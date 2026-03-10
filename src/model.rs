@@ -32,6 +32,7 @@ impl Vertex {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
     pub rotation: cgmath::Quaternion<f32>,
@@ -39,24 +40,27 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn to_raw(&self) -> InstanceRaw {
-        let model = cgmath::Matrix4::from_translation(self.position) 
+    pub fn to_model_matrix(&self) -> cgmath::Matrix4<f32> {
+        cgmath::Matrix4::from_translation(self.position)
             * cgmath::Matrix4::from(self.rotation)
-            * cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
+            * cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z)
+    }
+
+    pub fn to_raw(&self) -> InstanceRaw {
+        let model = self.to_model_matrix();
         InstanceRaw {
             model: model.into(),
             color: [1.0, 1.0, 1.0, 1.0], // Default white placeholder
         }
     }
-    
-    pub fn to_raw_with_color(&self, color: [f32; 3]) -> InstanceRaw {
-         let model = cgmath::Matrix4::from_translation(self.position) 
-            * cgmath::Matrix4::from(self.rotation) 
-            * cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
-         InstanceRaw {
-             model: model.into(),
-             color: [color[0], color[1], color[2], 1.0],
-         }
+
+    pub fn to_raw_with_color(&self, color: [f32; 3], selected: bool) -> InstanceRaw {
+        let model = self.to_model_matrix();
+        let alpha = if selected { 2.0 } else { 1.0 };
+        InstanceRaw {
+            model: model.into(),
+            color: [color[0], color[1], color[2], alpha],
+        }
     }
 }
 

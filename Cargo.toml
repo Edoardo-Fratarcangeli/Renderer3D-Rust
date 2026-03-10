@@ -13,6 +13,14 @@ egui = "0.28"
 egui-winit = "0.28"
 egui-wgpu = "0.28"
 serde = { version = "1.0", features = ["derive"] }
-ron = "0.8"  # Per settings JSON-like
+ron = "0.8"                                            # Per settings JSON-like
 anyhow = "1.0"
 chrono = "0.4.43"
+resvg = "0.47.0"
+usvg = "0.47.0"
+tiny-skia = "0.12.0"
+image = { version = "0.25.10", features = ["ico"] }
+
+
+[build-dependencies]
+winres = "0.1.12"

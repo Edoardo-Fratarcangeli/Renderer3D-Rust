@@ -1,2 +1,5 @@
-// Main entry point for `tests/scene` integration test suite
 mod defaults;
+mod logic_tests;
+mod picking;
+mod properties;
+mod undo_redo;

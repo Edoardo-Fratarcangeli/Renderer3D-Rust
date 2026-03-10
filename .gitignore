@@ -1,0 +1,20 @@
+/target/
+**/*.rs.bk
+*.pdb
+/logs/
+
+# VS Code
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db

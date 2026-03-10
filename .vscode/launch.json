@@ -1,0 +1,31 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🦀 Debug 3D Renderer",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=rendering_3d",
+                    "--package=rendering_3d"
+                ],
+                "filter": {
+                    "name": "rendering_3d",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "🧪 Run Test Manager",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/test_manager.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

@@ -24,6 +24,7 @@ struct VertexOutput {
     @location(0) color: vec3<f32>,
     @location(1) instance_color: vec3<f32>,
     @location(2) world_normal: vec3<f32>,
+    @location(3) instance_alpha: f32,
 };
 
 @vertex
@@ -36,7 +37,6 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
     );
     
     // Transform normal to world space (using rotation part of model matrix)
-    // For non-uniform scaling, we should use inverse-transpose, but for uniform scale/rotation only, map is fine.
     let normal_matrix = mat3x3<f32>(
         model_matrix[0].xyz,
         model_matrix[1].xyz,
@@ -47,6 +47,7 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
     out.color = model.color;
     out.instance_color = instance.color.rgb;
     out.world_normal = normalize(normal_matrix * model.normal);
+    out.instance_alpha = instance.color.a;
     out.clip_position = uniforms.view_projection * model_matrix * vec4<f32>(model.position, 1.0);
     return out;
 }
@@ -60,7 +61,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Mix vertex color (grid) with instance color (objects)
     let mixed_color = in.color * in.instance_color;
     
-    let result = mixed_color * diffuse_strength;
+    var result = mixed_color * diffuse_strength;
+
+    // Selection Highlight (Emission-like)
+    if (in.instance_alpha > 1.5) {
+        result = result + vec3<f32>(0.2, 0.2, 0.05); // Subtle Golden Glow
+    }
 
     return vec4<f32>(result, 1.0);
 }

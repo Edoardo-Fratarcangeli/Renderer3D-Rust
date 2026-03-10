@@ -2,6 +2,7 @@ import sys
 import os
 import subprocess
 import threading
+import re
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton, QLabel,
@@ -126,7 +127,7 @@ class TestManagerApp(QMainWindow):
                 padding: 12px;
                 font-family: 'Cascadia Code', 'Consolas', monospace;
                 font-size: 12px;
-                color: #7ee787;
+                color: #c9d1d9;
             }
             QPushButton {
                 background-color: #238636;
@@ -317,7 +318,9 @@ class TestManagerApp(QMainWindow):
                 if child.checkState(0) == Qt.CheckState.Checked:
                     data = child.data(0, Qt.ItemDataRole.UserRole)
                     if data:
-                        if data[0] == "category":
+                        if data[0] == "root":
+                            walk(child)
+                        elif data[0] == "category":
                             categories_to_run.add(data[1])
                         elif data[0] == "test":
                             cat, mod = data[1], data[2]
@@ -356,6 +359,11 @@ class TestManagerApp(QMainWindow):
 
     def execute_commands(self, commands):
         try:
+            total_suites = len(commands)
+            total_passed = 0
+            total_failed = 0
+            any_process_failed = False
+            
             for cmd in commands:
                 full_cmd = " ".join(cmd)
                 self.log_signal.log_message.emit(f"{'─'*60}\n$ {full_cmd}\n\n", "dim")
@@ -370,22 +378,44 @@ class TestManagerApp(QMainWindow):
                 )
                 
                 for line in process.stdout:
-                    if "ok" in line.lower() or "passed" in line.lower():
-                        self.log_signal.log_message.emit(line, "success")
-                    elif "error" in line.lower() or "failed" in line.lower():
-                        self.log_signal.log_message.emit(line, "error")
-                    else:
-                        self.log_signal.log_message.emit(line, "info")
+                    self.log_signal.log_message.emit(line, "info")
+                    
+                    # Parse cargo test result summary
+                    if "test result:" in line:
+                        match = re.search(r'(\d+)\s+passed;\s+(\d+)\s+failed', line)
+                        if match:
+                            total_passed += int(match.group(1))
+                            total_failed += int(match.group(2))
                 
                 process.wait()
+                if process.returncode != 0:
+                    any_process_failed = True
+
+            # Final summary report
+            self.log_signal.log_message.emit(f"\n{'━'*60}\n", "dim")
+            self.log_signal.log_message.emit("📊  TEST RUN SUMMARY\n", "info")
+            self.log_signal.log_message.emit(f"{'━'*60}\n", "dim")
+            
+            self.log_signal.log_message.emit(f"Total Suites: {total_suites}\n", "info")
+            
+            total_tests = total_passed + total_failed
+            self.log_signal.log_message.emit(f"Total Tests:  {total_tests}\n", "info")
+            self.log_signal.log_message.emit(f"Passed:       {total_passed}\n", "success")
+            
+            if total_failed > 0:
+                self.log_signal.log_message.emit(f"Failed:       {total_failed}\n", "error")
+            else:
+                self.log_signal.log_message.emit(f"Failed:       0\n", "info")
                 
-                if process.returncode == 0:
-                    self.log_signal.log_message.emit("\n✅ Finished successfully\n\n", "success")
-                else:
-                    self.log_signal.log_message.emit(f"\n❌ Failed with code {process.returncode}\n\n", "error")
-                    
+            self.log_signal.log_message.emit(f"{'━'*60}\n", "dim")
+            
+            if any_process_failed or total_failed > 0:
+                self.log_signal.log_message.emit("\n❌ Finished with errors\n\n", "error")
+            else:
+                self.log_signal.log_message.emit("\n✅ Finished successfully\n\n", "success")
+                
         except Exception as e:
-            self.log_signal.log_message.emit(f"❌ Error: {str(e)}\n", "error")
+            self.log_signal.log_message.emit(f"❌ Error: {str(e)}\n\n", "error")
 
     def append_log(self, text, tag="info"):
         cursor = self.output.textCursor()

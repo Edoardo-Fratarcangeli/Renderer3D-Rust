@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a2e" />
+      <stop offset="100%" stop-color="#0f0f1a" />
+    </linearGradient>
+
+    <!-- Top Face Gradient (Brightest) -->
+    <linearGradient id="topGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4facfe" />
+      <stop offset="100%" stop-color="#00f2fe" />
+    </linearGradient>
+
+    <!-- Left Face Gradient -->
+    <linearGradient id="leftGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0072ff" />
+      <stop offset="100%" stop-color="#0052cc" />
+    </linearGradient>
+
+    <!-- Right Face Gradient (Darkest but still brilliant) -->
+    <linearGradient id="rightGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0046b8" />
+      <stop offset="100%" stop-color="#002166" />
+    </linearGradient>
+    
+    <!-- Outer Glow -->
+    <filter id="glow">
+        <feGaussianBlur stdDeviation="5" result="coloredBlur"/>
+        <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Solid rounded background for contrast -->
+  <rect x="0" y="0" width="200" height="200" rx="40" fill="url(#bgGrad)" />
+
+  <!-- The 3D Cube using isometric projection, made significantly larger -->
+  <g filter="url(#glow)">
+      <!-- Top Face -->
+      <polygon points="100,40 160,75 100,110 40,75" fill="url(#topGrad)" />
+      
+      <!-- Left Face -->
+      <polygon points="40,75 100,110 100,180 40,145" fill="url(#leftGrad)" />
+      
+      <!-- Right Face -->
+      <polygon points="100,110 160,75 160,145 100,180" fill="url(#rightGrad)" />
+      
+      <!-- Edges for extra 3D clarity -->
+      <!-- Center Y -->
+      <line x1="100" y1="110" x2="100" y2="180" stroke="#4facfe" stroke-width="2" opacity="0.8"/>
+      <!-- Top Left edge -->
+      <line x1="100" y1="110" x2="40" y2="75" stroke="#4facfe" stroke-width="2" opacity="0.8"/>
+      <!-- Top Right edge -->
+      <line x1="100" y1="110" x2="160" y2="75" stroke="#4facfe" stroke-width="2" opacity="0.8"/>
+  </g>
+</svg>

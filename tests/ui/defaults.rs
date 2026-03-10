@@ -2,17 +2,17 @@
 // UI Panel, Grid, and Background default value tests
 
 use rendering_3d::state::{
-    // UI Panels
-    DEFAULT_SHOW_SETTINGS,
-    DEFAULT_SHOW_ADD_PANEL,
+    // Background
+    DEFAULT_BG_COLOR,
     DEFAULT_BOTTOM_PANEL_EXPANDED,
+    DEFAULT_SHOW_ADD_PANEL,
+    DEFAULT_SHOW_AXES,
     // Grids
     DEFAULT_SHOW_GRID_XY,
     DEFAULT_SHOW_GRID_XZ,
     DEFAULT_SHOW_GRID_YZ,
-    DEFAULT_SHOW_AXES,
-    // Background
-    DEFAULT_BG_COLOR,
+    // UI Panels
+    DEFAULT_SHOW_SETTINGS,
 };
 
 // UI Panel Tests
@@ -28,7 +28,10 @@ fn test_show_add_panel() {
 
 #[test]
 fn test_bottom_panel_expanded() {
-    assert_eq!(DEFAULT_BOTTOM_PANEL_EXPANDED, true, "Bottom Panel Expanded mismatch");
+    assert_eq!(
+        DEFAULT_BOTTOM_PANEL_EXPANDED, false,
+        "Bottom Panel Expanded mismatch"
+    );
 }
 
 // Grid Tests

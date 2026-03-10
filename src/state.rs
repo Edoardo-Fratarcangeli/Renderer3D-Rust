@@ -1,14 +1,11 @@
-use wgpu::util::DeviceExt;
-use winit::{
-    event::*,
-    window::Window,
-};
 use cgmath::prelude::*;
+use wgpu::util::DeviceExt;
+use winit::{event::*, window::Window};
 
 use crate::camera::{Camera, Uniforms};
-use crate::model::{Vertex, InstanceRaw};
-use crate::scene::{SceneObject, GeometryType};
+use crate::model::{InstanceRaw, Vertex};
 use crate::primitives;
+use crate::scene::{GeometryType, SceneObject};
 
 // Camera Default Values (used for initialization and reset)
 pub const DEFAULT_CAMERA_YAW: f32 = 16.0;
@@ -27,7 +24,7 @@ pub const DEFAULT_NEW_OBJ_COLOR: [f32; 3] = [1.0, 0.0, 0.0]; // Red
 // UI Panel Defaults
 pub const DEFAULT_SHOW_SETTINGS: bool = false;
 pub const DEFAULT_SHOW_ADD_PANEL: bool = false;
-pub const DEFAULT_BOTTOM_PANEL_EXPANDED: bool = true;
+pub const DEFAULT_BOTTOM_PANEL_EXPANDED: bool = false;
 
 // Grid Defaults
 pub const DEFAULT_SHOW_GRID_XY: bool = true;
@@ -44,6 +41,14 @@ pub struct MeshBuffers {
     pub num_indices: u32,
 }
 
+#[derive(Clone)]
+pub enum UndoCommand {
+    Add(SceneObject),
+    Delete(SceneObject),
+    Edit { old: SceneObject, new: SceneObject },
+    MultiAction(Vec<UndoCommand>),
+}
+
 pub struct State {
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
@@ -51,11 +56,11 @@ pub struct State {
     pub config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub window: std::sync::Arc<Window>,
-    
+
     // Render Pipelines
-    render_pipeline: wgpu::RenderPipeline, 
-    line_pipeline: wgpu::RenderPipeline,   
-    
+    render_pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
+
     // Geometry Resources
     cube_mesh: MeshBuffers,
     sphere_mesh: MeshBuffers,
@@ -63,53 +68,69 @@ pub struct State {
     grid_xy_mesh: MeshBuffers,
     grid_xz_mesh: MeshBuffers,
     grid_yz_mesh: MeshBuffers,
-    axes_mesh: MeshBuffers, 
-    
+    axes_mesh: MeshBuffers,
+    normal_arrow_mesh: MeshBuffers,
+
     // Scene
-    pub objects: Vec<SceneObject>, 
+    pub objects: Vec<SceneObject>,
     pub next_id: usize,
-    
+
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
-    
+
     pub camera: Camera,
-    
+
     // Egui
     pub egui_renderer: egui_wgpu::Renderer,
     pub egui_state: egui_winit::State,
-    
+
     // Camera Control State
     pub camera_yaw: f32,
     pub camera_pitch: f32,
     pub camera_dist: f32,
     pub min_zoom: f32,
     pub max_zoom: f32,
-    
+
     // UI State
     pub new_obj_pos: [f32; 3],
     pub new_obj_type: GeometryType,
     pub new_obj_color: [f32; 3],
     pub show_settings: bool,
     pub show_add_panel: bool,
-    
+
     // Grid Settings
     pub show_grid_xy: bool,
     pub show_grid_xz: bool,
     pub show_grid_yz: bool,
     pub show_axes: bool,
-    
+
     // Background
-    pub bg_color: f64, 
-    
+    pub bg_color: f64,
+
     pub bottom_panel_expanded: bool,
+    pub last_click_time: std::time::Instant,
 
     // Mouse
     pub is_drag_active: bool,
     pub is_pan_active: bool,
     pub camera_target: cgmath::Point3<f32>,
-    
+    pub mouse_pos: [f32; 2],
+
     // Editor State
     pub editing_obj_id: Option<usize>,
+    pub editing_obj_draft: Option<SceneObject>,
+
+    // Draft state for new object creation
+    pub draft_object: Option<SceneObject>,
+
+    // Clipboard
+    pub clipboard: Vec<SceneObject>,
+
+    // Undo/Redo
+    pub undo_stack: Vec<UndoCommand>,
+    pub redo_stack: Vec<UndoCommand>,
+
+    pub should_focus_name: bool,
 }
 
 impl State {
@@ -121,26 +142,34 @@ impl State {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
-        
+
         let surface = instance.create_surface(window.clone()).unwrap();
 
-        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }).await.unwrap();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .unwrap();
 
-        let (device, queue) = adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-            },
-            None,
-        ).await.unwrap();
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                },
+                None,
+            )
+            .await
+            .unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps.formats.iter()
+        let surface_format = surface_caps
+            .formats
+            .iter()
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
@@ -186,7 +215,7 @@ impl State {
         let cube_mesh = upload_mesh(primitives::create_cube());
         let sphere_mesh = upload_mesh(primitives::create_sphere(0.5, 32, 32));
         let plane_mesh = upload_mesh(primitives::create_plane(1.0));
-        
+
         // Grids
         let grid_size = 20;
         let spacing = 1.0;
@@ -196,6 +225,9 @@ impl State {
 
         // Axes (Thick)
         let axes_mesh = upload_mesh(primitives::create_thick_axes(3.0, 0.05));
+
+        // Normal Arrow
+        let normal_arrow_mesh = upload_mesh(primitives::create_arrow(1.0, 0.04, [1.0, 1.0, 0.0]));
 
         // --- Camera & Uniforms ---
         let camera = Camera {
@@ -217,19 +249,20 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-            label: Some("uniform_bind_group_layout"),
-        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("uniform_bind_group_layout"),
+            });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &uniform_bind_group_layout,
@@ -241,11 +274,12 @@ impl State {
         });
 
         // --- Pipelines ---
-        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&uniform_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[&uniform_bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         // Triangle Pipeline (Mesh)
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -311,7 +345,7 @@ impl State {
                 topology: wgpu::PrimitiveTopology::LineList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None, 
+                cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -326,19 +360,33 @@ impl State {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-        
-        let egui_context = egui::Context::default();
-        let egui_state = egui_winit::State::new(
-            egui_context, 
-            egui::ViewportId::ROOT, 
-            &window,
-            Some(window.scale_factor() as f32), 
-            None
-        );
-        let egui_renderer = egui_wgpu::Renderer::new(&device, surface_format, Some(wgpu::TextureFormat::Depth32Float), 1);
 
-        // Initial Objects
-        let objects = Vec::new();
+        let egui_context = egui::Context::default();
+
+        let mut style = (*egui_context.style()).clone();
+        style.visuals = egui::Visuals::dark();
+        style.visuals.window_rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.noninteractive.rounding = egui::Rounding::same(6.0);
+        style.visuals.widgets.inactive.rounding = egui::Rounding::same(6.0);
+        style.visuals.widgets.hovered.rounding = egui::Rounding::same(6.0);
+        style.visuals.widgets.active.rounding = egui::Rounding::same(6.0);
+        style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+        style.spacing.window_margin = egui::Margin::same(12.0);
+        egui_context.set_style(style);
+
+        let egui_state = egui_winit::State::new(
+            egui_context,
+            egui::ViewportId::ROOT,
+            &window,
+            Some(window.scale_factor() as f32),
+            None,
+        );
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &device,
+            surface_format,
+            Some(wgpu::TextureFormat::Depth32Float),
+            1,
+        );
 
         Self {
             window,
@@ -359,13 +407,13 @@ impl State {
             uniform_buffer,
             uniform_bind_group,
             camera,
-            objects,
+            objects: Vec::new(),
             next_id: 1,
             egui_renderer,
             egui_state,
             // User requested default (matches Reset View)
             camera_yaw: DEFAULT_CAMERA_YAW,
-            camera_pitch: DEFAULT_CAMERA_PITCH, 
+            camera_pitch: DEFAULT_CAMERA_PITCH,
             camera_dist: DEFAULT_CAMERA_DIST,
             min_zoom: DEFAULT_MIN_ZOOM,
             max_zoom: DEFAULT_MAX_ZOOM,
@@ -375,17 +423,88 @@ impl State {
             show_settings: DEFAULT_SHOW_SETTINGS,
             show_add_panel: DEFAULT_SHOW_ADD_PANEL,
             // Grids
-            show_grid_xy: DEFAULT_SHOW_GRID_XY, 
+            show_grid_xy: DEFAULT_SHOW_GRID_XY,
             show_grid_xz: DEFAULT_SHOW_GRID_XZ,
             show_grid_yz: DEFAULT_SHOW_GRID_YZ,
             show_axes: DEFAULT_SHOW_AXES,
-            bg_color: DEFAULT_BG_COLOR, 
-            
+            bg_color: DEFAULT_BG_COLOR,
+
             bottom_panel_expanded: DEFAULT_BOTTOM_PANEL_EXPANDED,
             is_drag_active: false,
             is_pan_active: false,
-            camera_target: cgmath::Point3::new(DEFAULT_CAMERA_TARGET[0], DEFAULT_CAMERA_TARGET[1], DEFAULT_CAMERA_TARGET[2]),
+            camera_target: cgmath::Point3::new(
+                DEFAULT_CAMERA_TARGET[0],
+                DEFAULT_CAMERA_TARGET[1],
+                DEFAULT_CAMERA_TARGET[2],
+            ),
             editing_obj_id: None,
+            editing_obj_draft: None,
+            draft_object: None,
+            clipboard: Vec::new(),
+            mouse_pos: [0.0, 0.0],
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            normal_arrow_mesh,
+            last_click_time: std::time::Instant::now(),
+            should_focus_name: false,
+        }
+    }
+
+    pub fn push_undo(&mut self, cmd: UndoCommand) {
+        self.undo_stack.push(cmd);
+        self.redo_stack.clear(); // Redo stack clears on a new action
+        if self.undo_stack.len() > 100 {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(cmd) = self.undo_stack.pop() {
+            self.apply_undo_cmd(cmd.clone(), true);
+            self.redo_stack.push(cmd);
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(cmd) = self.redo_stack.pop() {
+            self.apply_undo_cmd(cmd.clone(), false);
+            self.undo_stack.push(cmd);
+        }
+    }
+
+    fn apply_undo_cmd(&mut self, cmd: UndoCommand, is_undo: bool) {
+        match cmd {
+            UndoCommand::Add(obj) => {
+                if is_undo {
+                    self.objects.retain(|o| o.id != obj.id);
+                } else {
+                    self.objects.push(obj);
+                }
+            }
+            UndoCommand::Delete(obj) => {
+                if is_undo {
+                    self.objects.push(obj);
+                } else {
+                    self.objects.retain(|o| o.id != obj.id);
+                }
+            }
+            UndoCommand::Edit { old, new } => {
+                let target = if is_undo { &old } else { &new };
+                if let Some(obj) = self.objects.iter_mut().find(|o| o.id == target.id) {
+                    *obj = target.clone();
+                }
+            }
+            UndoCommand::MultiAction(cmds) => {
+                if is_undo {
+                    for c in cmds.iter().rev() {
+                        self.apply_undo_cmd(c.clone(), is_undo);
+                    }
+                } else {
+                    for c in cmds {
+                        self.apply_undo_cmd(c.clone(), is_undo);
+                    }
+                }
+            }
         }
     }
 
@@ -406,22 +525,165 @@ impl State {
             return true;
         }
 
+        // Handle Keyboard Shortcuts
+        if let WindowEvent::KeyboardInput {
+            event:
+                winit::event::KeyEvent {
+                    state: ElementState::Pressed,
+                    logical_key,
+                    ..
+                },
+            ..
+        } = event
+        {
+            let modifiers = self.egui_state.egui_ctx().input(|i| i.modifiers);
+            let is_ctrl = modifiers.ctrl || modifiers.mac_cmd;
+
+            match logical_key {
+                winit::keyboard::Key::Character(c) => match c.as_str() {
+                    "c" | "C" if is_ctrl => {
+                        self.clipboard = self
+                            .objects
+                            .iter()
+                            .filter(|o| o.selected)
+                            .cloned()
+                            .collect();
+                        return true;
+                    }
+                    "v" | "V" if is_ctrl => {
+                        let mut new_objs = Vec::new();
+                        for mut obj in self.clipboard.clone() {
+                            obj.id = self.next_id;
+                            self.next_id += 1;
+                            obj.selected = true; // Select newly pasted
+                            new_objs.push(obj);
+                        }
+
+                        // Deselect old ones
+                        for obj in &mut self.objects {
+                            obj.selected = false;
+                        }
+
+                        let mut undo_cmds = Vec::new();
+                        for obj in &new_objs {
+                            undo_cmds.push(UndoCommand::Add(obj.clone()));
+                        }
+                        self.push_undo(UndoCommand::MultiAction(undo_cmds));
+
+                        self.objects.extend(new_objs);
+                        return true;
+                    }
+                    "d" | "D" if is_ctrl => {
+                        let mut duplicated = Vec::new();
+                        for obj in self.objects.iter().filter(|o| o.selected) {
+                            let mut new_obj = obj.clone();
+                            new_obj.id = self.next_id;
+                            self.next_id += 1;
+                            duplicated.push(new_obj);
+                        }
+
+                        let mut undo_cmds = Vec::new();
+                        for obj in &duplicated {
+                            undo_cmds.push(UndoCommand::Add(obj.clone()));
+                        }
+                        self.push_undo(UndoCommand::MultiAction(undo_cmds));
+
+                        self.objects.extend(duplicated);
+                        return true;
+                    }
+                    "z" | "Z" if is_ctrl => {
+                        if modifiers.shift {
+                            self.redo();
+                        } else {
+                            self.undo();
+                        }
+                        return true;
+                    }
+                    "y" | "Y" if is_ctrl => {
+                        self.redo();
+                        return true;
+                    }
+                    "n" | "N" if !is_ctrl => {
+                        if self.draft_object.is_none() {
+                            let id = self.next_id;
+                            let default_obj = SceneObject::new(
+                                id,
+                                format!("Object {}", id),
+                                [0.0, 0.0, 0.0],
+                                GeometryType::Cube,
+                            );
+                            self.draft_object = Some(default_obj);
+                            self.should_focus_name = true;
+                        }
+                        return true;
+                    }
+                    _ => {}
+                },
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::Delete) => {
+                    let to_delete: Vec<SceneObject> = self
+                        .objects
+                        .iter()
+                        .filter(|o| o.selected)
+                        .cloned()
+                        .collect();
+                    if !to_delete.is_empty() {
+                        let mut undo_cmds = Vec::new();
+                        for obj in &to_delete {
+                            undo_cmds.push(UndoCommand::Delete(obj.clone()));
+                        }
+                        self.push_undo(UndoCommand::MultiAction(undo_cmds));
+                        self.objects.retain(|o| !o.selected);
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
         match event {
             WindowEvent::MouseInput { state, button, .. } => {
                 match button {
-                     MouseButton::Left => {
-                         self.is_drag_active = *state == ElementState::Pressed;
-                         // If clicking background (not on UI), close panels
-                         if *state == ElementState::Pressed {
-                             if !self.egui_state.egui_ctx().is_pointer_over_area() {
-                                 // Deselect panels
-                                 self.show_add_panel = false;
-                                 self.show_settings = false;
-                             }
-                         }
-                     },
-                     MouseButton::Middle => self.is_pan_active = *state == ElementState::Pressed,
-                     _ => {}
+                    MouseButton::Left => {
+                        self.is_drag_active = *state == ElementState::Pressed;
+                        // If clicking background (not on UI), close panels
+                        if *state == ElementState::Pressed {
+                            let is_over_ui = self.egui_state.egui_ctx().is_pointer_over_area()
+                                || self.egui_state.egui_ctx().wants_pointer_input();
+
+                            // Log for debugging if picking fails again
+                            // println!("Click at physical: {:?}, is_over_ui: {}", self.mouse_pos, is_over_ui);
+
+                            if !is_over_ui {
+                                // Deselect panels
+                                self.show_add_panel = false;
+                                self.show_settings = false;
+
+                                // Selection Picking
+                                let x = (2.0 * self.mouse_pos[0]) / self.size.width as f32 - 1.0;
+                                let y = 1.0 - (2.0 * self.mouse_pos[1]) / self.size.height as f32;
+
+                                let now = std::time::Instant::now();
+                                let is_double_click =
+                                    now.duration_since(self.last_click_time).as_millis() < 300;
+                                self.last_click_time = now;
+
+                                if let Some(hit_id) = self.select_object_at_ndc(x, y) {
+                                    if is_double_click {
+                                        // Initialize Edit from 3D Double Click
+                                        self.editing_obj_id = Some(hit_id);
+                                        if let Some(obj) =
+                                            self.objects.iter().find(|o| o.id == hit_id)
+                                        {
+                                            self.editing_obj_draft = Some(obj.clone());
+                                            self.should_focus_name = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    MouseButton::Middle => self.is_pan_active = *state == ElementState::Pressed,
+                    _ => {}
                 }
                 true
             }
@@ -438,9 +700,9 @@ impl State {
                     }
                     MouseScrollDelta::PixelDelta(pos) => {
                         if pos.y > 0.0 {
-                             self.camera_dist /= zoom_factor;
+                            self.camera_dist /= zoom_factor;
                         } else {
-                             self.camera_dist *= zoom_factor;
+                            self.camera_dist *= zoom_factor;
                         }
                     }
                 }
@@ -455,15 +717,148 @@ impl State {
     fn get_selected_centroid(&self) -> Option<cgmath::Point3<f32>> {
         let selected: Vec<&SceneObject> = self.objects.iter().filter(|o| o.selected).collect();
         if selected.is_empty() {
-             return None;
+            return None;
         }
-        
+
         let mut sum = cgmath::Vector3::zero();
         for obj in &selected {
             sum += obj.instance.position;
         }
         let center = sum / selected.len() as f32;
         Some(cgmath::Point3::new(center.x, center.y, center.z))
+    }
+
+    fn select_object_at_ndc(&mut self, x: f32, y: f32) -> Option<usize> {
+        let modifiers = self.egui_state.egui_ctx().input(|i| i.modifiers);
+        let multi_select = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
+
+        let inv_vp = self
+            .camera
+            .build_view_projection_matrix()
+            .invert()
+            .unwrap_or(cgmath::Matrix4::identity());
+
+        let near_point = inv_vp * cgmath::Vector4::new(x, y, 0.0, 1.0);
+        let far_point = inv_vp * cgmath::Vector4::new(x, y, 1.0, 1.0);
+
+        let near_world = near_point.truncate() / near_point.w;
+        let far_world = far_point.truncate() / far_point.w;
+
+        let ray_origin = near_world;
+        let ray_dir = (far_world - near_world).normalize();
+
+        let mut closest_hit: Option<(usize, f32)> = None;
+
+        for obj in &self.objects {
+            if !obj.visible {
+                continue;
+            }
+
+            let model = obj.instance.to_model_matrix();
+            let inv_model = model.invert().unwrap_or(cgmath::Matrix4::identity());
+
+            let local_origin = (inv_model * ray_origin.extend(1.0)).truncate();
+            let local_dir = (inv_model * ray_dir.extend(0.0)).truncate().normalize();
+
+            if let Some(t) = self.intersect_primitive(obj.geometry_type, local_origin, local_dir) {
+                let world_dir = (model * local_dir.extend(0.0)).truncate();
+                let world_t = t * world_dir.magnitude();
+
+                if closest_hit.is_none() || world_t < closest_hit.as_ref().unwrap().1 {
+                    closest_hit = Some((obj.id, world_t));
+                }
+            }
+        }
+
+        if !multi_select {
+            for obj in &mut self.objects {
+                obj.selected = false;
+            }
+        }
+
+        if let Some((hit_id, _)) = closest_hit {
+            if let Some(obj) = self.objects.iter_mut().find(|o| o.id == hit_id) {
+                if multi_select {
+                    obj.selected = !obj.selected; // Toggle in multi
+                } else {
+                    obj.selected = true;
+                }
+            }
+            Some(hit_id)
+        } else {
+            None
+        }
+    }
+
+    fn intersect_primitive(
+        &self,
+        geo_type: GeometryType,
+        local_origin: cgmath::Vector3<f32>,
+        local_dir: cgmath::Vector3<f32>,
+    ) -> Option<f32> {
+        match geo_type {
+            GeometryType::Cube => {
+                let mut tmin = -f32::INFINITY;
+                let mut tmax = f32::INFINITY;
+                for i in 0..3 {
+                    if local_dir[i].abs() < 1e-6 {
+                        if local_origin[i] < -0.5 || local_origin[i] > 0.5 {
+                            return None;
+                        }
+                    } else {
+                        let inv_d = 1.0 / local_dir[i];
+                        let mut t1 = (-0.5 - local_origin[i]) * inv_d;
+                        let mut t2 = (0.5 - local_origin[i]) * inv_d;
+                        if t1 > t2 {
+                            std::mem::swap(&mut t1, &mut t2);
+                        }
+                        tmin = tmin.max(t1);
+                        tmax = tmax.min(t2);
+                    }
+                }
+                if tmax >= tmin && tmax >= 0.0 {
+                    Some(tmin.max(0.0))
+                } else {
+                    None
+                }
+            }
+            GeometryType::Sphere => {
+                let oc = local_origin;
+                let a = local_dir.dot(local_dir);
+                let b = 2.0 * oc.dot(local_dir);
+                let c = oc.dot(oc) - 0.25; // radius 0.5 matches visuals
+                let discriminant = b * b - 4.0 * a * c;
+                if discriminant < 0.0 {
+                    None
+                } else {
+                    let mut t = (-b - discriminant.sqrt()) / (2.0 * a);
+                    if t < 0.0 {
+                        t = (-b + discriminant.sqrt()) / (2.0 * a);
+                    }
+                    if t >= 0.0 {
+                        Some(t)
+                    } else {
+                        None
+                    }
+                }
+            }
+            GeometryType::Plane => {
+                if local_dir.y.abs() < 1e-6 {
+                    return None;
+                }
+                let t = -local_origin.y / local_dir.y;
+                if t < 0.0 {
+                    return None;
+                }
+                let p = local_origin + local_dir * t;
+                if p.x.abs() <= 0.5 && p.z.abs() <= 0.5 {
+                    Some(t)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     pub fn update(&mut self) {
@@ -478,23 +873,26 @@ impl State {
         let x = dist * yaw.cos() * pitch.cos();
         let y = dist * yaw.sin() * pitch.cos();
         let z = dist * pitch.sin();
-        
+
         // Ensure camera UP is Z
         self.camera.up = cgmath::Vector3::unit_z();
-        
+
         let offset = cgmath::Vector3::new(x, y, z);
         self.camera.eye = self.camera_target + offset;
         self.camera.target = self.camera_target;
-        
+
         // Uniforms
         let mut uniforms = Uniforms::new();
         uniforms.update_view_proj(&self.camera);
-        self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+        self.queue
+            .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             size: wgpu::Extent3d {
@@ -512,115 +910,93 @@ impl State {
         });
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
-        
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
         // --- EGUI UI DRAWING ---
         let raw_input = self.egui_state.take_egui_input(&self.window);
-        
+
         // Deferred actions
         let mut action_reset_view = false;
         let mut action_focus_selected = false;
-        let mut next_id_increment = false;
         let mut create_object = None;
-        
+
         let mut action_edit_obj_id = None;
         let mut action_close_editor = false;
-        let mut action_delete_edited = false;
+        let mut action_delete_obj_id = None;
+        let mut action_confirm_edit = false;
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             // Because we can't easily borrow fields disjointly multiple times in complex closure,
             // We'll use the 'self' accessible in the closure but be careful.
-            
-            // Top Left Panel: Add Objects
-            egui::Window::new("Add Panel")
+
+            // Top Left Panel: Add Object Button
+            egui::Area::new("add_obj_area".into())
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
-                .collapsible(true)
-                .open(&mut self.show_add_panel)
                 .show(ctx, |ui| {
-                    ui.label("Create New Object");
-                    
-                    egui::ComboBox::from_label("Type")
-                        .selected_text(format!("{:?}", self.new_obj_type))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.new_obj_type, GeometryType::Cube, "Cube");
-                            ui.selectable_value(&mut self.new_obj_type, GeometryType::Sphere, "Sphere");
-                            ui.selectable_value(&mut self.new_obj_type, GeometryType::Plane, "Plane");
-                        });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Pos:");
-                        ui.add(egui::DragValue::new(&mut self.new_obj_pos[0]).speed(0.1));
-                        ui.add(egui::DragValue::new(&mut self.new_obj_pos[1]).speed(0.1));
-                        ui.add(egui::DragValue::new(&mut self.new_obj_pos[2]).speed(0.1));
-                    });
-
-                    ui.horizontal(|ui| {
-                         ui.label("Color:");
-                         ui.color_edit_button_rgb(&mut self.new_obj_color);
-                    });
-                    
-                    if ui.button("Create").clicked() {
-                        create_object = Some((self.new_obj_type, self.new_obj_pos, self.new_obj_color));
-                        next_id_increment = true;
+                    if ui.button("➕ New Object").clicked() {
+                        let id = self.next_id;
+                        let default_obj = SceneObject::new(
+                            id,
+                            format!("Object {}", id),
+                            [0.0, 0.0, 0.0],
+                            GeometryType::Cube,
+                        );
+                        self.draft_object = Some(default_obj);
+                        self.should_focus_name = true;
                     }
                 });
-            
-            // "Add" Toggle Button
-            if !self.show_add_panel {
-                 egui::Window::new("Add Button")
-                    .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
-                    .title_bar(false)
-                    .resizable(false)
-                    .show(ctx, |ui| {
-                        if ui.button("➕ Add Object").clicked() {
-                            self.show_add_panel = true;
-                        }
-                    });
-            }
 
             // Top Right Panel: Settings
-             egui::Window::new("Settings")
+            egui::Window::new("Settings")
                 .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
                 .collapsible(true)
                 .open(&mut self.show_settings)
                 .show(ctx, |ui| {
-                     ui.heading("Global Settings");
-                     ui.add(egui::Slider::new(&mut self.bg_color, 0.0..=1.0).text("Background"));
-                     
-                     ui.separator();
-                     ui.heading("Camera & View");
-                     if ui.button("Focus Selected").clicked() {
-                          action_focus_selected = true;
-                     }
-                     if ui.button("Reset View (0,0,0)").clicked() {
-                         action_reset_view = true;
-                     }
-                     
-                     ui.separator();
-                     ui.label("Zoom Limits:");
-                     ui.horizontal(|ui| {
-                         ui.add(egui::DragValue::new(&mut self.min_zoom).speed(0.1).prefix("Min: "));
-                         ui.add(egui::DragValue::new(&mut self.max_zoom).speed(1.0).prefix("Max: "));
-                     });
+                    ui.heading("Global Settings");
+                    ui.add(egui::Slider::new(&mut self.bg_color, 0.0..=1.0).text("Background"));
 
-                     ui.separator();
-                     ui.heading("Grid Options");
-                     ui.checkbox(&mut self.show_grid_xy, "XY Plane");
-                     ui.checkbox(&mut self.show_grid_xz, "XZ Plane");
-                     ui.checkbox(&mut self.show_grid_yz, "YZ Plane");
-                     ui.checkbox(&mut self.show_axes, "Show Axes");
+                    ui.separator();
+                    ui.heading("Camera & View");
+                    if ui.button("Focus Selected").clicked() {
+                        action_focus_selected = true;
+                    }
+                    if ui.button("Reset View (0,0,0)").clicked() {
+                        action_reset_view = true;
+                    }
+
+                    ui.separator();
+                    ui.label("Zoom Limits:");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.min_zoom)
+                                .speed(0.1)
+                                .prefix("Min: "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut self.max_zoom)
+                                .speed(1.0)
+                                .prefix("Max: "),
+                        );
+                    });
+
+                    ui.separator();
+                    ui.heading("Grid Options");
+                    ui.checkbox(&mut self.show_grid_xy, "XY Plane");
+                    ui.checkbox(&mut self.show_grid_xz, "XZ Plane");
+                    ui.checkbox(&mut self.show_grid_yz, "YZ Plane");
+                    ui.checkbox(&mut self.show_axes, "Show Axes");
                 });
-            
+
             // Gear Button
-             if !self.show_settings {
-                 egui::Window::new("Settings Button")
+            if !self.show_settings {
+                egui::Area::new("settings_btn_area".into())
                     .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
-                    .title_bar(false)
-                    .resizable(false)
                     .show(ctx, |ui| {
-                        if ui.button("⚙").clicked() {
+                        if ui.button(egui::RichText::new("⚙").size(20.0)).clicked() {
                             self.show_settings = true;
                         }
                     });
@@ -632,182 +1008,811 @@ impl State {
                 .min_height(20.0)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                         ui.label(format!("Camera Eye: {:.2}, {:.2}, {:.2}", self.camera.eye.x, self.camera.eye.y, self.camera.eye.z));
-                         ui.separator();
-                         ui.label(format!("Target: {:.2}, {:.2}, {:.2}", self.camera_target.x, self.camera_target.y, self.camera_target.z));
-                         ui.separator();
-                         ui.label(format!("Yaw: {:.1}° Pitch: {:.1}°", self.camera_yaw, self.camera_pitch));
+                        ui.label(format!(
+                            "Camera Eye: {:.2}, {:.2}, {:.2}",
+                            self.camera.eye.x, self.camera.eye.y, self.camera.eye.z
+                        ));
+                        ui.separator();
+                        ui.label(format!(
+                            "Target: {:.2}, {:.2}, {:.2}",
+                            self.camera_target.x, self.camera_target.y, self.camera_target.z
+                        ));
+                        ui.separator();
+                        ui.label(format!(
+                            "Yaw: {:.1}° Pitch: {:.1}°",
+                            self.camera_yaw, self.camera_pitch
+                        ));
                     });
                 });
 
             // Bottom Panel: Object List
+            let mut panel_expanded = self.bottom_panel_expanded;
             egui::TopBottomPanel::bottom("bottom_panel")
-                .resizable(true)
-                .min_height(30.0)
-                .show_animated(ctx, self.bottom_panel_expanded, |ui| {
-                     ui.horizontal(|ui| {
-                         ui.heading("Scene Objects");
-                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                             if ui.button(if self.bottom_panel_expanded { "▼" } else { "▲" }).clicked() {
-                                 // Expand logic could be here
-                             }
-                         });
-                     });
-                     ui.separator();
-                     
-                     egui::ScrollArea::vertical().show(ui, |ui| {
-                         for obj in self.objects.iter_mut() {
-                             ui.horizontal(|ui| {
-                                 ui.checkbox(&mut obj.selected, "");
-                                 ui.label(&obj.label);
-                                 ui.checkbox(&mut obj.visible, "Vis");
-                                 if ui.button("Edit").clicked() {
-                                     action_edit_obj_id = Some(obj.id);
-                                 }
-                             });
-                         }
-                     });
+                .frame(egui::Frame::none()) // Remove horizontal band when closed
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0; // Remove spacing below tab
+                                                           // Central Tab
+                    ui.vertical_centered(|ui| {
+                        let tab_bg = ctx.style().visuals.window_fill;
+                        egui::Frame::none()
+                            .fill(tab_bg)
+                            .rounding(egui::Rounding {
+                                nw: 12.0,
+                                ne: 12.0,
+                                sw: 0.0,
+                                se: 0.0,
+                            })
+                            .inner_margin(egui::Margin::symmetric(24.0, 6.0))
+                            .show(ui, |ui| {
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(16.0, 8.0),
+                                    egui::Sense::click(),
+                                );
+
+                                let color = if response.hovered() {
+                                    ctx.style().visuals.widgets.hovered.text_color()
+                                } else {
+                                    ctx.style().visuals.text_color()
+                                };
+
+                                let mut points = vec![];
+                                if panel_expanded {
+                                    // Point downwards
+                                    points.push(rect.left_top());
+                                    points.push(rect.right_top());
+                                    points.push(rect.center_bottom());
+                                } else {
+                                    // Point upwards
+                                    points.push(rect.center_top());
+                                    points.push(rect.right_bottom());
+                                    points.push(rect.left_bottom());
+                                }
+                                ui.painter().add(egui::Shape::convex_polygon(
+                                    points,
+                                    color,
+                                    egui::Stroke::NONE,
+                                ));
+
+                                if response.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                if response.clicked() {
+                                    panel_expanded = !panel_expanded;
+                                }
+                            });
+                    });
+
+                    if panel_expanded {
+                        let panel_bg = ctx.style().visuals.window_fill;
+                        egui::Frame::none()
+                            .fill(panel_bg)
+                            .inner_margin(egui::Margin {
+                                left: 12.0,
+                                right: 12.0,
+                                top: 4.0,
+                                bottom: 12.0,
+                            })
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width()); // expand to full width
+                                egui::ScrollArea::vertical()
+                                    .max_height(250.0)
+                                    .show(ui, |ui| {
+                                        ui.spacing_mut().item_spacing.y = 2.0;
+                                        let mut select_exclusive_id = None;
+                                        for obj in self.objects.iter_mut() {
+                                            ui.horizontal(|ui| {
+                                                // Unique Name (Selectable)
+                                                let response = ui.selectable_label(
+                                                    obj.selected,
+                                                    egui::RichText::new(&obj.label)
+                                                        .strong()
+                                                        .size(14.0),
+                                                );
+                                                if response.clicked() {
+                                                    let modifiers = ui.ctx().input(|i| i.modifiers);
+                                                    if modifiers.ctrl
+                                                        || modifiers.shift
+                                                        || modifiers.mac_cmd
+                                                    {
+                                                        obj.selected = !obj.selected;
+                                                    } else {
+                                                        select_exclusive_id = Some(obj.id);
+                                                    }
+                                                }
+                                                if response.double_clicked() {
+                                                    action_edit_obj_id = Some(obj.id);
+                                                }
+
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        // Edit icon
+                                                        let is_editing = action_edit_obj_id
+                                                            == Some(obj.id)
+                                                            || self.editing_obj_id == Some(obj.id);
+                                                        let edit_color = if is_editing {
+                                                            egui::Color32::from_rgb(0, 150, 255)
+                                                        } else {
+                                                            ui.visuals().text_color()
+                                                        };
+                                                        if ui
+                                                            .add(
+                                                                egui::Button::new(
+                                                                    egui::RichText::new("✏")
+                                                                        .color(edit_color),
+                                                                )
+                                                                .fill(egui::Color32::TRANSPARENT),
+                                                            )
+                                                            .on_hover_text("Edit")
+                                                            .clicked()
+                                                        {
+                                                            action_edit_obj_id = Some(obj.id);
+                                                            self.editing_obj_draft =
+                                                                Some(obj.clone());
+                                                            self.should_focus_name = true;
+                                                        }
+
+                                                        // Delete icon
+                                                        if ui
+                                                            .add(
+                                                                egui::Button::new(
+                                                                    egui::RichText::new("🗑").color(
+                                                                        egui::Color32::from_rgb(
+                                                                            255, 100, 100,
+                                                                        ),
+                                                                    ),
+                                                                )
+                                                                .fill(egui::Color32::TRANSPARENT),
+                                                            )
+                                                            .on_hover_text("Delete")
+                                                            .clicked()
+                                                        {
+                                                            action_delete_obj_id = Some(obj.id);
+                                                        }
+
+                                                        // Label toggle icon
+                                                        let label_icon = "🏷";
+                                                        let label_color = if obj.show_label {
+                                                            egui::Color32::from_rgb(0, 200, 255)
+                                                        } else {
+                                                            egui::Color32::from_rgb(150, 150, 150)
+                                                        };
+                                                        if ui
+                                                            .add(
+                                                                egui::Button::new(
+                                                                    egui::RichText::new(label_icon)
+                                                                        .color(label_color),
+                                                                )
+                                                                .fill(egui::Color32::TRANSPARENT),
+                                                            )
+                                                            .on_hover_text("Toggle Label")
+                                                            .clicked()
+                                                        {
+                                                            obj.show_label = !obj.show_label;
+                                                        }
+
+                                                        // Visibility icon (Colori opposti)
+                                                        let vis_icon = if obj.visible {
+                                                            "👁"
+                                                        } else {
+                                                            "🕶"
+                                                        };
+                                                        let vis_color = if obj.visible {
+                                                            egui::Color32::from_rgb(100, 255, 100)
+                                                        } else {
+                                                            egui::Color32::from_rgb(255, 100, 100)
+                                                        };
+                                                        if ui
+                                                            .add(
+                                                                egui::Button::new(
+                                                                    egui::RichText::new(vis_icon)
+                                                                        .color(vis_color),
+                                                                )
+                                                                .fill(egui::Color32::TRANSPARENT),
+                                                            )
+                                                            .on_hover_text("Visibility")
+                                                            .clicked()
+                                                        {
+                                                            obj.visible = !obj.visible;
+                                                        }
+                                                    },
+                                                );
+                                            });
+                                        }
+
+                                        if let Some(id) = select_exclusive_id {
+                                            for obj in &mut self.objects {
+                                                obj.selected = obj.id == id;
+                                            }
+                                        }
+                                    });
+                            });
+                    }
                 });
-            
-            // Editor Popup Window
-            if let Some(edit_id) = self.editing_obj_id {
+            self.bottom_panel_expanded = panel_expanded;
+
+            // Draft Create Object Window
+            if let Some(mut draft) = self.draft_object.take() {
                 let mut open = true;
-                if let Some(obj) = self.objects.iter_mut().find(|o| o.id == edit_id) {
-                    egui::Window::new(format!("Edit Object {}", edit_id))
+                let mut action_discard = false;
+                let mut action_confirm = false;
+                egui::Window::new("Add New Object")
+                    .open(&mut open)
+                    .resizable(true)
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Name:");
+                            let res = ui.text_edit_singleline(&mut draft.label);
+                            if self.should_focus_name {
+                                res.request_focus();
+                                self.should_focus_name = false;
+                            }
+                        });
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label("Type:");
+                            egui::ComboBox::from_id_source("draft_type_combo")
+                                .selected_text(format!("{:?}", draft.geometry_type))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut draft.geometry_type,
+                                        GeometryType::Cube,
+                                        "Cube",
+                                    );
+                                    ui.selectable_value(
+                                        &mut draft.geometry_type,
+                                        GeometryType::Sphere,
+                                        "Sphere",
+                                    );
+                                    ui.selectable_value(
+                                        &mut draft.geometry_type,
+                                        GeometryType::Plane,
+                                        "Plane",
+                                    );
+                                });
+                        });
+
+                        ui.heading("Transform");
+                        ui.horizontal(|ui| {
+                            ui.label("Pos:");
+                            ui.add(egui::DragValue::new(&mut draft.instance.position.x).speed(0.1));
+                            ui.add(egui::DragValue::new(&mut draft.instance.position.y).speed(0.1));
+                            ui.add(egui::DragValue::new(&mut draft.instance.position.z).speed(0.1));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Rot:");
+                            let mut changed = false;
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut draft.rotation_euler[0])
+                                        .speed(1.0)
+                                        .suffix("°"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut draft.rotation_euler[1])
+                                        .speed(1.0)
+                                        .suffix("°"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut draft.rotation_euler[2])
+                                        .speed(1.0)
+                                        .suffix("°"),
+                                )
+                                .changed();
+                            if changed {
+                                draft.update_rotation();
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Scale:");
+                            ui.add(
+                                egui::DragValue::new(&mut draft.instance.scale.x)
+                                    .speed(0.01)
+                                    .max_decimals(2),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut draft.instance.scale.y)
+                                    .speed(0.01)
+                                    .max_decimals(2),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut draft.instance.scale.z)
+                                    .speed(0.01)
+                                    .max_decimals(2),
+                            );
+                        });
+
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label("Color:");
+                            ui.color_edit_button_rgb(&mut draft.color);
+                        });
+                        ui.checkbox(&mut draft.show_label, "Show Label in Viewport");
+
+                        ui.separator();
+                        ui.heading("Geometry Properties");
+                        match draft.geometry_type {
+                            GeometryType::Cube => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Side Length:");
+                                    if ui
+                                        .add(egui::DragValue::new(&mut draft.cube_side).speed(0.1))
+                                        .changed()
+                                    {
+                                        let s = draft.cube_side;
+                                        draft.instance.scale = cgmath::Vector3::new(s, s, s);
+                                    }
+                                });
+                            }
+                            GeometryType::Sphere => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Radius:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut draft.sphere_radius)
+                                                .speed(0.1),
+                                        )
+                                        .changed()
+                                    {
+                                        let s = draft.sphere_radius * 2.0; // Mesh is radius 0.5, so scale=2*radius
+                                        draft.instance.scale = cgmath::Vector3::new(s, s, s);
+                                    }
+                                });
+                            }
+                            GeometryType::Plane => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Surface Area:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut draft.plane_surface)
+                                                .speed(0.1)
+                                                .range(0.1..=100.0),
+                                        )
+                                        .changed()
+                                    {
+                                        let s = draft.plane_surface.sqrt();
+                                        draft.instance.scale = cgmath::Vector3::new(s, 1.0, s);
+                                    }
+                                });
+                                ui.checkbox(&mut draft.show_normal, "Show Normal Arrow");
+                            }
+                            _ => {}
+                        }
+
+                        ui.separator();
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_sized([80.0, 24.0], egui::Button::new("Cancel"))
+                                .clicked()
+                                || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                            {
+                                action_discard = true;
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add_sized([80.0, 24.0], egui::Button::new("Add"))
+                                        .clicked()
+                                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        action_confirm = true;
+                                    }
+                                },
+                            );
+                        });
+                    });
+
+                if action_discard {
+                    open = false;
+                }
+                if action_confirm {
+                    create_object = Some(draft.clone());
+                    open = false;
+                }
+
+                if open {
+                    self.draft_object = Some(draft); // Put it back if still open
+                }
+            }
+
+            // Editor Popup Window
+            if self.editing_obj_id.is_some() {
+                let mut open = true;
+                if let Some(mut obj) = self.editing_obj_draft.take() {
+                    egui::Window::new("Object Properties")
                         .open(&mut open)
                         .resizable(true)
                         .show(ctx, |ui| {
-                            ui.text_edit_singleline(&mut obj.label);
+                            ui.horizontal(|ui| {
+                                ui.label("Name:");
+                                let res = ui.text_edit_singleline(&mut obj.label);
+                                if self.should_focus_name {
+                                    res.request_focus();
+                                    self.should_focus_name = false;
+                                }
+                            });
                             ui.separator();
-                            ui.label(format!("Type: {:?}", obj.geometry_type));
-                            
+                            ui.horizontal(|ui| {
+                                ui.label("Type:");
+                                egui::ComboBox::from_id_source(format!("type_combo_{}", obj.id))
+                                    .selected_text(format!("{:?}", obj.geometry_type))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut obj.geometry_type,
+                                            GeometryType::Cube,
+                                            "Cube",
+                                        );
+                                        ui.selectable_value(
+                                            &mut obj.geometry_type,
+                                            GeometryType::Sphere,
+                                            "Sphere",
+                                        );
+                                        ui.selectable_value(
+                                            &mut obj.geometry_type,
+                                            GeometryType::Plane,
+                                            "Plane",
+                                        );
+                                    });
+                            });
+
                             ui.heading("Transform");
                             ui.horizontal(|ui| {
                                 ui.label("Pos:");
-                                ui.add(egui::DragValue::new(&mut obj.instance.position.x).speed(0.1));
-                                ui.add(egui::DragValue::new(&mut obj.instance.position.y).speed(0.1));
-                                ui.add(egui::DragValue::new(&mut obj.instance.position.z).speed(0.1));
+                                ui.add(
+                                    egui::DragValue::new(&mut obj.instance.position.x).speed(0.1),
+                                );
+                                ui.add(
+                                    egui::DragValue::new(&mut obj.instance.position.y).speed(0.1),
+                                );
+                                ui.add(
+                                    egui::DragValue::new(&mut obj.instance.position.z).speed(0.1),
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Rot:");
                                 let mut changed = false;
-                                changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[0]).speed(1.0).suffix("°")).changed();
-                                changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[1]).speed(1.0).suffix("°")).changed();
-                                changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[2]).speed(1.0).suffix("°")).changed();
+                                changed |= ui
+                                    .add(
+                                        egui::DragValue::new(&mut obj.rotation_euler[0])
+                                            .speed(1.0)
+                                            .suffix("°"),
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .add(
+                                        egui::DragValue::new(&mut obj.rotation_euler[1])
+                                            .speed(1.0)
+                                            .suffix("°"),
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .add(
+                                        egui::DragValue::new(&mut obj.rotation_euler[2])
+                                            .speed(1.0)
+                                            .suffix("°"),
+                                    )
+                                    .changed();
                                 if changed {
                                     obj.update_rotation();
                                 }
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Scale:");
-                                ui.add(egui::DragValue::new(&mut obj.instance.scale.x).speed(0.01).max_decimals(2));
-                                ui.add(egui::DragValue::new(&mut obj.instance.scale.y).speed(0.01).max_decimals(2));
-                                ui.add(egui::DragValue::new(&mut obj.instance.scale.z).speed(0.01).max_decimals(2));
+                                ui.add(
+                                    egui::DragValue::new(&mut obj.instance.scale.x)
+                                        .speed(0.01)
+                                        .max_decimals(2),
+                                );
+                                ui.add(
+                                    egui::DragValue::new(&mut obj.instance.scale.y)
+                                        .speed(0.01)
+                                        .max_decimals(2),
+                                );
+                                ui.add(
+                                    egui::DragValue::new(&mut obj.instance.scale.z)
+                                        .speed(0.01)
+                                        .max_decimals(2),
+                                );
                             });
-                            
+
                             ui.separator();
                             ui.horizontal(|ui| {
-                                 ui.label("Color:");
-                                 ui.color_edit_button_rgb(&mut obj.color);
+                                ui.label("Color:");
+                                ui.color_edit_button_rgb(&mut obj.color);
                             });
-                            
+                            ui.checkbox(&mut obj.show_label, "Show Label in Viewport");
+
                             ui.separator();
-                            if ui.button("🗑 Delete Object").clicked() {
-                                action_delete_edited = true;
-                                action_close_editor = true;
+                            ui.heading("Geometry Properties");
+                            match obj.geometry_type {
+                                GeometryType::Cube => {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Side Length:");
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut obj.cube_side).speed(0.1),
+                                            )
+                                            .changed()
+                                        {
+                                            let s = obj.cube_side;
+                                            obj.instance.scale = cgmath::Vector3::new(s, s, s);
+                                        }
+                                    });
+                                }
+                                GeometryType::Sphere => {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Radius:");
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut obj.sphere_radius)
+                                                    .speed(0.1),
+                                            )
+                                            .changed()
+                                        {
+                                            let s = obj.sphere_radius * 2.0;
+                                            obj.instance.scale = cgmath::Vector3::new(s, s, s);
+                                        }
+                                    });
+                                }
+                                GeometryType::Plane => {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Surface Area:");
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut obj.plane_surface)
+                                                    .speed(0.1)
+                                                    .range(0.1..=100.0),
+                                            )
+                                            .changed()
+                                        {
+                                            let s = obj.plane_surface.sqrt();
+                                            obj.instance.scale = cgmath::Vector3::new(s, 1.0, s);
+                                        }
+                                    });
+                                    ui.checkbox(&mut obj.show_normal, "Show Normal Arrow");
+                                }
+                                _ => {}
                             }
+
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add_sized([80.0, 24.0], egui::Button::new("Cancel"))
+                                    .clicked()
+                                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                                {
+                                    action_close_editor = true;
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .add_sized([80.0, 24.0], egui::Button::new("Confirm"))
+                                            .clicked()
+                                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                        {
+                                            action_confirm_edit = true;
+                                        }
+                                    },
+                                );
+                            });
                         });
+
+                    if open {
+                        self.editing_obj_draft = Some(obj);
+                    }
                 }
                 if !open {
                     action_close_editor = true;
                 }
             }
+
+            // 3D Object Labels
+            let vp = self.camera.build_view_projection_matrix();
+            for obj in &self.objects {
+                if obj.visible && obj.show_label {
+                    let world_pos = obj.instance.position;
+                    // Draw label slightly above the object
+                    let offset = match obj.geometry_type {
+                        GeometryType::Plane => 0.1,
+                        _ => 0.6 * obj.instance.scale.z,
+                    };
+                    let label_pos = world_pos + cgmath::Vector3::new(0.0, 0.0, offset);
+                    let clip_pos = vp * label_pos.extend(1.0);
+
+                    if clip_pos.w > 0.0 {
+                        let ndc = clip_pos.truncate() / clip_pos.w;
+                        if ndc.x.abs() <= 1.1 && ndc.y.abs() <= 1.1 {
+                            let screen_x = (ndc.x + 1.0) * 0.5 * self.size.width as f32;
+                            let screen_y = (1.0 - ndc.y) * 0.5 * self.size.height as f32;
+
+                            let ppp = ctx.pixels_per_point();
+                            let egui_pos = egui::pos2(screen_x / ppp, screen_y / ppp);
+
+                            egui::Area::new(format!("label_area_{}", obj.id).into())
+                                .fixed_pos(egui_pos)
+                                .pivot(egui::Align2::CENTER_BOTTOM)
+                                .show(ctx, |ui| {
+                                    ui.label(
+                                        egui::RichText::new(&obj.label)
+                                            .color(egui::Color32::WHITE)
+                                            .background_color(egui::Color32::from_black_alpha(160))
+                                            .strong(),
+                                    );
+                                });
+                        }
+                    }
+                }
+            }
         });
 
         // Apply deferred actions
-        if let Some((g_type, pos, col)) = create_object {
-            let id = self.next_id;
-            if next_id_increment { self.next_id += 1; }
-            let mut obj = SceneObject::new(
-                 id,
-                 format!("{:?} {}", g_type, id),
-                 pos,
-                 g_type
-            );
-            obj.color = col;
+        if let Some(obj) = create_object {
             self.objects.push(obj);
+            self.next_id += 1;
         }
-        
+
         if action_reset_view {
-             self.camera_target = cgmath::Point3::new(DEFAULT_CAMERA_TARGET[0], DEFAULT_CAMERA_TARGET[1], DEFAULT_CAMERA_TARGET[2]);
-             self.camera_yaw = DEFAULT_CAMERA_YAW;   
-             self.camera_pitch = DEFAULT_CAMERA_PITCH; 
-             self.camera_dist = DEFAULT_CAMERA_DIST;
+            self.camera_target = cgmath::Point3::new(
+                DEFAULT_CAMERA_TARGET[0],
+                DEFAULT_CAMERA_TARGET[1],
+                DEFAULT_CAMERA_TARGET[2],
+            );
+            self.camera_yaw = DEFAULT_CAMERA_YAW;
+            self.camera_pitch = DEFAULT_CAMERA_PITCH;
+            self.camera_dist = DEFAULT_CAMERA_DIST;
         }
-        
+
         if action_focus_selected {
             if let Some(target) = self.get_selected_centroid() {
                 self.camera_target = target;
             }
         }
-        
+
         // Editor Actions
         if let Some(id) = action_edit_obj_id {
             self.editing_obj_id = Some(id);
         }
-        
-        if action_delete_edited {
-             if let Some(id) = self.editing_obj_id {
-                if let Some(index) = self.objects.iter().position(|o| o.id == id) {
-                    self.objects.remove(index);
-                }
-                self.editing_obj_id = None;
-             }
-        } else if action_close_editor {
-             self.editing_obj_id = None;
+
+        if action_close_editor {
+            self.editing_obj_id = None;
+            self.editing_obj_draft = None;
         }
 
-        self.egui_state.handle_platform_output(&self.window, full_output.platform_output);
-        let tris = self.egui_state.egui_ctx().tessellate(full_output.shapes, self.egui_state.egui_ctx().pixels_per_point());
+        if action_confirm_edit {
+            if let Some(new_draft) = self.editing_obj_draft.take() {
+                let mut old_state = None;
+                if let Some(obj) = self.objects.iter_mut().find(|o| o.id == new_draft.id) {
+                    if *obj != new_draft {
+                        old_state = Some(obj.clone());
+                        *obj = new_draft.clone();
+                    }
+                }
+                if let Some(old) = old_state {
+                    self.push_undo(UndoCommand::Edit {
+                        old,
+                        new: new_draft,
+                    });
+                }
+            }
+            self.editing_obj_id = None;
+        }
+
+        if let Some(id_to_delete) = action_delete_obj_id {
+            if let Some(index) = self.objects.iter().position(|o| o.id == id_to_delete) {
+                self.objects.remove(index);
+            }
+            if self.editing_obj_id == Some(id_to_delete) {
+                self.editing_obj_id = None;
+            }
+        }
+
+        self.egui_state
+            .handle_platform_output(&self.window, full_output.platform_output);
+        let tris = self.egui_state.egui_ctx().tessellate(
+            full_output.shapes,
+            self.egui_state.egui_ctx().pixels_per_point(),
+        );
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.egui_state.egui_ctx().pixels_per_point(),
         };
-        
+
         for (id, delta) in &full_output.textures_delta.set {
-            self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
+            self.egui_renderer
+                .update_texture(&self.device, &self.queue, *id, delta);
         }
-        self.egui_renderer.update_buffers(&self.device, &self.queue, &mut encoder, &tris, &screen_descriptor);
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &tris,
+            &screen_descriptor,
+        );
 
         // --- Prepare Buffers ---
         let mut draw_list: Vec<(GeometryType, wgpu::Buffer, u32)> = Vec::new();
-        
+
         // Identity Matrix for Grids/Axes
         let identity_instance = [InstanceRaw {
             model: cgmath::Matrix4::identity().into(),
             color: [1.0; 4],
         }];
-        let single_instance_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-             label: Some("Single Instance Buffer"),
-             contents: bytemuck::cast_slice(&identity_instance),
-             usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        for geo_type in [GeometryType::Cube, GeometryType::Sphere, GeometryType::Plane] {
-             let instances = self.objects.iter()
-                .filter(|o| o.visible && o.geometry_type == geo_type)
-                .map(|o| o.instance.to_raw_with_color(o.color))
-                .collect::<Vec<_>>();
-             
-             if !instances.is_empty() {
-                 let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Instance Buffer"),
-                    contents: bytemuck::cast_slice(&instances),
+        let single_instance_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Single Instance Buffer"),
+                    contents: bytemuck::cast_slice(&identity_instance),
                     usage: wgpu::BufferUsages::VERTEX,
-                 });
-                 draw_list.push((geo_type, buffer, instances.len() as u32));
-             }
+                });
+
+        for geo_type in [
+            GeometryType::Cube,
+            GeometryType::Sphere,
+            GeometryType::Plane,
+        ] {
+            let instances = self
+                .objects
+                .iter()
+                .filter(|o| o.visible && o.geometry_type == geo_type)
+                .map(|o| o.instance.to_raw_with_color(o.color, o.selected))
+                .collect::<Vec<_>>();
+
+            if !instances.is_empty() {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Instance Buffer"),
+                        contents: bytemuck::cast_slice(&instances),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                draw_list.push((geo_type, buffer, instances.len() as u32));
+            }
         }
+
+        // Prepare Normal Arrow Buffer outside render pass to avoid lifetime issues
+        let normal_arrows: Vec<InstanceRaw> = self
+            .objects
+            .iter()
+            .filter(|o| o.visible && o.geometry_type == GeometryType::Plane && o.show_normal)
+            .map(|o| {
+                // Arrow should be centered on plane and follow its position/rotation
+                // BUT it must NOT inherit the plane's scale (otherwise it gets squashed)
+                let mut arrow_instance = o.instance.clone();
+                arrow_instance.scale = cgmath::Vector3::new(1.0, 1.0, 1.0);
+
+                // Use a slightly different shade of the plane color for the arrow
+                let arrow_color = [
+                    (o.color[0] * 0.8).min(1.0),
+                    (o.color[1] * 0.8).min(1.0),
+                    (o.color[2] * 0.8).min(1.0),
+                ];
+
+                arrow_instance.to_raw_with_color(arrow_color, false)
+            })
+            .collect();
+
+        let normal_arrow_instance_buffer = if !normal_arrows.is_empty() {
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Normal Arrow Instance Buffer"),
+                        contents: bytemuck::cast_slice(&normal_arrows),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
+        } else {
+            None
+        };
 
         // --- Render Pass ---
         {
@@ -818,7 +1823,10 @@ impl State {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: self.bg_color, g: self.bg_color, b: self.bg_color, a: 1.0,
+                            r: self.bg_color,
+                            g: self.bg_color,
+                            b: self.bg_color,
+                            a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -836,38 +1844,50 @@ impl State {
             });
 
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-            
+
             // Draw Grid (Lines)
             render_pass.set_pipeline(&self.line_pipeline);
             render_pass.set_vertex_buffer(1, single_instance_buffer.slice(..));
-            
+
             if self.show_grid_xy {
-                    render_pass.set_vertex_buffer(0, self.grid_xy_mesh.vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(self.grid_xy_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..self.grid_xy_mesh.num_indices, 0, 0..1);
+                render_pass.set_vertex_buffer(0, self.grid_xy_mesh.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    self.grid_xy_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                render_pass.draw_indexed(0..self.grid_xy_mesh.num_indices, 0, 0..1);
             }
             if self.show_grid_xz {
-                    render_pass.set_vertex_buffer(0, self.grid_xz_mesh.vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(self.grid_xz_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..self.grid_xz_mesh.num_indices, 0, 0..1);
+                render_pass.set_vertex_buffer(0, self.grid_xz_mesh.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    self.grid_xz_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                render_pass.draw_indexed(0..self.grid_xz_mesh.num_indices, 0, 0..1);
             }
             if self.show_grid_yz {
-                    render_pass.set_vertex_buffer(0, self.grid_yz_mesh.vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(self.grid_yz_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..self.grid_yz_mesh.num_indices, 0, 0..1);
+                render_pass.set_vertex_buffer(0, self.grid_yz_mesh.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    self.grid_yz_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                render_pass.draw_indexed(0..self.grid_yz_mesh.num_indices, 0, 0..1);
             }
 
             // Draw Objects (Triangles) & AXES
             render_pass.set_pipeline(&self.render_pipeline);
-            
+
             // Draw Axes
             if self.show_axes {
                 render_pass.set_vertex_buffer(0, self.axes_mesh.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, single_instance_buffer.slice(..));
-                render_pass.set_index_buffer(self.axes_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.set_index_buffer(
+                    self.axes_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
                 render_pass.draw_indexed(0..self.axes_mesh.num_indices, 0, 0..1);
             }
-            
+
             for (geo_type, instance_buf, count) in &draw_list {
                 let mesh = match geo_type {
                     GeometryType::Cube => &self.cube_mesh,
@@ -875,17 +1895,34 @@ impl State {
                     GeometryType::Plane => &self.plane_mesh,
                     _ => &self.cube_mesh,
                 };
-                
+
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, instance_buf.slice(..));
-                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass
+                    .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..mesh.num_indices, 0, 0..*count);
             }
-            
+
+            // Draw Normal Arrows for Planes
+            if let Some(instance_buffer) = &normal_arrow_instance_buffer {
+                render_pass.set_vertex_buffer(0, self.normal_arrow_mesh.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    self.normal_arrow_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                render_pass.draw_indexed(
+                    0..self.normal_arrow_mesh.num_indices,
+                    0,
+                    0..normal_arrows.len() as u32,
+                );
+            }
+
             // Render UI
-            self.egui_renderer.render(&mut render_pass, &tris, &screen_descriptor);
+            self.egui_renderer
+                .render(&mut render_pass, &tris, &screen_descriptor);
         }
-        
+
         for id in &full_output.textures_delta.free {
             self.egui_renderer.free_texture(id);
         }
