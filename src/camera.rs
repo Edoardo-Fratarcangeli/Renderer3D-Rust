@@ -44,3 +44,9 @@ impl Uniforms {
         self.view_proj = camera.build_view_projection_matrix().into();
     }
 }
+
+impl Default for Uniforms {
+    fn default() -> Self {
+        Self::new()
+    }
+}

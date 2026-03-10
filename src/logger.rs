@@ -1,6 +1,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
 use chrono::prelude::*;
 
 // Log Levels
@@ -14,7 +15,7 @@ pub enum LogLevel {
 }
 
 // Global Logger Configuration
-static mut GLOBAL_LOG_LEVEL: LogLevel = LogLevel::Verbose;
+static GLOBAL_LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::Verbose as u8);
 
 // Simple file path storage isn't strictly needed if we just open append every time 
 // or keep a static file handle (harder with safe Rust without lazy_static/OnceLock).
@@ -23,9 +24,7 @@ static mut GLOBAL_LOG_LEVEL: LogLevel = LogLevel::Verbose;
 static FILE_MUTEX: Mutex<()> = Mutex::new(());
 
 pub fn init(level: LogLevel) {
-    unsafe {
-        GLOBAL_LOG_LEVEL = level;
-    }
+    GLOBAL_LOG_LEVEL.store(level as u8, Ordering::Relaxed);
     
     // Create logs directory
     if let Err(e) = fs::create_dir_all("logs") {
@@ -36,10 +35,8 @@ pub fn init(level: LogLevel) {
 }
 
 pub fn log(level: LogLevel, message: &str) {
-    unsafe {
-        if level > GLOBAL_LOG_LEVEL {
-            return;
-        }
+    if level as u8 > GLOBAL_LOG_LEVEL.load(Ordering::Relaxed) {
+        return;
     }
 
     let now = Local::now();
