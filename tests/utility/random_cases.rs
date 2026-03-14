@@ -1,4 +1,3 @@
-
 #[test]
 fn test_fuzzy_inputs() {
     // Simulating random inputs

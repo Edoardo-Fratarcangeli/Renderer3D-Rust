@@ -1,9 +1,15 @@
 # Rust 3D Renderer
 
+[![Rust CI](https://github.com/Edoardo-Fratarcangeli/Renderer3D-Rust/actions/workflows/ci.yml/badge.svg)](https://github.com/Edoardo-Fratarcangeli/Renderer3D-Rust/actions/workflows/ci.yml)
+
 A modern, high-performance 3D renderer written in Rust using `wgpu` (WebGPU) and `egui` for the user interface. This project demonstrates instanced rendering, Euler angle rotation, a CAD-like camera control system, and a highly polished, interactive UI.
 
 ## 🚀 Features
 
+- **Batch Model Loading**: Load entire folders or single files (STL, OBJ, GLTF/GLB) with threaded background loading.
+- **3D Measurement Tool**: Precise Euclidean distance measurement between points picked on any scene object (primitives or meshes) via raycasting.
+- **Transform Controls**: Direct manipulation of **Position**, **Rotation** (Euler angles), and **Scale** for any selected object via the interactive **Analysis Window**.
+- **Mesh Pivot Recentering**: Automatically realign an imported model's origin to its geometric center to ensure intuitive rotation.
 - **Instanced Rendering**: Efficiently renders multiple instances of objects with low overhead.
 - **WGPU Graphics**: Uses the modern `wgpu` crate for cross-platform, type-safe graphics programming.
 - **Advanced Selection System**:
@@ -16,29 +22,31 @@ A modern, high-performance 3D renderer written in Rust using `wgpu` (WebGPU) and
 - **Object Labels**:
   - **3D World Space Labels**: Names appear as floating labels above objects.
   - **Visibility Toggles**: Control label visibility per-object via a dedicated icon (🏷️) in the list.
-- **Interactive Modern UI**: Integrated `egui` panel custom-styled with a transparent layout, vector graphics tabs, and dynamic coloring based on item states.
-- **Advanced Camera Controls**:
-  - **Orbit**: Left Mouse Drag to rotate around the target point.
-  - **Pan**: Middle Mouse Drag to translate the view across planes.
-  - **Zoom**: Scroll Wheel to zoom smoothly in and out.
-  - **Focus**: Option to focus the camera instantly on the bounds of selected objects.
+- **Modern Unified UI**:
+  - **Smart Toolbar**: Top-left floating toolbar with grouped icons for Add, Import, Load Folder, and Measurement.
+  - **Dynamic Analysis Window**: Horizontally draggable panel for measurement results and selection transforms.
+  - **Custom Styling**: Integrated `egui` panel with transparent layouts and dynamic coloring.
+- **High-Precision Camera System**:
+  - **Refactored Controller**: Dedicated `CameraController` with unit tests for rotation, zoom, and panning.
+  - **Orbit (Drag)**: Left Mouse Drag to rotate around the target point.
+  - **Pan (Middle Mouse)**: Middle Mouse Drag to translate the view parallel to the camera plane.
+  - **Zoom (Scroll)**: Scroll Wheel for smooth multiplicative zoom.
+  - **Focus & Reset**: Quickly focus on selection or reset to origin.
 - **Double-Click Workflow**:
   - **Quick Edit**: Double-click any object in the 3D viewport or the list to instantly open its property editor.
 - **Scene Management**:
-  - **Draft Creation**: Draft new objects (Cube, Sphere, Plane) with **context-specific properties** (Side Length, Radius, Surface Area) that update the scale in real-time.
-  - **Geometry Properties**: Toggle visualization aids like **Normal Vectors** for planes, with color matching and independent scaling.
-  - **Non-Destructive Editing**: Property editor uses a draft system; changes are only applied when clicking **Confirm**. Clicking **Cancel** reverts to the previous state.
-  - **Visibility & Deletion**: Toggle visibility with eye/sunglass icons, or delete objects directly via the UI list.
+  - **Draft Creation**: Draft new objects (Cube, Sphere, Plane) with real-time property updates.
+  - **Geometry Properties**: Toggle visualization aids like **Normal Vectors** for planes.
+  - **Non-Destructive Editing**: Property editor with a draft system; changes only applied on **Confirm**.
 - **Keyboard Shortcuts**:
   - `CTRL + Z`: Undo last action.
   - `CTRL + Shift + Z` or `CTRL + Y`: Redo last undone action.
-  - `CTRL + C`: Copy selected objects to clipboard.
-  - `CTRL + V`: Paste objects from clipboard to the scene.
-  - `CTRL + D`: Duplicate currently selected objects.
-  - `N`: Open "Add New Object" window.
-  - `ENTER`: Confirm draft/edit actions.
-  - `ESC`: Cancel draft/edit actions.
-  - `CANC` (Delete): Delete selected objects immediately.
+  - `CTRL + C`: Copy selected objects.
+  - `CTRL + V`: Paste objects.
+  - `CTRL + D`: Duplicate objects.
+  - `N`: New Object Draft.
+  - `M`: Toggle Measure Tool.
+  - `CANC` (Delete): Delete selection.
 
 ## 🧪 Testing & Verification
 

@@ -1,8 +1,8 @@
+use chrono::prelude::*;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, Ordering};
-use chrono::prelude::*;
+use std::sync::Mutex;
 
 // Log Levels
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -17,7 +17,7 @@ pub enum LogLevel {
 // Global Logger Configuration
 static GLOBAL_LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::Verbose as u8);
 
-// Simple file path storage isn't strictly needed if we just open append every time 
+// Simple file path storage isn't strictly needed if we just open append every time
 // or keep a static file handle (harder with safe Rust without lazy_static/OnceLock).
 // For simplicity and robustness, we'll open-append on each log for now, or use a Mutex<Option<File>>.
 
@@ -25,12 +25,12 @@ static FILE_MUTEX: Mutex<()> = Mutex::new(());
 
 pub fn init(level: LogLevel) {
     GLOBAL_LOG_LEVEL.store(level as u8, Ordering::Relaxed);
-    
+
     // Create logs directory
     if let Err(e) = fs::create_dir_all("logs") {
         eprintln!("Failed to create logs directory: {}", e);
     }
-    
+
     log(LogLevel::Info, "Logger initialized.");
 }
 
@@ -41,7 +41,7 @@ pub fn log(level: LogLevel, message: &str) {
 
     let now = Local::now();
     let filename = format!("logs/{}_log.txt", now.format("%Y%m%d"));
-    
+
     // Format: [YYYY-MM-DD HH:MM:SS] [LEVEL] Message
     let level_str = match level {
         LogLevel::Critical => "CRITICAL",
@@ -50,9 +50,14 @@ pub fn log(level: LogLevel, message: &str) {
         LogLevel::Info => "INFO",
         LogLevel::Verbose => "VERBOSE",
     };
-    
-    let log_line = format!("[{}] [{}] {}\n", now.format("%Y-%m-%d %H:%M:%S"), level_str, message);
-    
+
+    let log_line = format!(
+        "[{}] [{}] {}\n",
+        now.format("%Y-%m-%d %H:%M:%S"),
+        level_str,
+        message
+    );
+
     // Print to console as well
     print!("{}", log_line);
 

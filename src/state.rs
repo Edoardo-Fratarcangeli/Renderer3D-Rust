@@ -1,6 +1,7 @@
 use cgmath::prelude::*;
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
+use crate::render::{draw_measurement, pick_point};
 
 use crate::camera::{Camera, Uniforms};
 use crate::model::{InstanceRaw, Vertex};
@@ -79,17 +80,11 @@ pub struct State {
     uniform_bind_group: wgpu::BindGroup,
 
     pub camera: Camera,
+    pub camera_controller: crate::camera::CameraController,
 
     // Egui
     pub egui_renderer: egui_wgpu::Renderer,
     pub egui_state: egui_winit::State,
-
-    // Camera Control State
-    pub camera_yaw: f32,
-    pub camera_pitch: f32,
-    pub camera_dist: f32,
-    pub min_zoom: f32,
-    pub max_zoom: f32,
 
     // UI State
     pub new_obj_pos: [f32; 3],
@@ -113,7 +108,6 @@ pub struct State {
     // Mouse
     pub is_drag_active: bool,
     pub is_pan_active: bool,
-    pub camera_target: cgmath::Point3<f32>,
     pub mouse_pos: [f32; 2],
 
     // Editor State
@@ -131,6 +125,13 @@ pub struct State {
     pub redo_stack: Vec<UndoCommand>,
 
     pub should_focus_name: bool,
+    pub custom_meshes: std::collections::HashMap<usize, MeshBuffers>,
+    
+    // Measure & Analysis (Moved from App)
+    pub measure_mode: bool,
+    pub measure_points: Vec<[f32; 3]>,
+    pub measure_dist: f32,
+    pub analysis_x: f32,
 }
 
 impl State {
@@ -230,9 +231,18 @@ impl State {
         let normal_arrow_mesh = upload_mesh(primitives::create_arrow(1.0, 0.04, [1.0, 1.0, 0.0]));
 
         // --- Camera & Uniforms ---
+        let camera_controller = crate::camera::CameraController::new(
+            DEFAULT_CAMERA_YAW,
+            DEFAULT_CAMERA_PITCH,
+            DEFAULT_CAMERA_DIST,
+            DEFAULT_CAMERA_TARGET,
+            DEFAULT_MIN_ZOOM,
+            DEFAULT_MAX_ZOOM,
+        );
+
         let camera = Camera {
-            eye: (5.0, 5.0, 5.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
+            eye: camera_controller.eye(),
+            target: camera_controller.target(),
             up: cgmath::Vector3::unit_z(), // Z-Up
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
@@ -412,11 +422,14 @@ impl State {
             egui_renderer,
             egui_state,
             // User requested default (matches Reset View)
-            camera_yaw: DEFAULT_CAMERA_YAW,
-            camera_pitch: DEFAULT_CAMERA_PITCH,
-            camera_dist: DEFAULT_CAMERA_DIST,
-            min_zoom: DEFAULT_MIN_ZOOM,
-            max_zoom: DEFAULT_MAX_ZOOM,
+            camera_controller: crate::camera::CameraController::new(
+                DEFAULT_CAMERA_YAW,
+                DEFAULT_CAMERA_PITCH,
+                DEFAULT_CAMERA_DIST,
+                DEFAULT_CAMERA_TARGET,
+                DEFAULT_MIN_ZOOM,
+                DEFAULT_MAX_ZOOM,
+            ),
             new_obj_pos: DEFAULT_NEW_OBJ_POS,
             new_obj_type: GeometryType::Cube,
             new_obj_color: DEFAULT_NEW_OBJ_COLOR,
@@ -432,11 +445,6 @@ impl State {
             bottom_panel_expanded: DEFAULT_BOTTOM_PANEL_EXPANDED,
             is_drag_active: false,
             is_pan_active: false,
-            camera_target: cgmath::Point3::new(
-                DEFAULT_CAMERA_TARGET[0],
-                DEFAULT_CAMERA_TARGET[1],
-                DEFAULT_CAMERA_TARGET[2],
-            ),
             editing_obj_id: None,
             editing_obj_draft: None,
             draft_object: None,
@@ -447,6 +455,11 @@ impl State {
             normal_arrow_mesh,
             last_click_time: std::time::Instant::now(),
             should_focus_name: false,
+            custom_meshes: std::collections::HashMap::new(),
+            measure_mode: false,
+            measure_points: Vec::new(),
+            measure_dist: 0.0,
+            analysis_x: 800.0,
         }
     }
 
@@ -630,6 +643,7 @@ impl State {
                         let mut undo_cmds = Vec::new();
                         for obj in &to_delete {
                             undo_cmds.push(UndoCommand::Delete(obj.clone()));
+                            self.custom_meshes.remove(&obj.id);
                         }
                         self.push_undo(UndoCommand::MultiAction(undo_cmds));
                         self.objects.retain(|o| !o.selected);
@@ -667,7 +681,23 @@ impl State {
                                     now.duration_since(self.last_click_time).as_millis() < 300;
                                 self.last_click_time = now;
 
-                                if let Some(hit_id) = self.select_object_at_ndc(x, y) {
+                                let ctx = self.egui_state.egui_ctx().clone();
+                                if self.measure_mode && !ctx.is_pointer_over_area() {
+                                    if let Some(pt) = pick_point(&self.camera, &self.objects, [x, y]) {
+                                        self.measure_points.push(pt);
+                                        if self.measure_points.len() > 2 {
+                                            self.measure_points.remove(0);
+                                        }
+                                        if self.measure_points.len() == 2 {
+                                            let p1 = self.measure_points[0];
+                                            let p2 = self.measure_points[1];
+                                            self.measure_dist = ((p1[0] - p2[0]).powi(2)
+                                                + (p1[1] - p2[1]).powi(2)
+                                                + (p1[2] - p2[2]).powi(2))
+                                            .sqrt();
+                                        }
+                                    }
+                                } else if let Some(hit_id) = self.select_object_at_ndc(x, y) {
                                     if is_double_click {
                                         // Initialize Edit from 3D Double Click
                                         self.editing_obj_id = Some(hit_id);
@@ -688,25 +718,24 @@ impl State {
                 true
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                // Multiplicative Zoom for consistent feel at all distances
-                let zoom_factor = 1.1;
                 match delta {
-                    MouseScrollDelta::LineDelta(_, y) => {
-                        if *y > 0.0 {
-                            self.camera_dist /= zoom_factor;
-                        } else {
-                            self.camera_dist *= zoom_factor;
-                        }
-                    }
-                    MouseScrollDelta::PixelDelta(pos) => {
-                        if pos.y > 0.0 {
-                            self.camera_dist /= zoom_factor;
-                        } else {
-                            self.camera_dist *= zoom_factor;
-                        }
-                    }
+                    MouseScrollDelta::LineDelta(_, y) => self.camera_controller.zoom(*y),
+                    MouseScrollDelta::PixelDelta(pos) => self.camera_controller.zoom(pos.y as f32),
                 }
-                self.camera_dist = self.camera_dist.max(self.min_zoom).min(self.max_zoom);
+                true
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let current_pos = [position.x as f32, position.y as f32];
+                let dx = current_pos[0] - self.mouse_pos[0];
+                let dy = current_pos[1] - self.mouse_pos[1];
+
+                if self.is_drag_active {
+                    self.camera_controller.rotate(dx, dy);
+                }
+                if self.is_pan_active {
+                    self.camera_controller.pan(dx, dy, &self.camera);
+                }
+                self.mouse_pos = current_pos;
                 true
             }
             _ => false,
@@ -760,7 +789,7 @@ impl State {
             let local_origin = (inv_model * ray_origin.extend(1.0)).truncate();
             let local_dir = (inv_model * ray_dir.extend(0.0)).truncate().normalize();
 
-            if let Some(t) = self.intersect_primitive(obj.geometry_type, local_origin, local_dir) {
+            if let Some(t) = self.intersect_primitive(&obj.geometry_type, local_origin, local_dir) {
                 let world_dir = (model * local_dir.extend(0.0)).truncate();
                 let world_t = t * world_dir.magnitude();
 
@@ -792,7 +821,7 @@ impl State {
 
     fn intersect_primitive(
         &self,
-        geo_type: GeometryType,
+        geo_type: &GeometryType,
         local_origin: cgmath::Vector3<f32>,
         local_dir: cgmath::Vector3<f32>,
     ) -> Option<f32> {
@@ -857,29 +886,53 @@ impl State {
                     None
                 }
             }
+            GeometryType::Mesh { data } => {
+                let ray = parry3d_f64::query::Ray::new(
+                    parry3d_f64::na::Point3::new(
+                        local_origin.x as f64,
+                        local_origin.y as f64,
+                        local_origin.z as f64,
+                    ),
+                    parry3d_f64::na::Vector3::new(
+                        local_dir.x as f64,
+                        local_dir.y as f64,
+                        local_dir.z as f64,
+                    ),
+                );
+
+                let mut min_t = f64::MAX;
+                let mut found = false;
+
+                for chunk in data.indices.chunks_exact(3) {
+                    let v0 = data.vertices[chunk[0] as usize].pos;
+                    let v1 = data.vertices[chunk[1] as usize].pos;
+                    let v2 = data.vertices[chunk[2] as usize].pos;
+                    let tri = parry3d_f64::shape::Triangle::new(
+                        parry3d_f64::na::Point3::new(v0[0] as f64, v0[1] as f64, v0[2] as f64),
+                        parry3d_f64::na::Point3::new(v1[0] as f64, v1[1] as f64, v1[2] as f64),
+                        parry3d_f64::na::Point3::new(v2[0] as f64, v2[1] as f64, v2[2] as f64),
+                    );
+                    use parry3d_f64::query::RayCast;
+                    if let Some(t) = tri.cast_local_ray(&ray, f64::MAX, true) {
+                        if t < min_t {
+                            min_t = t;
+                            found = true;
+                        }
+                    }
+                }
+
+                if found {
+                    Some(min_t as f32)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
 
     pub fn update(&mut self) {
-        // Update Camera from parameters
-        let yaw = cgmath::Deg(self.camera_yaw);
-        let pitch = cgmath::Deg(self.camera_pitch);
-        let dist = self.camera_dist;
-
-        // Z-Up Spherical Coordinates
-        // Pitch lifts Z
-        // Yaw rotates around Z
-        let x = dist * yaw.cos() * pitch.cos();
-        let y = dist * yaw.sin() * pitch.cos();
-        let z = dist * pitch.sin();
-
-        // Ensure camera UP is Z
-        self.camera.up = cgmath::Vector3::unit_z();
-
-        let offset = cgmath::Vector3::new(x, y, z);
-        self.camera.eye = self.camera_target + offset;
-        self.camera.target = self.camera_target;
+        self.camera_controller.update_camera(&mut self.camera);
 
         // Uniforms
         let mut uniforms = Uniforms::new();
@@ -889,6 +942,108 @@ impl State {
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        self.render_with_callback(|_| {})
+    }
+
+    pub fn add_default_object(&mut self) {
+        let id = self.next_id;
+        let default_obj = SceneObject::new(
+            id,
+            format!("Object {}", id),
+            [0.0, 0.0, 0.0],
+            GeometryType::Cube,
+        );
+        self.draft_object = Some(default_obj);
+        self.should_focus_name = true;
+    }
+
+    pub fn add_mesh_object(&mut self, mesh_data: crate::mesh::MeshData, label: String) {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("Custom Mesh Vertex Buffer {}", id)),
+            contents: bytemuck::cast_slice(&mesh_data.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("Custom Mesh Index Buffer {}", id)),
+            contents: bytemuck::cast_slice(mesh_data.indices.as_slice()),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        self.custom_meshes.insert(
+            id,
+            MeshBuffers {
+                vertex_buffer,
+                index_buffer,
+                num_indices: mesh_data.indices.len() as u32,
+            },
+        );
+
+        let mut obj = SceneObject::new(
+            id,
+            label,
+            [0.0, 0.0, 0.0],
+            GeometryType::Mesh {
+                data: std::sync::Arc::new(mesh_data),
+            },
+        );
+        obj.selected = true; // Select newly added
+        self.objects.push(obj);
+    }
+
+    pub fn recenter_mesh_pivot(&mut self, obj_id: usize) {
+        if let Some(obj) = self.objects.iter_mut().find(|o| o.id == obj_id) {
+            if let GeometryType::Mesh { data } = &obj.geometry_type {
+                if data.vertices.is_empty() { return; }
+                
+                let mut sum = cgmath::Vector3::new(0.0, 0.0, 0.0);
+                for v in &data.vertices {
+                    sum += cgmath::Vector3::from(v.pos);
+                }
+                let centroid = sum / data.vertices.len() as f32;
+
+                let mut new_vertices = data.vertices.clone();
+                for v in &mut new_vertices {
+                    v.pos[0] -= centroid.x;
+                    v.pos[1] -= centroid.y;
+                    v.pos[2] -= centroid.z;
+                }
+                
+                let new_data = crate::mesh::MeshData {
+                    vertices: new_vertices,
+                    indices: data.indices.clone(),
+                };
+
+                let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Custom Mesh Vertex Buffer (Recentered) {}", obj_id)),
+                    contents: bytemuck::cast_slice(&new_data.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                
+                if let Some(mesh_buf) = self.custom_meshes.get_mut(&obj_id) {
+                    mesh_buf.vertex_buffer = vertex_buffer;
+                }
+
+                obj.geometry_type = GeometryType::Mesh { data: std::sync::Arc::new(new_data) };
+                
+                // Adjust translation to keep object in same world position
+                let scale = obj.instance.scale;
+                let scaled_centroid = cgmath::Vector3::new(centroid.x * scale.x, centroid.y * scale.y, centroid.z * scale.z);
+                let offset = obj.instance.rotation * scaled_centroid;
+                obj.instance.position += offset;
+            }
+        }
+    }
+
+    pub fn render_with_callback<F>(&mut self, custom_ui: F) -> Result<(), wgpu::SurfaceError>
+    where
+        F: FnOnce(&egui::Context),
+    {
+        let mut action_add_primitive = false;
+        let mut action_recenter_id = None;
+
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -928,27 +1083,157 @@ impl State {
         let mut action_close_editor = false;
         let mut action_delete_obj_id = None;
         let mut action_confirm_edit = false;
+        let mut action_add_mesh = None;
+        let mut action_load_folder = None;
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
-            // Because we can't easily borrow fields disjointly multiple times in complex closure,
-            // We'll use the 'self' accessible in the closure but be careful.
+            // Consolidation of App UI features inside State
+            let screen_size = [self.size.width as f32, self.size.height as f32];
+            let any_mesh = self.objects.iter().any(|o| matches!(o.geometry_type, GeometryType::Mesh { .. }));
 
-            // Top Left Panel: Add Object Button
-            egui::Area::new("add_obj_area".into())
+            // 1. Toolbar area
+            egui::Area::new("toolbar_area_state".into())
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
                 .show(ctx, |ui| {
-                    if ui.button("➕ New Object").clicked() {
-                        let id = self.next_id;
-                        let default_obj = SceneObject::new(
-                            id,
-                            format!("Object {}", id),
-                            [0.0, 0.0, 0.0],
-                            GeometryType::Cube,
-                        );
-                        self.draft_object = Some(default_obj);
-                        self.should_focus_name = true;
-                    }
+                    egui::Frame::window(&ctx.style())
+                        .rounding(10.0)
+                        .inner_margin(6.0)
+                        .fill(ctx.style().visuals.window_fill())
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                if ui.add(egui::Button::new(egui::RichText::new("➕").size(18.0)).frame(false))
+                                    .on_hover_text("Add new primitive object").clicked() {
+                                    action_add_primitive = true;
+                                }
+
+                                ui.add(egui::Separator::default().vertical());
+                                
+                                if ui.add(egui::Button::new(egui::RichText::new("📄").size(18.0)).frame(false))
+                                    .on_hover_text("Import single 3D model").clicked() {
+                                    if let Some(path) = rfd::FileDialog::new()
+                                        .add_filter("3D Models", &["stl", "obj", "gltf", "glb"])
+                                        .pick_file() {
+                                        let label = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                                        if let Ok(m) = crate::mesh::MeshData::load(path) {
+                                            action_add_mesh = Some((m, label));
+                                        }
+                                    }
+                                }
+
+                                if ui.add(egui::Button::new(egui::RichText::new("📂").size(18.0)).frame(false))
+                                    .on_hover_text("Load entire folder of 3D models").clicked() {
+                                    if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                        action_load_folder = Some(path);
+                                    }
+                                }
+
+                                ui.add(egui::Separator::default().vertical());
+
+                                let m_color = if self.measure_mode { egui::Color32::LIGHT_BLUE } else { ui.visuals().widgets.noninteractive.text_color() };
+                                if ui.add(egui::Button::new(egui::RichText::new("📏").size(18.0).color(m_color)).frame(false))
+                                    .on_hover_text("Measure tool: click points on meshes").clicked() {
+                                    self.measure_mode = !self.measure_mode;
+                                }
+                            });
+                        });
                 });
+
+            // 2. Analysis / Transform Window
+            let sel_indices: Vec<usize> = self.objects.iter().enumerate()
+                .filter(|(_, o)| o.selected)
+                .map(|(i, _)| i)
+                .collect();
+
+            if self.measure_mode || !sel_indices.is_empty() || any_mesh {
+                let mut ax = self.analysis_x;
+                egui::Window::new("⚙ Analysis")
+                    .id(egui::Id::new("analysis_win"))
+                    .fixed_pos([ax, 80.0])
+                    .collapsible(true)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        let d_resp = ui.interact(ui.max_rect(), ui.id().with("drag"), egui::Sense::drag());
+                        if d_resp.dragged() {
+                            ax += d_resp.drag_delta().x;
+                        }
+
+                        if self.measure_mode {
+                            ui.heading("📏 Measurement");
+                            ui.label(format!("Distance: {:.3}m", self.measure_dist));
+                            if ui.button("Clear Points").clicked() {
+                                self.measure_points.clear();
+                                self.measure_dist = 0.0;
+                            }
+                            ui.separator();
+                        }
+
+                        if !sel_indices.is_empty() {
+                            ui.heading("🎯 Selection");
+                            if sel_indices.len() == 1 {
+                                let idx = sel_indices[0];
+                                let obj = &mut self.objects[idx];
+                                ui.label(format!("Editing: {}", obj.label));
+                                
+                                ui.add_space(4.0);
+                                ui.label("Position:");
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::DragValue::new(&mut obj.instance.position.x).speed(0.1).prefix("X:"));
+                                    ui.add(egui::DragValue::new(&mut obj.instance.position.y).speed(0.1).prefix("Y:"));
+                                    ui.add(egui::DragValue::new(&mut obj.instance.position.z).speed(0.1).prefix("Z:"));
+                                });
+
+                                ui.add_space(4.0);
+                                ui.label("Rotation:");
+                                ui.horizontal(|ui| {
+                                    let mut changed = false;
+                                    changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[0]).speed(1.0).prefix("X:").suffix("°")).changed();
+                                    changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[1]).speed(1.0).prefix("Y:").suffix("°")).changed();
+                                    changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[2]).speed(1.0).prefix("Z:").suffix("°")).changed();
+                                    if changed {
+                                        obj.update_rotation();
+                                    }
+                                });
+
+                                ui.add_space(4.0);
+                                ui.label("Scale:");
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::DragValue::new(&mut obj.instance.scale.x).speed(0.01).prefix("X:"));
+                                    ui.add(egui::DragValue::new(&mut obj.instance.scale.y).speed(0.01).prefix("Y:"));
+                                    ui.add(egui::DragValue::new(&mut obj.instance.scale.z).speed(0.01).prefix("Z:"));
+                                });
+
+                                if let GeometryType::Mesh { .. } = obj.geometry_type {
+                                    ui.add_space(8.0);
+                                    if ui.button("🎯 Recenter Pivot").on_hover_text("Align the object's origin to its geometric center").clicked() {
+                                        action_recenter_id = Some(obj.id);
+                                    }
+                                }
+                            } else {
+                                ui.label(format!("{} objects selected", sel_indices.len()));
+                            }
+                        } else if any_mesh {
+                             ui.label("Select a model to edit its transform.");
+                        }
+                    });
+                self.analysis_x = ax;
+            }
+
+            // 3. Measurement overlay
+            if self.measure_mode && self.measure_points.len() == 2 {
+                egui::Area::new("measure_overlay_state".into())
+                    .interactable(false)
+                    .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+                    .show(ctx, |ui| {
+                        draw_measurement(
+                            ui,
+                            &self.camera,
+                            self.measure_points[0],
+                            self.measure_points[1],
+                            screen_size,
+                        );
+                    });
+            }
+
 
             // Top Right Panel: Settings
             egui::Window::new("Settings")
@@ -972,12 +1257,12 @@ impl State {
                     ui.label("Zoom Limits:");
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::DragValue::new(&mut self.min_zoom)
+                            egui::DragValue::new(&mut self.camera_controller.min_zoom)
                                 .speed(0.1)
                                 .prefix("Min: "),
                         );
                         ui.add(
-                            egui::DragValue::new(&mut self.max_zoom)
+                            egui::DragValue::new(&mut self.camera_controller.max_zoom)
                                 .speed(1.0)
                                 .prefix("Max: "),
                         );
@@ -1015,12 +1300,12 @@ impl State {
                         ui.separator();
                         ui.label(format!(
                             "Target: {:.2}, {:.2}, {:.2}",
-                            self.camera_target.x, self.camera_target.y, self.camera_target.z
+                            self.camera_controller.target.x, self.camera_controller.target.y, self.camera_controller.target.z
                         ));
                         ui.separator();
                         ui.label(format!(
                             "Yaw: {:.1}° Pitch: {:.1}°",
-                            self.camera_yaw, self.camera_pitch
+                            self.camera_controller.yaw, self.camera_controller.pitch
                         ));
                     });
                 });
@@ -1424,6 +1709,7 @@ impl State {
                 }
             }
 
+            
             // Editor Popup Window
             if self.editing_obj_id.is_some() {
                 let mut open = true;
@@ -1653,6 +1939,8 @@ impl State {
                     }
                 }
             }
+
+            custom_ui(ctx);
         });
 
         // Apply deferred actions
@@ -1661,20 +1949,42 @@ impl State {
             self.next_id += 1;
         }
 
+        if action_add_primitive {
+            self.add_default_object();
+        }
+        if let Some(id) = action_recenter_id {
+            self.recenter_mesh_pivot(id);
+        }
+
+        if let Some((m, label)) = action_add_mesh {
+            self.add_mesh_object(m, label);
+        }
+        if let Some(path) = action_load_folder {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    let label = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    if let Ok(m) = crate::mesh::MeshData::load(p) {
+                        self.add_mesh_object(m, label);
+                    }
+                }
+            }
+        }
+
         if action_reset_view {
-            self.camera_target = cgmath::Point3::new(
+            self.camera_controller.target = cgmath::Point3::new(
                 DEFAULT_CAMERA_TARGET[0],
                 DEFAULT_CAMERA_TARGET[1],
                 DEFAULT_CAMERA_TARGET[2],
             );
-            self.camera_yaw = DEFAULT_CAMERA_YAW;
-            self.camera_pitch = DEFAULT_CAMERA_PITCH;
-            self.camera_dist = DEFAULT_CAMERA_DIST;
+            self.camera_controller.yaw = DEFAULT_CAMERA_YAW;
+            self.camera_controller.pitch = DEFAULT_CAMERA_PITCH;
+            self.camera_controller.dist = DEFAULT_CAMERA_DIST;
         }
 
         if action_focus_selected {
             if let Some(target) = self.get_selected_centroid() {
-                self.camera_target = target;
+                self.camera_controller.target = target;
             }
         }
 
@@ -1776,6 +2086,22 @@ impl State {
                         usage: wgpu::BufferUsages::VERTEX,
                     });
                 draw_list.push((geo_type, buffer, instances.len() as u32));
+            }
+        }
+
+        // --- Prepare Custom Meshes Draw List ---
+        let mut custom_draw_list: Vec<(usize, wgpu::Buffer, u32)> = Vec::new(); // (obj_id, instance_buffer, instances_len)
+        for obj in &self.objects {
+            if let GeometryType::Mesh { .. } = &obj.geometry_type {
+                if obj.visible {
+                    let instance_raw = [obj.instance.to_raw_with_color(obj.color, obj.selected)];
+                    let instance_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Custom Mesh Instance Buffer"),
+                        contents: bytemuck::cast_slice(&instance_raw),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    custom_draw_list.push((obj.id, instance_buf, 1));
+                }
             }
         }
 
@@ -1898,9 +2224,18 @@ impl State {
 
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, instance_buf.slice(..));
-                render_pass
-                    .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..mesh.num_indices, 0, 0..*count);
+            }
+
+            // Draw Custom Meshes
+            for (obj_id, instance_buf, _) in &custom_draw_list {
+                if let Some(mesh_buf) = self.custom_meshes.get(obj_id) {
+                    render_pass.set_vertex_buffer(0, mesh_buf.vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, instance_buf.slice(..));
+                    render_pass.set_index_buffer(mesh_buf.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..mesh_buf.num_indices, 0, 0..1);
+                }
             }
 
             // Draw Normal Arrows for Planes

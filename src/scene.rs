@@ -1,12 +1,15 @@
 use crate::model::Instance;
 use cgmath::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GeometryType {
     Cube,
     Sphere,
     Plane,
     Line, // For adding segment geometry later
+    Mesh {
+        data: std::sync::Arc<crate::mesh::MeshData>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

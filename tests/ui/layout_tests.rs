@@ -1,4 +1,3 @@
-
 #[test]
 fn test_default_config() {
     // Check if default config values (simulated) are valid

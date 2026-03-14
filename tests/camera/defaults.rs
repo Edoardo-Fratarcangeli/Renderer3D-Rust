@@ -2,12 +2,8 @@
 // Camera and Zoom default value tests
 
 use rendering_3d::state::{
-    DEFAULT_CAMERA_YAW,
-    DEFAULT_CAMERA_PITCH,
-    DEFAULT_CAMERA_DIST,
-    DEFAULT_CAMERA_TARGET,
-    DEFAULT_MIN_ZOOM,
-    DEFAULT_MAX_ZOOM,
+    DEFAULT_CAMERA_DIST, DEFAULT_CAMERA_PITCH, DEFAULT_CAMERA_TARGET, DEFAULT_CAMERA_YAW,
+    DEFAULT_MAX_ZOOM, DEFAULT_MIN_ZOOM,
 };
 
 #[test]
@@ -27,7 +23,11 @@ fn test_camera_dist() {
 
 #[test]
 fn test_camera_target() {
-    assert_eq!(DEFAULT_CAMERA_TARGET, [3.0, 0.15, 0.5], "Camera Target mismatch");
+    assert_eq!(
+        DEFAULT_CAMERA_TARGET,
+        [3.0, 0.15, 0.5],
+        "Camera Target mismatch"
+    );
 }
 
 #[test]
