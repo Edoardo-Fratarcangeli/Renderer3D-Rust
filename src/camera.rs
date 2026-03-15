@@ -93,7 +93,7 @@ impl CameraController {
         use cgmath::prelude::*;
         let yaw = cgmath::Deg(self.yaw);
         let pitch = cgmath::Deg(self.pitch);
-        
+
         let x = self.dist * yaw.cos() * pitch.cos();
         let y = self.dist * yaw.sin() * pitch.cos();
         let z = self.dist * pitch.sin();
@@ -122,7 +122,7 @@ mod tests {
         let init_dist = controller.dist;
         controller.zoom(1.0); // Zoom in
         assert!(controller.dist < init_dist);
-        
+
         controller.zoom(-1.0); // Zoom out
         assert!((controller.dist - init_dist).abs() < 1e-4);
     }
@@ -139,7 +139,7 @@ mod tests {
             zfar: 100.0,
         };
         let mut controller = CameraController::new(45.0, 35.0, 10.0, [0.0, 0.0, 0.0], 1.0, 100.0);
-        
+
         let old_target = controller.target;
         // Panning right (dx > 0)
         controller.pan(10.0, 0.0, &camera);

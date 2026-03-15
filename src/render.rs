@@ -3,7 +3,11 @@ use cgmath::{InnerSpace, SquareMatrix};
 use parry3d_f64::na::{Point3, Vector3 as NaVector3};
 use parry3d_f64::query::Ray;
 
-pub fn pick_point(camera: &crate::camera::Camera, objects: &[crate::scene::SceneObject], mouse_ndc: [f32; 2]) -> Option<[f32; 3]> {
+pub fn pick_point(
+    camera: &crate::camera::Camera,
+    objects: &[crate::scene::SceneObject],
+    mouse_ndc: [f32; 2],
+) -> Option<[f32; 3]> {
     let inv_vp = camera.build_view_projection_matrix().invert()?;
     let near = inv_vp * cgmath::Vector4::new(mouse_ndc[0], mouse_ndc[1], 0.0, 1.0);
     let far = inv_vp * cgmath::Vector4::new(mouse_ndc[0], mouse_ndc[1], 1.0, 1.0);
@@ -15,16 +19,22 @@ pub fn pick_point(camera: &crate::camera::Camera, objects: &[crate::scene::Scene
     let mut hit_pt = None;
 
     for obj in objects {
-        if !obj.visible { continue; }
-        
+        if !obj.visible {
+            continue;
+        }
+
         let model = obj.instance.to_model_matrix();
         let inv_model = model.invert().unwrap_or(cgmath::Matrix4::identity());
-        
+
         // Transform ray to local space
         let local_origin = (inv_model * n.extend(1.0)).truncate();
         let local_dir = (inv_model * dir.extend(0.0)).truncate().normalize();
 
-        let l_origin = Point3::new(local_origin.x as f64, local_origin.y as f64, local_origin.z as f64);
+        let l_origin = Point3::new(
+            local_origin.x as f64,
+            local_origin.y as f64,
+            local_origin.z as f64,
+        );
         let l_dir = NaVector3::new(local_dir.x as f64, local_dir.y as f64, local_dir.z as f64);
         let ray = Ray::new(l_origin, l_dir);
 

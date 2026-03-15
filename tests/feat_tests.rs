@@ -2,7 +2,7 @@ use cgmath::Point3;
 use rendering_3d::camera::Camera;
 use rendering_3d::mesh::{MeshData, Vertex};
 use rendering_3d::render::pick_point;
-use rendering_3d::scene::{SceneObject, GeometryType};
+use rendering_3d::scene::{GeometryType, SceneObject};
 use std::sync::Arc;
 
 #[test]
@@ -25,7 +25,14 @@ fn test_raycast_mock() {
         indices: vec![0, 1, 2],
     };
 
-    let obj = SceneObject::new(1, "Test".to_string(), [0.0, 0.0, 0.0], GeometryType::Mesh { data: Arc::new(mesh) });
+    let obj = SceneObject::new(
+        1,
+        "Test".to_string(),
+        [0.0, 0.0, 0.0],
+        GeometryType::Mesh {
+            data: Arc::new(mesh),
+        },
+    );
 
     let camera = Camera {
         eye: Point3::new(0.0, 0.0, 5.0),
@@ -90,7 +97,14 @@ fn test_raycast_miss() {
         indices: vec![0, 1, 2],
     };
 
-    let obj = SceneObject::new(1, "Test".to_string(), [0.0, 0.0, 0.0], GeometryType::Mesh { data: Arc::new(mesh) });
+    let obj = SceneObject::new(
+        1,
+        "Test".to_string(),
+        [0.0, 0.0, 0.0],
+        GeometryType::Mesh {
+            data: Arc::new(mesh),
+        },
+    );
 
     let camera = Camera {
         eye: Point3::new(0.0, 0.0, 5.0),

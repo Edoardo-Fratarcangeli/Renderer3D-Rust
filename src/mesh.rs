@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Serialize, Deserialize, PartialEq,
+)]
 pub struct Vertex {
     pub pos: [f32; 3],
     pub norm: [f32; 3],

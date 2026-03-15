@@ -1,7 +1,7 @@
+use crate::render::{draw_measurement, pick_point};
 use cgmath::prelude::*;
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
-use crate::render::{draw_measurement, pick_point};
 
 use crate::camera::{Camera, Uniforms};
 use crate::model::{InstanceRaw, Vertex};
@@ -126,7 +126,7 @@ pub struct State {
 
     pub should_focus_name: bool,
     pub custom_meshes: std::collections::HashMap<usize, MeshBuffers>,
-    
+
     // Measure & Analysis (Moved from App)
     pub measure_mode: bool,
     pub measure_points: Vec<[f32; 3]>,
@@ -683,7 +683,9 @@ impl State {
 
                                 let ctx = self.egui_state.egui_ctx().clone();
                                 if self.measure_mode && !ctx.is_pointer_over_area() {
-                                    if let Some(pt) = pick_point(&self.camera, &self.objects, [x, y]) {
+                                    if let Some(pt) =
+                                        pick_point(&self.camera, &self.objects, [x, y])
+                                    {
                                         self.measure_points.push(pt);
                                         if self.measure_points.len() > 2 {
                                             self.measure_points.remove(0);
@@ -961,16 +963,20 @@ impl State {
         let id = self.next_id;
         self.next_id += 1;
 
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Custom Mesh Vertex Buffer {}", id)),
-            contents: bytemuck::cast_slice(&mesh_data.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Custom Mesh Index Buffer {}", id)),
-            contents: bytemuck::cast_slice(mesh_data.indices.as_slice()),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Custom Mesh Vertex Buffer {}", id)),
+                contents: bytemuck::cast_slice(&mesh_data.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Custom Mesh Index Buffer {}", id)),
+                contents: bytemuck::cast_slice(mesh_data.indices.as_slice()),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         self.custom_meshes.insert(
             id,
@@ -996,8 +1002,10 @@ impl State {
     pub fn recenter_mesh_pivot(&mut self, obj_id: usize) {
         if let Some(obj) = self.objects.iter_mut().find(|o| o.id == obj_id) {
             if let GeometryType::Mesh { data } = &obj.geometry_type {
-                if data.vertices.is_empty() { return; }
-                
+                if data.vertices.is_empty() {
+                    return;
+                }
+
                 let mut sum = cgmath::Vector3::new(0.0, 0.0, 0.0);
                 for v in &data.vertices {
                     sum += cgmath::Vector3::from(v.pos);
@@ -1010,27 +1018,38 @@ impl State {
                     v.pos[1] -= centroid.y;
                     v.pos[2] -= centroid.z;
                 }
-                
+
                 let new_data = crate::mesh::MeshData {
                     vertices: new_vertices,
                     indices: data.indices.clone(),
                 };
 
-                let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("Custom Mesh Vertex Buffer (Recentered) {}", obj_id)),
-                    contents: bytemuck::cast_slice(&new_data.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                
+                let vertex_buffer =
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!(
+                                "Custom Mesh Vertex Buffer (Recentered) {}",
+                                obj_id
+                            )),
+                            contents: bytemuck::cast_slice(&new_data.vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+
                 if let Some(mesh_buf) = self.custom_meshes.get_mut(&obj_id) {
                     mesh_buf.vertex_buffer = vertex_buffer;
                 }
 
-                obj.geometry_type = GeometryType::Mesh { data: std::sync::Arc::new(new_data) };
-                
+                obj.geometry_type = GeometryType::Mesh {
+                    data: std::sync::Arc::new(new_data),
+                };
+
                 // Adjust translation to keep object in same world position
                 let scale = obj.instance.scale;
-                let scaled_centroid = cgmath::Vector3::new(centroid.x * scale.x, centroid.y * scale.y, centroid.z * scale.z);
+                let scaled_centroid = cgmath::Vector3::new(
+                    centroid.x * scale.x,
+                    centroid.y * scale.y,
+                    centroid.z * scale.z,
+                );
                 let offset = obj.instance.rotation * scaled_centroid;
                 obj.instance.position += offset;
             }
@@ -1089,7 +1108,10 @@ impl State {
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             // Consolidation of App UI features inside State
             let screen_size = [self.size.width as f32, self.size.height as f32];
-            let any_mesh = self.objects.iter().any(|o| matches!(o.geometry_type, GeometryType::Mesh { .. }));
+            let any_mesh = self
+                .objects
+                .iter()
+                .any(|o| matches!(o.geometry_type, GeometryType::Mesh { .. }));
 
             // 1. Toolbar area
             egui::Area::new("toolbar_area_state".into())
@@ -1101,27 +1123,50 @@ impl State {
                         .fill(ctx.style().visuals.window_fill())
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                if ui.add(egui::Button::new(egui::RichText::new("➕").size(18.0)).frame(false))
-                                    .on_hover_text("Add new primitive object").clicked() {
+                                if ui
+                                    .add(
+                                        egui::Button::new(egui::RichText::new("➕").size(18.0))
+                                            .frame(false),
+                                    )
+                                    .on_hover_text("Add new primitive object")
+                                    .clicked()
+                                {
                                     action_add_primitive = true;
                                 }
 
                                 ui.add(egui::Separator::default().vertical());
-                                
-                                if ui.add(egui::Button::new(egui::RichText::new("📄").size(18.0)).frame(false))
-                                    .on_hover_text("Import single 3D model").clicked() {
+
+                                if ui
+                                    .add(
+                                        egui::Button::new(egui::RichText::new("📄").size(18.0))
+                                            .frame(false),
+                                    )
+                                    .on_hover_text("Import single 3D model")
+                                    .clicked()
+                                {
                                     if let Some(path) = rfd::FileDialog::new()
                                         .add_filter("3D Models", &["stl", "obj", "gltf", "glb"])
-                                        .pick_file() {
-                                        let label = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                                        .pick_file()
+                                    {
+                                        let label = path
+                                            .file_name()
+                                            .unwrap_or_default()
+                                            .to_string_lossy()
+                                            .into_owned();
                                         if let Ok(m) = crate::mesh::MeshData::load(path) {
                                             action_add_mesh = Some((m, label));
                                         }
                                     }
                                 }
 
-                                if ui.add(egui::Button::new(egui::RichText::new("📂").size(18.0)).frame(false))
-                                    .on_hover_text("Load entire folder of 3D models").clicked() {
+                                if ui
+                                    .add(
+                                        egui::Button::new(egui::RichText::new("📂").size(18.0))
+                                            .frame(false),
+                                    )
+                                    .on_hover_text("Load entire folder of 3D models")
+                                    .clicked()
+                                {
                                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                                         action_load_folder = Some(path);
                                     }
@@ -1129,9 +1174,21 @@ impl State {
 
                                 ui.add(egui::Separator::default().vertical());
 
-                                let m_color = if self.measure_mode { egui::Color32::LIGHT_BLUE } else { ui.visuals().widgets.noninteractive.text_color() };
-                                if ui.add(egui::Button::new(egui::RichText::new("📏").size(18.0).color(m_color)).frame(false))
-                                    .on_hover_text("Measure tool: click points on meshes").clicked() {
+                                let m_color = if self.measure_mode {
+                                    egui::Color32::LIGHT_BLUE
+                                } else {
+                                    ui.visuals().widgets.noninteractive.text_color()
+                                };
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("📏").size(18.0).color(m_color),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text("Measure tool: click points on meshes")
+                                    .clicked()
+                                {
                                     self.measure_mode = !self.measure_mode;
                                 }
                             });
@@ -1139,7 +1196,10 @@ impl State {
                 });
 
             // 2. Analysis / Transform Window
-            let sel_indices: Vec<usize> = self.objects.iter().enumerate()
+            let sel_indices: Vec<usize> = self
+                .objects
+                .iter()
+                .enumerate()
                 .filter(|(_, o)| o.selected)
                 .map(|(i, _)| i)
                 .collect();
@@ -1152,7 +1212,8 @@ impl State {
                     .collapsible(true)
                     .resizable(false)
                     .show(ctx, |ui| {
-                        let d_resp = ui.interact(ui.max_rect(), ui.id().with("drag"), egui::Sense::drag());
+                        let d_resp =
+                            ui.interact(ui.max_rect(), ui.id().with("drag"), egui::Sense::drag());
                         if d_resp.dragged() {
                             ax += d_resp.drag_delta().x;
                         }
@@ -1173,22 +1234,55 @@ impl State {
                                 let idx = sel_indices[0];
                                 let obj = &mut self.objects[idx];
                                 ui.label(format!("Editing: {}", obj.label));
-                                
+
                                 ui.add_space(4.0);
                                 ui.label("Position:");
                                 ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut obj.instance.position.x).speed(0.1).prefix("X:"));
-                                    ui.add(egui::DragValue::new(&mut obj.instance.position.y).speed(0.1).prefix("Y:"));
-                                    ui.add(egui::DragValue::new(&mut obj.instance.position.z).speed(0.1).prefix("Z:"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut obj.instance.position.x)
+                                            .speed(0.1)
+                                            .prefix("X:"),
+                                    );
+                                    ui.add(
+                                        egui::DragValue::new(&mut obj.instance.position.y)
+                                            .speed(0.1)
+                                            .prefix("Y:"),
+                                    );
+                                    ui.add(
+                                        egui::DragValue::new(&mut obj.instance.position.z)
+                                            .speed(0.1)
+                                            .prefix("Z:"),
+                                    );
                                 });
 
                                 ui.add_space(4.0);
                                 ui.label("Rotation:");
                                 ui.horizontal(|ui| {
                                     let mut changed = false;
-                                    changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[0]).speed(1.0).prefix("X:").suffix("°")).changed();
-                                    changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[1]).speed(1.0).prefix("Y:").suffix("°")).changed();
-                                    changed |= ui.add(egui::DragValue::new(&mut obj.rotation_euler[2]).speed(1.0).prefix("Z:").suffix("°")).changed();
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(&mut obj.rotation_euler[0])
+                                                .speed(1.0)
+                                                .prefix("X:")
+                                                .suffix("°"),
+                                        )
+                                        .changed();
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(&mut obj.rotation_euler[1])
+                                                .speed(1.0)
+                                                .prefix("Y:")
+                                                .suffix("°"),
+                                        )
+                                        .changed();
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(&mut obj.rotation_euler[2])
+                                                .speed(1.0)
+                                                .prefix("Z:")
+                                                .suffix("°"),
+                                        )
+                                        .changed();
                                     if changed {
                                         obj.update_rotation();
                                     }
@@ -1197,14 +1291,32 @@ impl State {
                                 ui.add_space(4.0);
                                 ui.label("Scale:");
                                 ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut obj.instance.scale.x).speed(0.01).prefix("X:"));
-                                    ui.add(egui::DragValue::new(&mut obj.instance.scale.y).speed(0.01).prefix("Y:"));
-                                    ui.add(egui::DragValue::new(&mut obj.instance.scale.z).speed(0.01).prefix("Z:"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut obj.instance.scale.x)
+                                            .speed(0.01)
+                                            .prefix("X:"),
+                                    );
+                                    ui.add(
+                                        egui::DragValue::new(&mut obj.instance.scale.y)
+                                            .speed(0.01)
+                                            .prefix("Y:"),
+                                    );
+                                    ui.add(
+                                        egui::DragValue::new(&mut obj.instance.scale.z)
+                                            .speed(0.01)
+                                            .prefix("Z:"),
+                                    );
                                 });
 
                                 if let GeometryType::Mesh { .. } = obj.geometry_type {
                                     ui.add_space(8.0);
-                                    if ui.button("🎯 Recenter Pivot").on_hover_text("Align the object's origin to its geometric center").clicked() {
+                                    if ui
+                                        .button("🎯 Recenter Pivot")
+                                        .on_hover_text(
+                                            "Align the object's origin to its geometric center",
+                                        )
+                                        .clicked()
+                                    {
                                         action_recenter_id = Some(obj.id);
                                     }
                                 }
@@ -1212,7 +1324,7 @@ impl State {
                                 ui.label(format!("{} objects selected", sel_indices.len()));
                             }
                         } else if any_mesh {
-                             ui.label("Select a model to edit its transform.");
+                            ui.label("Select a model to edit its transform.");
                         }
                     });
                 self.analysis_x = ax;
@@ -1233,7 +1345,6 @@ impl State {
                         );
                     });
             }
-
 
             // Top Right Panel: Settings
             egui::Window::new("Settings")
@@ -1300,7 +1411,9 @@ impl State {
                         ui.separator();
                         ui.label(format!(
                             "Target: {:.2}, {:.2}, {:.2}",
-                            self.camera_controller.target.x, self.camera_controller.target.y, self.camera_controller.target.z
+                            self.camera_controller.target.x,
+                            self.camera_controller.target.y,
+                            self.camera_controller.target.z
                         ));
                         ui.separator();
                         ui.label(format!(
@@ -1709,7 +1822,6 @@ impl State {
                 }
             }
 
-            
             // Editor Popup Window
             if self.editing_obj_id.is_some() {
                 let mut open = true;
@@ -1963,7 +2075,11 @@ impl State {
             if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries.flatten() {
                     let p = entry.path();
-                    let label = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    let label = p
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     if let Ok(m) = crate::mesh::MeshData::load(p) {
                         self.add_mesh_object(m, label);
                     }
@@ -2095,11 +2211,13 @@ impl State {
             if let GeometryType::Mesh { .. } = &obj.geometry_type {
                 if obj.visible {
                     let instance_raw = [obj.instance.to_raw_with_color(obj.color, obj.selected)];
-                    let instance_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Custom Mesh Instance Buffer"),
-                        contents: bytemuck::cast_slice(&instance_raw),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                    let instance_buf =
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Custom Mesh Instance Buffer"),
+                                contents: bytemuck::cast_slice(&instance_raw),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
                     custom_draw_list.push((obj.id, instance_buf, 1));
                 }
             }
@@ -2224,7 +2342,8 @@ impl State {
 
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, instance_buf.slice(..));
-                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass
+                    .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..mesh.num_indices, 0, 0..*count);
             }
 
@@ -2233,7 +2352,10 @@ impl State {
                 if let Some(mesh_buf) = self.custom_meshes.get(obj_id) {
                     render_pass.set_vertex_buffer(0, mesh_buf.vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, instance_buf.slice(..));
-                    render_pass.set_index_buffer(mesh_buf.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.set_index_buffer(
+                        mesh_buf.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
                     render_pass.draw_indexed(0..mesh_buf.num_indices, 0, 0..1);
                 }
             }
