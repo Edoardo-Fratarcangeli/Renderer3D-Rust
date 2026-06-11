@@ -4,6 +4,14 @@ A modern, high-performance 3D renderer written in Rust using `wgpu` (WebGPU) and
 
 ## 🚀 Features
 
+- **ML Dataset 3D Visualizer** (📊 button in the toolbar):
+  - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
+  - **3D point cloud**: instanced rendering with deterministic per-label colors and optional per-label shapes; PCA (or direct-axis) projection computed on a background thread.
+  - **Persistent caches**: metadata JSON, label index and 3D projection cached under `.r3d_cache/`, keyed by file content fingerprint.
+  - **Table, filters & search**: virtual-scrolling table (click a row to focus the camera), per-label visibility toggles, query search (`substring`, `row:N`, `c0 > 0.5`), label distribution chart.
+  - **Export**: writes the currently filtered subset to CSV.
+  - See [docs/ML_VISUALIZER.md](docs/ML_VISUALIZER.md) for the architecture.
+
 - **Instanced Rendering**: Efficiently renders multiple instances of objects with low overhead.
 - **WGPU Graphics**: Uses the modern `wgpu` crate for cross-platform, type-safe graphics programming.
 - **Advanced Selection System**:

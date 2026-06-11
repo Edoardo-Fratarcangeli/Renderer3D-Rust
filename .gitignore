@@ -3,6 +3,10 @@
 *.pdb
 /logs/
 
+# Dataset visualizer caches & exports
+/.r3d_cache/
+/export.csv
+
 # VS Code
 .vscode/*
 !.vscode/launch.json

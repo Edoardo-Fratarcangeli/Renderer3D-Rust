@@ -3,7 +3,10 @@
 #[macro_use]
 pub mod logger;
 pub mod camera;
+pub mod dataset;
 pub mod model;
 pub mod scene;
 pub mod primitives;
 pub mod state;
+pub mod ui;
+pub mod visualization;
