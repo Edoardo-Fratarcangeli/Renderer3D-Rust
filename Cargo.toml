@@ -33,6 +33,8 @@ parquet-support = ["dep:parquet"]
 
 [dev-dependencies]
 tempfile = "3"
+# Headless egui for UI integration tests (same version as the main dep).
+egui = "0.28"
 
 [build-dependencies]
 winres = "0.1.12"

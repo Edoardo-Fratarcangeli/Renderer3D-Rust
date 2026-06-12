@@ -1,6 +1,18 @@
-// Dataset visualizer UI. This layer only renders state and forwards user
-// intent; parsing, indexing and projection live in `dataset`/`visualization`
-// and run on a background thread so the UI never blocks on large files.
+//! Dataset visualizer UI.
+//!
+//! This layer only renders state and forwards user intent; parsing, indexing
+//! and projection live in [`crate::dataset`] / [`crate::visualization`] and
+//! run on a background thread so the UI never blocks on large files.
+//!
+//! Structure:
+//! - [`DatasetView`] is the single owner of all visualizer UI state and is
+//!   embedded in `State`. Each frame, `State` calls [`DatasetView::show`].
+//! - The window is organized in tabs ([`DatasetTab`]); each tab delegates to
+//!   a focused panel module ([`import_dialog`], [`dataset_table`],
+//!   [`label_filter`], [`search_panel`], [`distribution_chart`],
+//!   [`export_panel`]).
+//! - Panels are plain functions over explicit state, so they can be driven
+//!   headless (no GPU) by the integration tests in `tests/ui`.
 
 pub mod dataset_table;
 pub mod distribution_chart;
@@ -21,62 +33,204 @@ use crate::visualization::point_cloud::{self, PointCloudSettings};
 /// Directory holding metadata / index / projection caches.
 pub const CACHE_DIR: &str = ".r3d_cache";
 
+/// A dataset ready for display: data + label index + 3D projection.
 pub struct LoadedDataset {
+    /// The decoded dataset (features may stay memory mapped on disk).
     pub dataset: Dataset,
+    /// Label -> rows index used by filters.
     pub index: DatasetIndex,
+    /// Normalized 3D coordinates, one per row.
     pub projection: Projection,
 }
 
-/// What the dataset UI asks the host (State) to do this frame.
+/// What the dataset UI asks the host (`State`) to do this frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DatasetAction {
+    /// Nothing to do.
     None,
     /// Move the camera target onto this world-space point.
     FocusPoint([f32; 3]),
 }
 
+/// Where an import should read from.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportSource {
+    /// A dataset file on disk (NPY/NPZ/CSV/IDX/Parquet).
     Path(PathBuf),
+    /// One of the synthetic benchmark generators (see [`builtin`]).
     Builtin(&'static str),
 }
 
+/// A fully specified import request produced by the import dialog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportRequest {
+    /// File path or builtin generator name.
     pub source: ImportSource,
+    /// Optional hard cap on imported rows.
     pub max_rows: Option<usize>,
+    /// Projection used for the 3D preview.
     pub method: ProjectionMethod,
 }
 
+/// Severity of a [`StatusMessage`]; controls its color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusKind {
+    /// Neutral progress/info text.
+    Info,
+    /// A completed operation.
+    Success,
+    /// A failed operation.
+    Error,
+}
+
+/// A colored, user-facing status line shown under a panel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusMessage {
+    /// Severity (drives the color).
+    pub kind: StatusKind,
+    /// Human readable text.
+    pub text: String,
+}
+
+impl StatusMessage {
+    /// Neutral informational message.
+    pub fn info(text: impl Into<String>) -> Self {
+        Self {
+            kind: StatusKind::Info,
+            text: text.into(),
+        }
+    }
+
+    /// Green success message.
+    pub fn success(text: impl Into<String>) -> Self {
+        Self {
+            kind: StatusKind::Success,
+            text: text.into(),
+        }
+    }
+
+    /// Red error message.
+    pub fn error(text: impl Into<String>) -> Self {
+        Self {
+            kind: StatusKind::Error,
+            text: text.into(),
+        }
+    }
+
+    /// Color used to render this message in the current theme.
+    pub fn color(&self, visuals: &egui::Visuals) -> egui::Color32 {
+        match self.kind {
+            StatusKind::Info => visuals.text_color(),
+            StatusKind::Success => egui::Color32::from_rgb(120, 220, 120),
+            StatusKind::Error => egui::Color32::from_rgb(255, 120, 120),
+        }
+    }
+
+    /// Render the message as a colored label.
+    pub fn show(&self, ui: &mut egui::Ui) {
+        let color = self.color(ui.visuals());
+        ui.colored_label(color, &self.text);
+    }
+}
+
+/// Tabs of the visualizer window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatasetTab {
+    /// File / benchmark import.
+    Import,
+    /// Search bar + virtual-scrolling table.
+    Explore,
+    /// Per-label visibility filters + distribution chart.
+    Labels,
+    /// Point size and shape policy.
+    View,
+    /// CSV export of the filtered subset.
+    Export,
+}
+
+impl DatasetTab {
+    /// All tabs in display order.
+    pub const ALL: [DatasetTab; 5] = [
+        DatasetTab::Import,
+        DatasetTab::Explore,
+        DatasetTab::Labels,
+        DatasetTab::View,
+        DatasetTab::Export,
+    ];
+
+    /// Icon + title shown on the tab button.
+    pub fn title(&self) -> &'static str {
+        match self {
+            DatasetTab::Import => "📂 Import",
+            DatasetTab::Explore => "🔍 Explore",
+            DatasetTab::Labels => "🏷 Labels",
+            DatasetTab::View => "🎨 View",
+            DatasetTab::Export => "💾 Export",
+        }
+    }
+
+    /// Whether the tab is usable before any dataset is loaded.
+    pub fn needs_dataset(&self) -> bool {
+        !matches!(self, DatasetTab::Import)
+    }
+}
+
+/// State of the import form (path, row cap, projection method, progress).
 #[derive(Default)]
 pub struct ImportState {
+    /// Path typed in the file field.
     pub path_text: String,
+    /// Whether the row cap is active.
     pub limit_rows: bool,
+    /// Row cap value (used when `limit_rows`).
     pub max_rows: usize,
+    /// PCA (true) vs direct first-three-columns projection (false).
     pub use_pca: bool,
-    pub status: String,
+    /// Last import outcome shown to the user.
+    pub status: Option<StatusMessage>,
+    /// True while the worker thread is importing.
     pub loading: bool,
 }
 
+/// State of the export form.
 #[derive(Default)]
 pub struct ExportState {
+    /// Destination path typed by the user.
     pub path_text: String,
-    pub status: String,
+    /// Last export outcome shown to the user.
+    pub status: Option<StatusMessage>,
 }
 
+/// Root state of the dataset visualizer window.
+///
+/// Owns the loaded dataset, the filter/search state, the rendering settings
+/// and the background import worker. The host (`State`) drains the dirty
+/// flag via [`DatasetView::take_render_dirty`] to rebuild GPU buffers only
+/// when the visible point set actually changed.
 pub struct DatasetView {
+    /// Whether the window is visible.
     pub show_window: bool,
+    /// Currently selected tab.
+    pub tab: DatasetTab,
+    /// Import form state.
     pub import: ImportState,
+    /// Export form state.
     pub export: ExportState,
+    /// The active dataset, if any.
     pub loaded: Option<LoadedDataset>,
 
-    // Filter / search state
+    /// Label ids currently visible.
     pub enabled_labels: HashSet<u32>,
+    /// Raw search text (parsed by [`SearchQuery::parse`]).
     pub search_text: String,
+    /// Parse error of the current search text, if any.
     pub search_error: Option<String>,
+    /// Rows matching filter + search, ascending.
     pub visible_rows: Vec<u32>,
 
+    /// Point cloud rendering settings.
     pub settings: PointCloudSettings,
+    /// Human readable summary of the last instance build.
     pub last_build_info: String,
 
     render_dirty: bool,
@@ -90,9 +244,11 @@ impl Default for DatasetView {
 }
 
 impl DatasetView {
+    /// Fresh view with sensible defaults (PCA on, 100k row cap suggestion).
     pub fn new() -> Self {
         Self {
             show_window: false,
+            tab: DatasetTab::Import,
             import: ImportState {
                 use_pca: true,
                 max_rows: 100_000,
@@ -120,11 +276,18 @@ impl DatasetView {
         std::mem::take(&mut self.render_dirty)
     }
 
+    /// Force an instance-buffer rebuild on the next frame.
     pub fn mark_dirty(&mut self) {
         self.render_dirty = true;
     }
 
-    /// Install a freshly loaded dataset and reset filters/selection.
+    /// True while a background import is in flight.
+    pub fn is_loading(&self) -> bool {
+        self.import.loading
+    }
+
+    /// Install a freshly loaded dataset, reset filters/selection and jump
+    /// to the Explore tab.
     pub fn install(&mut self, loaded: LoadedDataset) {
         self.enabled_labels = (0..loaded.dataset.label_names.len() as u32).collect();
         self.search_text.clear();
@@ -133,8 +296,8 @@ impl DatasetView {
         self.loaded = Some(loaded);
         self.recompute_visible();
         let l = self.loaded.as_ref().unwrap();
-        self.import.status = format!(
-            "Loaded '{}': {} rows x {} cols, {} labels{}{}",
+        self.import.status = Some(StatusMessage::success(format!(
+            "Loaded '{}': {} rows × {} cols, {} labels{}{}",
             l.dataset.metadata.name,
             l.dataset.n_rows(),
             l.dataset.n_cols(),
@@ -149,10 +312,11 @@ impl DatasetView {
             } else {
                 ""
             },
-        );
+        )));
+        self.tab = DatasetTab::Explore;
     }
 
-    /// Re-evaluate filter + search into `visible_rows`.
+    /// Re-evaluate filter + search into [`Self::visible_rows`].
     pub fn recompute_visible(&mut self) {
         let Some(loaded) = &self.loaded else {
             self.visible_rows.clear();
@@ -211,136 +375,25 @@ impl DatasetView {
         result
     }
 
-    /// Poll the loader thread; draw the window; return host action.
+    /// Poll the loader thread, draw the window, return the host action.
     pub fn show(&mut self, ctx: &egui::Context) -> DatasetAction {
         self.poll_worker();
-        let mut action = DatasetAction::None;
         if !self.show_window {
-            return action;
+            return DatasetAction::None;
         }
 
+        let mut action = DatasetAction::None;
         let mut open = true;
+        let screen_center = ctx.screen_rect().center();
         egui::Window::new("📊 Dataset Visualizer")
             .open(&mut open)
-            .default_width(440.0)
+            .default_size([540.0, 520.0])
+            // Spawn centered on screen; remains draggable afterwards.
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(screen_center)
             .resizable(true)
-            .vscroll(true)
             .show(ctx, |ui| {
-                // --- Import ---
-                egui::CollapsingHeader::new("Import")
-                    .default_open(self.loaded.is_none())
-                    .show(ui, |ui| {
-                        if let Some(req) = import_dialog::show(ui, &mut self.import) {
-                            self.start_import(req);
-                        }
-                    });
-
-                let Some(loaded) = &self.loaded else { return };
-
-                ui.separator();
-                ui.label(format!(
-                    "{} — {} rows x {} cols ({})",
-                    loaded.dataset.metadata.name,
-                    loaded.dataset.n_rows(),
-                    loaded.dataset.n_cols(),
-                    loaded.dataset.metadata.format
-                ));
-                if !self.last_build_info.is_empty() {
-                    ui.label(&self.last_build_info);
-                }
-
-                // --- View settings ---
-                egui::CollapsingHeader::new("View").show(ui, |ui| {
-                    let mut changed = false;
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut self.settings.point_size, 0.01..=0.5)
-                                .text("Point size"),
-                        )
-                        .changed();
-                    let mut per_label = matches!(
-                        self.settings.geometry_policy,
-                        crate::visualization::geometry_assigner::GeometryPolicy::PerLabel
-                    );
-                    if ui
-                        .checkbox(&mut per_label, "Shape per label (sphere/cube/plane)")
-                        .changed()
-                    {
-                        self.settings.geometry_policy = if per_label {
-                            crate::visualization::geometry_assigner::GeometryPolicy::PerLabel
-                        } else {
-                            crate::visualization::geometry_assigner::GeometryPolicy::default()
-                        };
-                        changed = true;
-                    }
-                    if changed {
-                        self.render_dirty = true;
-                    }
-                });
-
-                // --- Filters ---
-                let mut filters_changed = false;
-                egui::CollapsingHeader::new("Label Filter")
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        filters_changed |= label_filter::show(
-                            ui,
-                            &loaded.dataset.metadata.labels,
-                            &mut self.enabled_labels,
-                        );
-                    });
-
-                // --- Search ---
-                egui::CollapsingHeader::new("Search").show(ui, |ui| {
-                    filters_changed |=
-                        search_panel::show(ui, &mut self.search_text, &self.search_error);
-                });
-
-                // --- Distribution ---
-                egui::CollapsingHeader::new("Label Distribution").show(ui, |ui| {
-                    distribution_chart::show(
-                        ui,
-                        &loaded.dataset.metadata.labels,
-                        &self.enabled_labels,
-                    );
-                });
-
-                // --- Table ---
-                egui::CollapsingHeader::new("Table")
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        if let Some(focus) = dataset_table::show(
-                            ui,
-                            &loaded.dataset,
-                            &loaded.projection.points,
-                            &self.visible_rows,
-                            &mut self.settings.highlighted_row,
-                        ) {
-                            action = DatasetAction::FocusPoint(focus);
-                            self.render_dirty = true;
-                        }
-                    });
-
-                // --- Export ---
-                egui::CollapsingHeader::new("Export").show(ui, |ui| {
-                    if let Some(path) = export_panel::show(ui, &mut self.export) {
-                        match crate::dataset::export::export_csv(
-                            &loaded.dataset,
-                            &self.visible_rows,
-                            &path,
-                        ) {
-                            Ok(n) => {
-                                self.export.status =
-                                    format!("Exported {} rows to {}", n, path.display())
-                            }
-                            Err(e) => self.export.status = format!("Export failed: {}", e),
-                        }
-                    }
-                });
-
-                if filters_changed {
-                    self.recompute_visible();
-                }
+                action = self.contents(ui);
             });
         if !open {
             self.show_window = false;
@@ -348,6 +401,147 @@ impl DatasetView {
         action
     }
 
+    /// Window body: tab bar, summary strip and the active tab's panel.
+    fn contents(&mut self, ui: &mut egui::Ui) -> DatasetAction {
+        let mut action = DatasetAction::None;
+
+        // --- Tab bar (centered) ---
+        ui.vertical_centered(|ui| {
+            ui.horizontal(|ui| {
+                for tab in DatasetTab::ALL {
+                    let enabled = !tab.needs_dataset() || self.loaded.is_some();
+                    let selected = self.tab == tab;
+                    let label = egui::RichText::new(tab.title()).size(14.0);
+                    if ui
+                        .add_enabled(enabled, egui::SelectableLabel::new(selected, label))
+                        .clicked()
+                    {
+                        self.tab = tab;
+                    }
+                }
+            });
+        });
+        ui.separator();
+
+        // --- Summary strip ---
+        if let Some(loaded) = &self.loaded {
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} — {} rows × {} cols ({})",
+                        loaded.dataset.metadata.name,
+                        loaded.dataset.n_rows(),
+                        loaded.dataset.n_cols(),
+                        loaded.dataset.metadata.format
+                    ))
+                    .strong(),
+                );
+                if !self.last_build_info.is_empty() {
+                    ui.label(egui::RichText::new(&self.last_build_info).weak());
+                }
+            });
+            ui.separator();
+        }
+
+        // --- Active tab ---
+        if self.tab.needs_dataset() && self.loaded.is_none() {
+            // Defensive: tabs are disabled in this case, but keep a friendly
+            // empty state in case the tab was preselected.
+            empty_state(ui);
+            return action;
+        }
+        match self.tab {
+            DatasetTab::Import => {
+                if let Some(req) = import_dialog::show(ui, &mut self.import) {
+                    self.start_import(req);
+                }
+            }
+            DatasetTab::Explore => {
+                if search_panel::show(ui, &mut self.search_text, &self.search_error) {
+                    self.recompute_visible();
+                }
+                ui.add_space(4.0);
+                let loaded = self.loaded.as_ref().unwrap();
+                if let Some(focus) = dataset_table::show(
+                    ui,
+                    &loaded.dataset,
+                    &loaded.projection.points,
+                    &self.visible_rows,
+                    &mut self.settings.highlighted_row,
+                ) {
+                    action = DatasetAction::FocusPoint(focus);
+                    self.render_dirty = true;
+                }
+            }
+            DatasetTab::Labels => {
+                let loaded = self.loaded.as_ref().unwrap();
+                let stats = loaded.dataset.metadata.labels.clone();
+                if label_filter::show(ui, &stats, &mut self.enabled_labels) {
+                    self.recompute_visible();
+                }
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("Distribution").heading());
+                });
+                distribution_chart::show(ui, &stats, &self.enabled_labels);
+            }
+            DatasetTab::View => {
+                let mut changed = false;
+                egui::Grid::new("view_settings_grid")
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label("Point size");
+                        changed |= ui
+                            .add(egui::Slider::new(&mut self.settings.point_size, 0.01..=0.5))
+                            .changed();
+                        ui.end_row();
+
+                        ui.label("Shape per label");
+                        let mut per_label = matches!(
+                            self.settings.geometry_policy,
+                            crate::visualization::geometry_assigner::GeometryPolicy::PerLabel
+                        );
+                        if ui
+                            .checkbox(&mut per_label, "cycle sphere / cube / plane")
+                            .changed()
+                        {
+                            self.settings.geometry_policy = if per_label {
+                                crate::visualization::geometry_assigner::GeometryPolicy::PerLabel
+                            } else {
+                                crate::visualization::geometry_assigner::GeometryPolicy::default()
+                            };
+                            changed = true;
+                        }
+                        ui.end_row();
+                    });
+                if changed {
+                    self.render_dirty = true;
+                }
+            }
+            DatasetTab::Export => {
+                let n_visible = self.visible_rows.len();
+                if let Some(path) = export_panel::show(ui, &mut self.export, n_visible) {
+                    let loaded = self.loaded.as_ref().unwrap();
+                    self.export.status = match crate::dataset::export::export_csv(
+                        &loaded.dataset,
+                        &self.visible_rows,
+                        &path,
+                    ) {
+                        Ok(n) => Some(StatusMessage::success(format!(
+                            "Exported {} rows to {}",
+                            n,
+                            path.display()
+                        ))),
+                        Err(e) => Some(StatusMessage::error(format!("Export failed: {}", e))),
+                    };
+                }
+            }
+        }
+        action
+    }
+
+    /// Drain the background worker channel, if an import is in flight.
     fn poll_worker(&mut self) {
         let Some(rx) = &self.worker else { return };
         match rx.try_recv() {
@@ -359,35 +553,44 @@ impl DatasetView {
             Ok(Err(msg)) => {
                 self.worker = None;
                 self.import.loading = false;
-                self.import.status = format!("Import failed: {}", msg);
+                self.import.status = Some(StatusMessage::error(format!("Import failed: {}", msg)));
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.worker = None;
                 self.import.loading = false;
-                self.import.status = "Import worker died unexpectedly".to_string();
+                self.import.status =
+                    Some(StatusMessage::error("Import worker died unexpectedly"));
             }
         }
     }
 
+    /// Kick off an import: builtins are generated synchronously (they are
+    /// tiny), files are loaded + projected on a worker thread.
     pub fn start_import(&mut self, req: ImportRequest) {
         match req.source {
-            ImportSource::Builtin(name) => {
-                // Synthetic datasets are tiny: generate synchronously.
-                match builtin::BuiltinDataset::default_of(name) {
-                    Some(kind) => {
-                        let loaded = prepare_dataset(builtin::generate(kind, 42), req.method, None);
-                        match loaded {
-                            Ok(l) => self.install(l),
-                            Err(e) => self.import.status = format!("Import failed: {}", e),
+            ImportSource::Builtin(name) => match builtin::BuiltinDataset::default_of(name) {
+                Some(kind) => {
+                    let loaded = prepare_dataset(builtin::generate(kind, 42), req.method, None);
+                    match loaded {
+                        Ok(l) => self.install(l),
+                        Err(e) => {
+                            self.import.status =
+                                Some(StatusMessage::error(format!("Import failed: {}", e)))
                         }
                     }
-                    None => self.import.status = format!("Unknown builtin '{}'", name),
                 }
-            }
+                None => {
+                    self.import.status =
+                        Some(StatusMessage::error(format!("Unknown builtin '{}'", name)))
+                }
+            },
             ImportSource::Path(path) => {
                 self.import.loading = true;
-                self.import.status = format!("Loading {} ...", path.display());
+                self.import.status = Some(StatusMessage::info(format!(
+                    "Loading {} ...",
+                    path.display()
+                )));
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.worker = Some(rx);
                 let method = req.method;
@@ -402,6 +605,18 @@ impl DatasetView {
             }
         }
     }
+}
+
+/// Centered placeholder shown when a data tab is opened with no dataset.
+fn empty_state(ui: &mut egui::Ui) {
+    ui.add_space(40.0);
+    ui.vertical_centered(|ui| {
+        ui.label(egui::RichText::new("🗄").size(48.0));
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("No dataset loaded").heading());
+        ui.label(egui::RichText::new("Import a file or a benchmark from the Import tab.").weak());
+    });
+    ui.add_space(40.0);
 }
 
 /// Full import pipeline used by the worker thread: load file, build/reuse
@@ -442,8 +657,7 @@ fn prepare_dataset_cached(
             match DatasetIndex::load_json(&index_path) {
                 Ok(idx) if idx.n_rows == dataset.n_rows() => idx,
                 _ => {
-                    let idx =
-                        DatasetIndex::build(&dataset.labels, dataset.label_names.len());
+                    let idx = DatasetIndex::build(&dataset.labels, dataset.label_names.len());
                     let _ = idx.save_json(&index_path);
                     idx
                 }
@@ -466,4 +680,66 @@ fn prepare_dataset_cached(
         index,
         projection,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_message_constructors_set_kind() {
+        assert_eq!(StatusMessage::info("a").kind, StatusKind::Info);
+        assert_eq!(StatusMessage::success("b").kind, StatusKind::Success);
+        assert_eq!(StatusMessage::error("c").kind, StatusKind::Error);
+        assert_eq!(StatusMessage::error("c").text, "c");
+    }
+
+    #[test]
+    fn status_message_colors_distinguish_outcomes() {
+        let visuals = egui::Visuals::dark();
+        let ok = StatusMessage::success("ok").color(&visuals);
+        let err = StatusMessage::error("no").color(&visuals);
+        let info = StatusMessage::info("hm").color(&visuals);
+        assert_ne!(ok, err);
+        assert_ne!(ok, info);
+        assert_ne!(err, info);
+    }
+
+    #[test]
+    fn tab_metadata_is_consistent() {
+        assert_eq!(DatasetTab::ALL.len(), 5);
+        // Titles unique and non-empty.
+        for (i, a) in DatasetTab::ALL.iter().enumerate() {
+            assert!(!a.title().is_empty());
+            for b in &DatasetTab::ALL[i + 1..] {
+                assert_ne!(a.title(), b.title());
+            }
+        }
+        // Only Import works without data.
+        assert!(!DatasetTab::Import.needs_dataset());
+        for tab in &DatasetTab::ALL[1..] {
+            assert!(tab.needs_dataset());
+        }
+    }
+
+    #[test]
+    fn new_view_defaults() {
+        let view = DatasetView::new();
+        assert!(!view.show_window);
+        assert_eq!(view.tab, DatasetTab::Import);
+        assert!(view.import.use_pca);
+        assert!(view.loaded.is_none());
+        assert!(view.visible_rows.is_empty());
+        assert!(!view.is_loading());
+        assert_eq!(view.export.path_text, "export.csv");
+    }
+
+    #[test]
+    fn dirty_flag_is_drained_once() {
+        let mut view = DatasetView::new();
+        assert!(!view.take_render_dirty());
+        view.mark_dirty();
+        assert!(view.take_render_dirty());
+        assert!(!view.take_render_dirty());
+    }
 }

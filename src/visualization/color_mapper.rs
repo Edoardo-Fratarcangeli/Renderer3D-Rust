@@ -1,4 +1,8 @@
-// Deterministic label id -> RGB color mapping.
+//! Deterministic label id -> RGB color mapping.
+//!
+//! The base palette is Okabe-Ito (colorblind friendly) extended to twelve
+//! entries; ids beyond the palette get darkened variants so any number of
+//! labels still maps to distinct, stable colors.
 
 /// Qualitative base palette (colorblind-friendly Okabe-Ito + extras).
 const PALETTE: [[f32; 3]; 12] = [

@@ -28,6 +28,25 @@ never touch egui/wgpu):
 pre-existing instanced mesh pipeline (one draw call per point shape). A
 dirty flag rebuilds GPU buffers only when the visible selection changes.
 
+### Window layout
+
+The visualizer opens centered on screen (draggable afterwards) and is
+organized in five tabs — `DatasetTab` — with a persistent summary strip
+(dataset name, shape, rendered-point count) under the tab bar:
+
+| Tab | Content |
+|-----|---------|
+| 📂 Import | grid form (file, row cap, projection) + one-click benchmarks |
+| 🔍 Explore | search bar + zebra-striped virtual table, click row → focus camera |
+| 🏷 Labels | per-label toggles (two columns) + distribution chart with hover % |
+| 🎨 View | point size slider, shape-per-label policy |
+| 💾 Export | destination + row count preview, colored result status |
+
+Tabs that need data are disabled until a dataset is loaded; a centered
+empty state guides the user to Import. Status lines use `StatusMessage`
+(info/success/error → themed colors). All panels are plain functions over
+explicit state, so the whole UI runs headless in tests (no GPU).
+
 ### Large-file strategy
 
 - **NPY / IDX**: memory mapped (`memmap2`); rows are decoded lazily from the
@@ -80,14 +99,46 @@ button, focus action, instance-buffer rebuild + draw), `.gitignore`.
 
 ## 4. Tests
 
-- `tests/dataset/loader_tests.rs` — every format, mmap flag, row cap, error paths.
+Integration suites:
+
+- `tests/dataset/loader_tests.rs` — every format, mmap flag, row caps, label
+  auto-detection (incl. the `y` vs `label` precedence regression), explicit
+  label column, unlabeled fallbacks, fortran/big-endian/dtype rejections.
 - `tests/dataset/metadata_tests.rs` — JSON roundtrip, label stats.
 - `tests/dataset/index_tests.rs` — index build/persistence, filter, search grammar.
 - `tests/dataset/preprocessor_tests.rs` — PCA correctness, normalization, cache hit/miss.
 - `tests/dataset/export_tests.rs` — filtered export re-imports identically.
 - `tests/dataset/smoke.rs` — full import→cache→filter→render→export pipeline.
 - `tests/visualization/main.rs` — palette determinism/distinctness, shape policy, instance batches, highlight, downsampling.
-- `tests/dataset/bench.rs` — `#[ignore]` timing benchmarks.
+- `tests/ui/dataset_panels.rs` — headless egui frames over the real
+  `DatasetView`: every tab renders (loaded and empty), background-worker
+  import success/failure, search/filter/highlight invariants, table text.
+- `tests/dataset/bench.rs` — `#[ignore]` timing benchmarks
+  (`cargo test --release --test dataset -- --ignored --nocapture`).
+
+In-module unit tests (`cargo test --lib`) cover the private helpers:
+NPY/IDX header parsing, dtype decoding for every `ElemType`, FNV hashing,
+CSV value formatting/escaping, comparison operators, projection cache
+corruption handling, RNG determinism, status/tab metadata.
+
+Coverage is measured with `cargo llvm-cov --tests --summary-only`.
+Region coverage of the visualizer modules (the target of the "maximum
+coverage" goal — `state.rs`/`main.rs` need a window + GPU and are exercised
+by the existing manual/scene tests instead):
+
+| Module | Regions covered |
+|--------|-----------------|
+| `visualization/*` | 100% |
+| `dataset/mod`, `dataset/builtin` | 100% |
+| `dataset/preprocessor` | 98% |
+| `dataset/export`, `dataset/loader` | 94% |
+| `dataset/index` | 93% |
+| `dataset/metadata` | 90% |
+| `ui/*` | 90–99% (avg ≈ 93%) |
+| **Visualizer modules overall** | **≈ 95%** |
+
+The remaining gaps are egui click-handler closures that only run on real
+pointer input, plus `unwrap_or(0)` style fallbacks on system clock errors.
 
 ## 5. Risks & mitigations
 

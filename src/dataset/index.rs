@@ -1,5 +1,9 @@
-// Label index + filter/search evaluation, persisted to disk as JSON so a
-// re-import of the same file skips the indexing pass.
+//! Label index + filter/search evaluation.
+//!
+//! The index is persisted to disk as JSON so a re-import of the same file
+//! skips the indexing pass. [`SearchQuery`] implements the small query
+//! grammar used by the search panel; [`apply_filter`] resolves a
+//! [`FilterSpec`] (label toggles + query) into the matching row set.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -193,4 +197,53 @@ pub fn apply_filter(dataset: &Dataset, index: &DatasetIndex, spec: &FilterSpec) 
             spec.query.matches(dataset, row, &buf)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cmp_op_evaluation_covers_all_operators() {
+        assert!(CmpOp::Lt.eval(1.0, 2.0) && !CmpOp::Lt.eval(2.0, 1.0));
+        assert!(CmpOp::Gt.eval(2.0, 1.0) && !CmpOp::Gt.eval(1.0, 2.0));
+        assert!(CmpOp::Le.eval(2.0, 2.0) && !CmpOp::Le.eval(3.0, 2.0));
+        assert!(CmpOp::Ge.eval(2.0, 2.0) && !CmpOp::Ge.eval(1.0, 2.0));
+        assert!(CmpOp::Eq.eval(2.0, 2.0) && !CmpOp::Eq.eval(2.1, 2.0));
+        assert!(CmpOp::Ne.eval(2.1, 2.0) && !CmpOp::Ne.eval(2.0, 2.0));
+    }
+
+    #[test]
+    fn malformed_column_queries_fall_back_to_substring() {
+        // Not parseable as a column predicate -> label substring.
+        assert!(matches!(
+            SearchQuery::parse("cat > dog").unwrap(),
+            SearchQuery::LabelSubstring(_)
+        ));
+        assert!(matches!(
+            SearchQuery::parse("c > 1").unwrap(),
+            SearchQuery::LabelSubstring(_)
+        ));
+        // Uppercase column prefix works.
+        assert!(matches!(
+            SearchQuery::parse("C2 <= 0.5").unwrap(),
+            SearchQuery::Column { col: 2, op: CmpOp::Le, .. }
+        ));
+    }
+
+    #[test]
+    fn needs_features_only_for_column_queries() {
+        assert!(SearchQuery::parse("c0 > 1").unwrap().needs_features());
+        assert!(!SearchQuery::parse("row:1").unwrap().needs_features());
+        assert!(!SearchQuery::parse("abc").unwrap().needs_features());
+        assert!(!SearchQuery::All.needs_features());
+    }
+
+    #[test]
+    fn rows_for_labels_ignores_unknown_ids() {
+        let idx = DatasetIndex::build(&[0, 1, 0], 2);
+        let rows = idx.rows_for_labels(&HashSet::from([1, 99]));
+        assert_eq!(rows, vec![1]);
+        assert_eq!(idx.count(99), 0);
+    }
 }

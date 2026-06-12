@@ -1,6 +1,7 @@
-// Label id -> point geometry mapping. Cycling through primitive shapes adds
-// a second visual channel on top of color (useful for many labels or
-// colorblind users).
+//! Label id -> point geometry mapping.
+//!
+//! Cycling through primitive shapes adds a second visual channel on top of
+//! color (useful for many labels or colorblind users).
 
 use crate::scene::GeometryType;
 

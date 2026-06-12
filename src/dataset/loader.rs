@@ -1,10 +1,13 @@
-// Multi-format dataset loader.
-//
-// - NPY: memory mapped, rows decoded lazily (no full RAM copy).
-// - NPZ: zip of NPY entries, stream-decompressed (features + optional labels).
-// - CSV: streamed record by record through the `csv` reader.
-// - IDX (MNIST-style): memory mapped, sibling label file auto-detected.
-// - Parquet: behind the optional `parquet-support` feature.
+//! Multi-format dataset loader.
+//!
+//! - NPY: memory mapped, rows decoded lazily (no full RAM copy).
+//! - NPZ: zip of NPY entries, stream-decompressed (features + optional labels).
+//! - CSV: streamed record by record through the `csv` reader.
+//! - IDX (MNIST-style): memory mapped, sibling label file auto-detected.
+//! - Parquet: behind the optional `parquet-support` feature.
+//!
+//! Entry point is [`load`], which dispatches on the file extension and
+//! returns a fully described [`Dataset`].
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -106,7 +109,7 @@ pub fn parse_npy_header(bytes: &[u8]) -> Result<NpyHeader> {
     let fortran_order = header
         .split("fortran_order")
         .nth(1)
-        .map(|s| s.trim_start_matches([':', ' ']).starts_with("True"))
+        .map(|s| s.trim_start_matches(['\'', ':', ' ']).starts_with("True"))
         .unwrap_or(false);
     let shape = extract_shape(header)?;
 
@@ -188,6 +191,20 @@ fn parse_descr(descr: &str) -> Result<ElemType> {
         }
     };
     Ok(elem)
+}
+
+/// Auto-detect the label column from header names.
+///
+/// Strong names ("label", "target", "class", ...) take precedence over the
+/// weak name "y", which often collides with a coordinate column.
+pub fn detect_label_column(headers: &[String]) -> Option<usize> {
+    let strong = headers.iter().position(|h| {
+        matches!(
+            h.to_ascii_lowercase().as_str(),
+            "label" | "labels" | "target" | "class" | "species" | "category"
+        )
+    });
+    strong.or_else(|| headers.iter().position(|h| h.eq_ignore_ascii_case("y")))
 }
 
 /// Flatten a shape into (rows, cols): trailing dims are folded into columns.
@@ -420,12 +437,7 @@ fn load_csv(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
                     DatasetError::Format(format!("label column '{}' not found", name))
                 })?,
         ),
-        None => headers.iter().position(|h| {
-            matches!(
-                h.to_ascii_lowercase().as_str(),
-                "label" | "labels" | "target" | "class" | "y" | "species" | "category"
-            )
-        }),
+        None => detect_label_column(&headers),
     };
 
     let feature_idx: Vec<usize> = (0..headers.len())
@@ -617,12 +629,7 @@ fn load_parquet(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
 
     let label_idx = match &opts.label_column {
         Some(name) => headers.iter().position(|h| h.eq_ignore_ascii_case(name)),
-        None => headers.iter().position(|h| {
-            matches!(
-                h.to_ascii_lowercase().as_str(),
-                "label" | "labels" | "target" | "class" | "y" | "species" | "category"
-            )
-        }),
+        None => detect_label_column(&headers),
     };
 
     let mut data: Vec<f32> = Vec::new();
@@ -713,4 +720,158 @@ fn load_parquet(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         labels,
         label_names,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal NPY v1 buffer with the given descr/shape header fields.
+    fn npy_with_header(dict: &str, payload: &[u8]) -> Vec<u8> {
+        let mut header = dict.to_string();
+        header.push('\n');
+        let mut out = Vec::new();
+        out.extend_from_slice(b"\x93NUMPY");
+        out.push(1);
+        out.push(0);
+        out.extend_from_slice(&(header.len() as u16).to_le_bytes());
+        out.extend_from_slice(header.as_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[test]
+    fn descr_parsing_covers_all_supported_dtypes() {
+        for (descr, elem) in [
+            ("<f4", ElemType::F32),
+            ("<f8", ElemType::F64),
+            ("|i1", ElemType::I8),
+            ("|u1", ElemType::U8),
+            ("<i2", ElemType::I16),
+            ("<u2", ElemType::U16),
+            ("<i4", ElemType::I32),
+            ("<u4", ElemType::U32),
+            ("<i8", ElemType::I64),
+            ("<u8", ElemType::U64),
+            ("=f4", ElemType::F32),
+            ("f4", ElemType::F32), // no byte-order prefix
+        ] {
+            assert_eq!(parse_descr(descr).unwrap(), elem, "descr {}", descr);
+        }
+    }
+
+    #[test]
+    fn descr_rejects_big_endian_strings_and_unknowns() {
+        assert!(parse_descr(">f4").is_err());
+        assert!(parse_descr("<U16").is_err());
+        assert!(parse_descr("").is_err());
+    }
+
+    #[test]
+    fn shape_extraction_handles_tuples() {
+        let h = "{'descr': '<f4', 'fortran_order': False, 'shape': (3, 4), }";
+        assert_eq!(extract_shape(h).unwrap(), vec![3, 4]);
+        let h1 = "{'descr': '<f4', 'fortran_order': False, 'shape': (7,), }";
+        assert_eq!(extract_shape(h1).unwrap(), vec![7]);
+        let h3 = "{'shape': (2, 3, 4)}";
+        assert_eq!(extract_shape(h3).unwrap(), vec![2, 3, 4]);
+        assert!(extract_shape("{'shape': (a,)}").is_err());
+        assert!(extract_shape("{'no_shape': 1}").is_err());
+    }
+
+    #[test]
+    fn shape_to_2d_folds_trailing_dims() {
+        assert_eq!(shape_to_2d(&[10]).unwrap(), (10, 1));
+        assert_eq!(shape_to_2d(&[10, 4]).unwrap(), (10, 4));
+        assert_eq!(shape_to_2d(&[10, 2, 3]).unwrap(), (10, 6));
+        assert!(shape_to_2d(&[]).is_err());
+    }
+
+    #[test]
+    fn npy_header_version_2_uses_u32_length() {
+        let dict = "{'descr': '<f4', 'fortran_order': False, 'shape': (1, 1), }\n";
+        let mut out = Vec::new();
+        out.extend_from_slice(b"\x93NUMPY");
+        out.push(2);
+        out.push(0);
+        out.extend_from_slice(&(dict.len() as u32).to_le_bytes());
+        out.extend_from_slice(dict.as_bytes());
+        out.extend_from_slice(&1.0f32.to_le_bytes());
+        let h = parse_npy_header(&out).unwrap();
+        assert_eq!(h.elem, ElemType::F32);
+        assert_eq!(h.shape, vec![1, 1]);
+        assert_eq!(h.data_offset, 12 + dict.len());
+    }
+
+    #[test]
+    fn npy_header_rejects_bad_magic_and_version() {
+        assert!(parse_npy_header(b"NOPE").is_err());
+        let mut bad_ver = b"\x93NUMPY".to_vec();
+        bad_ver.extend_from_slice(&[9, 0, 0, 0]);
+        assert!(parse_npy_header(&bad_ver).is_err());
+    }
+
+    #[test]
+    fn npy_header_detects_fortran_order() {
+        let buf = npy_with_header(
+            "{'descr': '<f4', 'fortran_order': True, 'shape': (1, 1), }",
+            &1.0f32.to_le_bytes(),
+        );
+        assert!(parse_npy_header(&buf).unwrap().fortran_order);
+        let buf2 = npy_with_header(
+            "{'descr': '<f4', 'fortran_order': False, 'shape': (1, 1), }",
+            &1.0f32.to_le_bytes(),
+        );
+        assert!(!parse_npy_header(&buf2).unwrap().fortran_order);
+    }
+
+    #[test]
+    fn decode_rejects_truncated_payload() {
+        let buf = npy_with_header(
+            "{'descr': '<f4', 'fortran_order': False, 'shape': (4, 4), }",
+            &[0u8; 4], // 4 bytes instead of 64
+        );
+        assert!(decode_npy_as_f32(&buf).is_err());
+    }
+
+    #[test]
+    fn label_detection_prefers_strong_names_over_y() {
+        let h = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // "y" alone is accepted...
+        assert_eq!(detect_label_column(&h(&["a", "y", "b"])), Some(1));
+        // ...but never beats an explicit "label"/"target"/"class" column.
+        assert_eq!(detect_label_column(&h(&["x", "y", "label"])), Some(2));
+        assert_eq!(detect_label_column(&h(&["y", "TARGET"])), Some(1));
+        assert_eq!(detect_label_column(&h(&["Species", "y"])), Some(0));
+        assert_eq!(detect_label_column(&h(&["a", "b"])), None);
+    }
+
+    #[test]
+    fn labels_from_numeric_builds_sorted_vocabulary() {
+        let (ids, names) = labels_from_numeric(&[5.0, -1.0, 5.0, 2.0]);
+        assert_eq!(names, vec!["-1", "2", "5"]);
+        assert_eq!(ids, vec![2, 0, 2, 1]);
+    }
+
+    #[test]
+    fn idx_header_parsing_and_rejections() {
+        // Valid u8, 2 dims.
+        let mut buf = vec![0u8, 0, 0x08, 2];
+        buf.extend_from_slice(&3u32.to_be_bytes());
+        buf.extend_from_slice(&2u32.to_be_bytes());
+        buf.extend_from_slice(&[1, 2, 3, 4, 5, 6]);
+        let (elem, dims, off) = parse_idx_header(&buf).unwrap();
+        assert_eq!(elem, ElemType::U8);
+        assert_eq!(dims, vec![3, 2]);
+        assert_eq!(off, 12);
+
+        // Bad magic.
+        assert!(parse_idx_header(&[1, 2, 3, 4]).is_err());
+        // Unsupported dtype code.
+        assert!(parse_idx_header(&[0, 0, 0xFF, 1, 0, 0, 0, 1]).is_err());
+        // Multi-byte dtype rejected (big-endian payload).
+        assert!(parse_idx_header(&[0, 0, 0x0D, 1, 0, 0, 0, 1]).is_err());
+        // Truncated dims.
+        assert!(parse_idx_header(&[0, 0, 0x08, 2, 0, 0]).is_err());
+    }
 }

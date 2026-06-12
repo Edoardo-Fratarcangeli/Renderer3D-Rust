@@ -1,6 +1,9 @@
-// Builds instanced point-cloud batches (InstanceRaw) from projected points,
-// labels and the active filter. Output plugs straight into the existing
-// instanced mesh pipeline in state.rs.
+//! Builds instanced point-cloud batches ([`InstanceRaw`]) from projected
+//! points, labels and the active filter.
+//!
+//! Output plugs straight into the existing instanced mesh pipeline in
+//! `state.rs`: one [`PointCloudBatch`] per primitive shape, drawn with a
+//! single instanced draw call each.
 
 use cgmath::SquareMatrix;
 

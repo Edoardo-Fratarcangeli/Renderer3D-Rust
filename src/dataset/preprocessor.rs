@@ -1,8 +1,10 @@
-// 3D projection of the feature matrix (PCA), with a persistent disk cache so
-// large datasets are only projected once.
-//
-// The pipeline streams rows through Dataset::row(): the full feature matrix
-// is never duplicated in RAM, only the (n_rows x 3) result is materialized.
+//! 3D projection of the feature matrix (PCA), with a persistent disk cache
+//! so large datasets are only projected once.
+//!
+//! The pipeline streams rows through [`Dataset::row`]: the full feature
+//! matrix is never duplicated in RAM, only the `(n_rows, 3)` result is
+//! materialized. Cache keys ([`cache_key`]) include file size and mtime, so
+//! source edits invalidate stale entries automatically.
 
 use std::path::{Path, PathBuf};
 
@@ -326,4 +328,72 @@ pub fn load_projection_cache(path: &Path, expected_rows: usize) -> Result<Vec<[f
         points.push(p);
     }
     Ok(points)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn method_tags_are_distinct() {
+        assert_eq!(ProjectionMethod::Pca.tag(), "pca");
+        assert_eq!(ProjectionMethod::Direct.tag(), "direct");
+    }
+
+    #[test]
+    fn normalize_handles_empty_and_degenerate_clouds() {
+        let mut empty: Vec<[f32; 3]> = Vec::new();
+        normalize_points(&mut empty); // must not panic
+
+        // All-identical points: centered at origin, no NaNs from /0.
+        let mut same = vec![[2.0, 2.0, 2.0]; 4];
+        normalize_points(&mut same);
+        for p in &same {
+            assert_eq!(*p, [0.0, 0.0, 0.0]);
+        }
+    }
+
+    #[test]
+    fn normalize_fills_the_view_cube() {
+        let mut pts = vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.5, 0.0]];
+        normalize_points(&mut pts);
+        let max = pts
+            .iter()
+            .flat_map(|p| p.iter())
+            .fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((max - VIEW_HALF_EXTENT).abs() < 1e-3);
+    }
+
+    #[test]
+    fn cache_load_rejects_corrupt_files() {
+        let dir = std::env::temp_dir().join(format!("r3d_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Too small.
+        let p1 = dir.join("small.proj");
+        std::fs::write(&p1, [1, 2, 3]).unwrap();
+        assert!(load_projection_cache(&p1, 1).is_err());
+
+        // Row-count mismatch with the requesting dataset.
+        let p2 = dir.join("mismatch.proj");
+        save_projection_cache(&p2, &[[1.0, 2.0, 3.0]]).unwrap();
+        assert!(load_projection_cache(&p2, 2).is_err());
+        // Truncated payload behind a valid count.
+        let mut bytes = std::fs::read(&p2).unwrap();
+        bytes.pop();
+        std::fs::write(&p2, bytes).unwrap();
+        assert!(load_projection_cache(&p2, 1).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cache_roundtrip_preserves_points() {
+        let dir = std::env::temp_dir().join(format!("r3d_rt_{}", std::process::id()));
+        let path = dir.join("ok.proj");
+        let points = vec![[1.5, -2.5, 3.25], [0.0, 0.5, -0.5]];
+        save_projection_cache(&path, &points).unwrap();
+        assert_eq!(load_projection_cache(&path, 2).unwrap(), points);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

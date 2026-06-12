@@ -1,4 +1,7 @@
-// Export of a (filtered) row subset to CSV, streaming row by row.
+//! Export of a (filtered) row subset to CSV, streaming row by row.
+//!
+//! The output re-imports through the CSV loader to exactly the same
+//! feature matrix and labels (verified by the integration tests).
 
 use std::io::Write;
 use std::path::Path;
@@ -60,5 +63,29 @@ fn escape_csv(s: &str) -> String {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integers_are_formatted_without_decimals() {
+        assert_eq!(format_f32(3.0), "3");
+        assert_eq!(format_f32(-7.0), "-7");
+        assert_eq!(format_f32(0.0), "0");
+        assert_eq!(format_f32(2.5), "2.5");
+        assert_eq!(format_f32(-0.125), "-0.125");
+        // Huge magnitudes fall back to float formatting.
+        assert!(format_f32(1e20).contains("100000000000000000000"));
+    }
+
+    #[test]
+    fn csv_escaping_quotes_only_when_needed() {
+        assert_eq!(escape_csv("plain"), "plain");
+        assert_eq!(escape_csv("with,comma"), "\"with,comma\"");
+        assert_eq!(escape_csv("with\"quote"), "\"with\"\"quote\"");
+        assert_eq!(escape_csv("multi\nline"), "\"multi\nline\"");
     }
 }

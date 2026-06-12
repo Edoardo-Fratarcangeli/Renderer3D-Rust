@@ -1,6 +1,7 @@
-// Synthetic benchmark datasets generated in-process, so the visualizer can
-// be exercised (and smoke-tested) without any files on disk. Deterministic:
-// the same seed always produces the same dataset.
+//! Synthetic benchmark datasets generated in-process, so the visualizer can
+//! be exercised (and smoke-tested) without any files on disk.
+//!
+//! Deterministic: the same seed always produces the same dataset.
 
 use super::{metadata::DatasetMetadata, Dataset, FeatureSource};
 
@@ -170,4 +171,40 @@ fn swiss_roll(points: usize, seed: u64) -> Dataset {
     }
     let names = (0..4).map(|i| format!("quartile_{}", i)).collect();
     finish("swiss_roll", 3, data, labels, names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rng_is_deterministic_and_in_range() {
+        let mut a = Rng::new(123);
+        let mut b = Rng::new(123);
+        for _ in 0..100 {
+            let v = a.next_f32();
+            assert_eq!(v, b.next_f32());
+            assert!((0.0..1.0).contains(&v));
+        }
+        // Zero seed must not lock the generator at zero.
+        let mut z = Rng::new(0);
+        assert_ne!(z.next_u64(), 0);
+    }
+
+    #[test]
+    fn gauss_is_roughly_centered() {
+        let mut rng = Rng::new(99);
+        let n = 5000;
+        let mean: f32 = (0..n).map(|_| rng.next_gauss()).sum::<f32>() / n as f32;
+        assert!(mean.abs() < 0.1, "gauss mean {} too far from 0", mean);
+    }
+
+    #[test]
+    fn names_round_trip_through_default_of() {
+        for name in BuiltinDataset::ALL_NAMES {
+            let kind = BuiltinDataset::default_of(name).unwrap();
+            assert_eq!(kind.name(), name);
+        }
+        assert!(BuiltinDataset::default_of("missing").is_none());
+    }
 }

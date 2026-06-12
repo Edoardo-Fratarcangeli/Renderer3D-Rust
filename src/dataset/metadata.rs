@@ -1,4 +1,4 @@
-// Dataset metadata, persisted as JSON next to the projection/index caches.
+//! Dataset metadata, persisted as JSON next to the projection/index caches.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -83,4 +83,21 @@ pub fn now_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn now_unix_is_recent() {
+        // Sanity check: after 2020-01-01 and not absurdly in the future.
+        let now = now_unix();
+        assert!(now > 1_577_836_800, "clock before 2020?");
+    }
+
+    #[test]
+    fn load_json_propagates_missing_file() {
+        assert!(DatasetMetadata::load_json(Path::new("/nonexistent/meta.json")).is_err());
+    }
 }

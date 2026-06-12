@@ -1,6 +1,15 @@
-// Dataset domain: loading, metadata, indexing, preprocessing and export of
-// ML datasets. This module is pure logic: it must never depend on egui/wgpu
-// so it stays unit-testable and reusable outside the UI.
+//! Dataset domain: loading, metadata, indexing, preprocessing and export of
+//! ML datasets.
+//!
+//! This module is pure logic: it must never depend on egui/wgpu so it stays
+//! unit-testable and reusable outside the UI.
+//!
+//! - [`loader`] — multi-format import (NPY/NPZ/CSV/IDX, optional Parquet)
+//! - [`metadata`] — JSON-persisted dataset description
+//! - [`index`] — label index + filter/search evaluation
+//! - [`preprocessor`] — 3D projection (PCA) with a disk cache
+//! - [`export`] — CSV export of filtered subsets
+//! - [`builtin`] — deterministic synthetic benchmark generators
 
 pub mod builtin;
 pub mod export;
@@ -200,4 +209,84 @@ pub fn fnv1a64(parts: &[&[u8]]) -> u64 {
         }
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elem_type_sizes() {
+        assert_eq!(ElemType::I8.size(), 1);
+        assert_eq!(ElemType::U8.size(), 1);
+        assert_eq!(ElemType::I16.size(), 2);
+        assert_eq!(ElemType::U16.size(), 2);
+        assert_eq!(ElemType::F32.size(), 4);
+        assert_eq!(ElemType::I32.size(), 4);
+        assert_eq!(ElemType::U32.size(), 4);
+        assert_eq!(ElemType::F64.size(), 8);
+        assert_eq!(ElemType::I64.size(), 8);
+        assert_eq!(ElemType::U64.size(), 8);
+    }
+
+    #[test]
+    fn elem_type_decodes_every_variant() {
+        let check = |elem: ElemType, bytes: &[u8], expected: f32| {
+            assert_eq!(elem.read_f32(bytes, 0), expected, "{:?}", elem);
+        };
+        check(ElemType::F32, &1.5f32.to_le_bytes(), 1.5);
+        check(ElemType::F64, &(-2.25f64).to_le_bytes(), -2.25);
+        check(ElemType::I8, &(-7i8).to_le_bytes(), -7.0);
+        check(ElemType::U8, &200u8.to_le_bytes(), 200.0);
+        check(ElemType::I16, &(-300i16).to_le_bytes(), -300.0);
+        check(ElemType::U16, &60000u16.to_le_bytes(), 60000.0);
+        check(ElemType::I32, &(-100000i32).to_le_bytes(), -100000.0);
+        check(ElemType::U32, &100000u32.to_le_bytes(), 100000.0);
+        check(ElemType::I64, &(-5i64).to_le_bytes(), -5.0);
+        check(ElemType::U64, &5u64.to_le_bytes(), 5.0);
+    }
+
+    #[test]
+    fn elem_type_reads_at_offset() {
+        let mut bytes = vec![0u8; 8];
+        bytes[4..8].copy_from_slice(&42.0f32.to_le_bytes());
+        assert_eq!(ElemType::F32.read_f32(&bytes, 4), 42.0);
+    }
+
+    #[test]
+    fn fnv1a64_is_stable_and_order_sensitive() {
+        let a = fnv1a64(&[b"hello", b"world"]);
+        assert_eq!(a, fnv1a64(&[b"hello", b"world"]));
+        assert_ne!(a, fnv1a64(&[b"world", b"hello"]));
+        assert_ne!(a, fnv1a64(&[b"helloworldX"]));
+        // Concatenation boundary does not matter (it hashes the byte stream).
+        assert_eq!(a, fnv1a64(&[b"helloworld"]));
+    }
+
+    #[test]
+    fn error_display_variants() {
+        let io: DatasetError = std::io::Error::new(std::io::ErrorKind::Other, "boom").into();
+        assert!(io.to_string().contains("I/O error"));
+        assert!(DatasetError::Format("x".into()).to_string().contains("format error"));
+        assert!(DatasetError::Unsupported("y".into())
+            .to_string()
+            .contains("unsupported"));
+        assert!(DatasetError::InvalidQuery("z".into())
+            .to_string()
+            .contains("invalid query"));
+    }
+
+    #[test]
+    fn dataset_debug_is_compact() {
+        let ds = Dataset {
+            metadata: DatasetMetadata::new("dbg", "builtin", 2, 2),
+            source: FeatureSource::InMemory(vec![1.0, 2.0, 3.0, 4.0]),
+            labels: vec![0, 0],
+            label_names: vec!["only".into()],
+        };
+        let s = format!("{:?}", ds);
+        assert!(s.contains("dbg") && s.contains("n_rows"));
+        // The raw data must not be dumped.
+        assert!(!s.contains("1.0"));
+    }
 }
