@@ -4,6 +4,15 @@ A modern, high-performance 3D renderer written in Rust using `wgpu` (WebGPU) and
 
 ## 🚀 Features
 
+- **ML Dataset 3D Visualizer** (📊 button in the toolbar):
+  - **Polished tabbed window**: opens centered on screen with five tabs (Import / Explore / Labels / View / Export), a persistent dataset summary strip, colored status messages and friendly empty states.
+  - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
+  - **3D point cloud**: instanced rendering with deterministic per-label colors and optional per-label shapes; PCA (or direct-axis) projection computed on a background thread.
+  - **Persistent caches**: metadata JSON, label index and 3D projection cached under `.r3d_cache/`, keyed by file content fingerprint.
+  - **Table, filters & search**: virtual-scrolling table (click a row to focus the camera), per-label visibility toggles, query search (`substring`, `row:N`, `c0 > 0.5`), label distribution chart.
+  - **Export**: writes the currently filtered subset to CSV.
+  - See [docs/ML_VISUALIZER.md](docs/ML_VISUALIZER.md) for the architecture.
+
 - **Instanced Rendering**: Efficiently renders multiple instances of objects with low overhead.
 - **WGPU Graphics**: Uses the modern `wgpu` crate for cross-platform, type-safe graphics programming.
 - **Advanced Selection System**:
@@ -46,7 +55,14 @@ The project includes a robust testing suite (GUI and integration tests) and a de
 
 - **Integrated Tests**:
   - `tests/scene/`: Logic for picking, selection, and object defaults.
-  - `tests/ui/`: UI layout, icons, and default configuration verification.
+  - `tests/ui/`: UI layout, icons, defaults, plus **headless egui tests** that drive the real Dataset Visualizer window (every tab, background imports, filters) without a GPU.
+  - `tests/dataset/`: loaders for every format, index/filter/search, PCA + caches, export roundtrips, end-to-end smoke tests and `#[ignore]` benchmarks.
+  - `tests/visualization/`: color palette, geometry policy and instanced point-cloud batches.
+  - In-module unit tests (`cargo test --lib`) cover private parsing/format helpers.
+- **Coverage**: measured with [`cargo llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
+  ```bash
+  cargo llvm-cov --tests --summary-only
+  ```
 - **Test Manager**: A Python-based GUI (`tests/test_manager.py`) allows you to select, run, and review test results with detailed summary reports.
 
 ## 📂 Project Structure

@@ -131,6 +131,10 @@ pub struct State {
     pub redo_stack: Vec<UndoCommand>,
 
     pub should_focus_name: bool,
+
+    // ML Dataset visualizer
+    pub dataset_view: crate::ui::DatasetView,
+    dataset_point_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
 }
 
 impl State {
@@ -447,6 +451,8 @@ impl State {
             normal_arrow_mesh,
             last_click_time: std::time::Instant::now(),
             should_focus_name: false,
+            dataset_view: crate::ui::DatasetView::new(),
+            dataset_point_batches: Vec::new(),
         }
     }
 
@@ -928,6 +934,7 @@ impl State {
         let mut action_close_editor = false;
         let mut action_delete_obj_id = None;
         let mut action_confirm_edit = false;
+        let mut dataset_action = crate::ui::DatasetAction::None;
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             // Because we can't easily borrow fields disjointly multiple times in complex closure,
@@ -937,18 +944,26 @@ impl State {
             egui::Area::new("add_obj_area".into())
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
                 .show(ctx, |ui| {
-                    if ui.button("➕ New Object").clicked() {
-                        let id = self.next_id;
-                        let default_obj = SceneObject::new(
-                            id,
-                            format!("Object {}", id),
-                            [0.0, 0.0, 0.0],
-                            GeometryType::Cube,
-                        );
-                        self.draft_object = Some(default_obj);
-                        self.should_focus_name = true;
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("➕ New Object").clicked() {
+                            let id = self.next_id;
+                            let default_obj = SceneObject::new(
+                                id,
+                                format!("Object {}", id),
+                                [0.0, 0.0, 0.0],
+                                GeometryType::Cube,
+                            );
+                            self.draft_object = Some(default_obj);
+                            self.should_focus_name = true;
+                        }
+                        if ui.button("📊 Dataset").clicked() {
+                            self.dataset_view.show_window = !self.dataset_view.show_window;
+                        }
+                    });
                 });
+
+            // Dataset visualizer window (import, table, filters, search, export)
+            dataset_action = self.dataset_view.show(ctx);
 
             // Top Right Panel: Settings
             egui::Window::new("Settings")
@@ -1678,6 +1693,31 @@ impl State {
             }
         }
 
+        if let crate::ui::DatasetAction::FocusPoint(p) = dataset_action {
+            self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
+
+        // Rebuild dataset point-cloud instance buffers only when the visible
+        // selection / settings changed.
+        if self.dataset_view.take_render_dirty() {
+            self.dataset_point_batches.clear();
+            let result = self.dataset_view.build_point_cloud();
+            for batch in result.batches {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Dataset Point Instance Buffer"),
+                        contents: bytemuck::cast_slice(&batch.instances),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                self.dataset_point_batches.push((
+                    batch.geometry,
+                    buffer,
+                    batch.instances.len() as u32,
+                ));
+            }
+        }
+
         // Editor Actions
         if let Some(id) = action_edit_obj_id {
             self.editing_obj_id = Some(id);
@@ -1896,6 +1936,21 @@ impl State {
                     _ => &self.cube_mesh,
                 };
 
+                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, instance_buf.slice(..));
+                render_pass
+                    .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..mesh.num_indices, 0, 0..*count);
+            }
+
+            // Draw Dataset Point Cloud (instanced, one batch per geometry)
+            for (geo_type, instance_buf, count) in &self.dataset_point_batches {
+                let mesh = match geo_type {
+                    GeometryType::Cube => &self.cube_mesh,
+                    GeometryType::Sphere => &self.sphere_mesh,
+                    GeometryType::Plane => &self.plane_mesh,
+                    _ => &self.sphere_mesh,
+                };
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, instance_buf.slice(..));
                 render_pass
