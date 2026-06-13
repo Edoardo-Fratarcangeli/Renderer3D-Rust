@@ -25,6 +25,7 @@ egui UI.
 ## 🚀 Features
 
 - **Solids Import** (🧊 button in the toolbar):
+  - **Import 3D models**: STL, OBJ and glTF/GLB solid meshes load on a background thread and appear as selectable objects in the scene (auto-scaled and centered). STEP (`.step`/`.stp`) is recognised but not yet tessellated.
   - **Paste anything**: geometry DSL, XYZ point lists or JSON — auto-detected and parsed into a layer.
   - **Import files**: JSON, XYZ and generic text/DSL files; parsing runs on a background thread. (Tabular CSV/Excel data import now lives in the Dataset window.)
   - **Layers**: every import is a named layer with visibility toggle, camera focus (🎯), removal and a distinct default color; per-record colors/rotations/scales/labels supported everywhere.

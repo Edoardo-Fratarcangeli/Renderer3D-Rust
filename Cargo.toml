@@ -21,6 +21,9 @@ csv = "1.3"                                            # Streaming CSV loader
 zip = { version = "2", default-features = false, features = ["deflate"] } # NPZ archives
 parquet = { version = "53", optional = true }          # Optional Parquet loader
 calamine = "0.26"                                      # Excel (xlsx/xls/ods) geometry tables
+stl_io = "0.3"                                         # STL solid model import
+tobj = "4.0"                                           # Wavefront OBJ import
+gltf = "1.4"                                           # glTF / GLB import
 chrono = "0.4.43"
 resvg = "0.47.0"
 usvg = "0.47.0"

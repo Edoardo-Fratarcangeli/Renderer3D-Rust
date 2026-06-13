@@ -41,6 +41,16 @@ pub struct MeshBuffers {
     pub num_indices: u32,
 }
 
+/// GPU buffers + CPU geometry for an imported 3D model. Unlike the built-in
+/// [`MeshBuffers`] (16-bit indices), imported meshes use 32-bit indices. The
+/// CPU [`crate::mesh::MeshData`] is retained for ray-pick selection.
+pub struct CustomMesh {
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    pub num_indices: u32,
+    pub data: std::sync::Arc<crate::mesh::MeshData>,
+}
+
 #[derive(Clone)]
 pub enum UndoCommand {
     Add(SceneObject),
@@ -139,6 +149,10 @@ pub struct State {
     // Universal geometry import (layers of instanced shapes)
     pub geometry_view: crate::ui::geometry_panel::GeometryView,
     geometry_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
+
+    // Imported 3D solid models (STL/OBJ/glTF), keyed by scene-object id.
+    pub custom_meshes: std::collections::HashMap<usize, CustomMesh>,
+    mesh_worker: Option<std::sync::mpsc::Receiver<Result<(crate::mesh::MeshData, String), String>>>,
     // Low-poly sphere used for instanced batches above LOD_SPHERE_THRESHOLD
     // instances, so huge point clouds stay fast.
     sphere_lod_mesh: MeshBuffers,
@@ -478,8 +492,114 @@ impl State {
             dataset_point_batches: Vec::new(),
             geometry_view: crate::ui::geometry_panel::GeometryView::new(),
             geometry_batches: Vec::new(),
+            custom_meshes: std::collections::HashMap::new(),
+            mesh_worker: None,
             sphere_lod_mesh,
         }
+    }
+
+    /// Spawn a worker thread that loads a 3D model file off the UI thread.
+    pub fn spawn_mesh_load(&mut self, path: std::path::PathBuf) {
+        self.geometry_view.mesh_loading = true;
+        self.geometry_view.status = Some(crate::ui::StatusMessage::info(format!(
+            "Loading {} ...",
+            path.display()
+        )));
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.mesh_worker = Some(rx);
+        std::thread::spawn(move || {
+            let label = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("model")
+                .to_string();
+            let result = crate::mesh::MeshData::load(&path)
+                .map(|mesh| (mesh, label))
+                .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Drain the mesh-load worker, adding the model to the scene on success.
+    fn poll_mesh_worker(&mut self) {
+        let Some(rx) = &self.mesh_worker else { return };
+        match rx.try_recv() {
+            Ok(Ok((mesh, label))) => {
+                self.mesh_worker = None;
+                self.geometry_view.mesh_loading = false;
+                self.add_mesh_object(mesh, label);
+            }
+            Ok(Err(msg)) => {
+                self.mesh_worker = None;
+                self.geometry_view.mesh_loading = false;
+                self.geometry_view.status =
+                    Some(crate::ui::StatusMessage::error(format!("Import failed: {}", msg)));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.mesh_worker = None;
+                self.geometry_view.mesh_loading = false;
+                self.geometry_view.status =
+                    Some(crate::ui::StatusMessage::error("Import worker died unexpectedly"));
+            }
+        }
+    }
+
+    /// Upload a loaded mesh to the GPU and add it as a selected scene object,
+    /// auto-scaled and centered at the origin so it is immediately visible.
+    pub fn add_mesh_object(&mut self, mesh: crate::mesh::MeshData, label: String) {
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Custom Mesh Vertex Buffer"),
+                contents: bytemuck::cast_slice(&mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Custom Mesh Index Buffer"),
+                contents: bytemuck::cast_slice(&mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+        let num_indices = mesh.indices.len() as u32;
+        let tri_count = mesh.triangle_count();
+
+        // Fit the model into roughly a 6-unit box centered at the origin.
+        let extent = mesh.max_extent();
+        let scale = if extent > 1e-6 { 6.0 / extent } else { 1.0 };
+        let center = mesh.center();
+
+        let id = self.next_id;
+        self.next_id += 1;
+
+        for obj in &mut self.objects {
+            obj.selected = false;
+        }
+        let mut obj = SceneObject::new(id, label, [0.0, 0.0, 0.0], GeometryType::Mesh);
+        obj.instance.scale = cgmath::Vector3::new(scale, scale, scale);
+        obj.instance.position =
+            cgmath::Vector3::new(-center[0] * scale, -center[1] * scale, -center[2] * scale);
+        obj.selected = true;
+
+        self.custom_meshes.insert(
+            id,
+            CustomMesh {
+                vertex_buffer,
+                index_buffer,
+                num_indices,
+                data: std::sync::Arc::new(mesh),
+            },
+        );
+        self.push_undo(UndoCommand::Add(obj.clone()));
+        self.objects.push(obj);
+
+        // Center the camera on the freshly imported model.
+        self.camera_target = cgmath::Point3::new(0.0, 0.0, 0.0);
+        self.geometry_view.status = Some(crate::ui::StatusMessage::success(format!(
+            "Imported model with {} triangles",
+            tri_count
+        )));
     }
 
     pub fn push_undo(&mut self, cmd: UndoCommand) {
@@ -795,7 +915,16 @@ impl State {
             let local_origin = (inv_model * ray_origin.extend(1.0)).truncate();
             let local_dir = (inv_model * ray_dir.extend(0.0)).truncate().normalize();
 
-            if let Some(t) = self.intersect_primitive(obj.geometry_type, local_origin, local_dir) {
+            // Imported meshes ray-test against their triangles; primitives use
+            // their analytic intersector.
+            let hit = if obj.geometry_type == GeometryType::Mesh {
+                self.custom_meshes
+                    .get(&obj.id)
+                    .and_then(|m| m.data.ray_hit(local_origin, local_dir))
+            } else {
+                self.intersect_primitive(obj.geometry_type, local_origin, local_dir)
+            };
+            if let Some(t) = hit {
                 let world_dir = (model * local_dir.extend(0.0)).truncate();
                 let world_t = t * world_dir.magnitude();
 
@@ -924,6 +1053,9 @@ impl State {
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // Drain any in-flight 3D-model import before drawing this frame.
+        self.poll_mesh_worker();
+
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -1819,6 +1951,11 @@ impl State {
             self.dataset_view.clear_dataset();
         }
 
+        // Kick off a 3D-model import requested from the Solids window.
+        if let Some(path) = self.geometry_view.take_mesh_request() {
+            self.spawn_mesh_load(path);
+        }
+
         // Rebuild geometry-layer instance buffers only when layers changed.
         if self.geometry_view.take_render_dirty() {
             self.geometry_batches.clear();
@@ -1957,6 +2094,30 @@ impl State {
             }
         }
 
+        // Imported 3D models: one draw per object (each has its own mesh), so
+        // build a single-instance buffer per visible mesh object up front to
+        // keep the buffers alive for the whole render pass.
+        let mesh_draws: Vec<(usize, wgpu::Buffer)> = self
+            .objects
+            .iter()
+            .filter(|o| {
+                o.visible
+                    && o.geometry_type == GeometryType::Mesh
+                    && self.custom_meshes.contains_key(&o.id)
+            })
+            .map(|o| {
+                let instance = [o.instance.to_raw_with_color(o.color, o.selected)];
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Custom Mesh Instance Buffer"),
+                        contents: bytemuck::cast_slice(&instance),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                (o.id, buffer)
+            })
+            .collect();
+
         // Prepare Normal Arrow Buffer outside render pass to avoid lifetime issues
         let normal_arrows: Vec<InstanceRaw> = self
             .objects
@@ -2079,6 +2240,19 @@ impl State {
                 render_pass
                     .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..mesh.num_indices, 0, 0..*count);
+            }
+
+            // Draw imported 3D models (32-bit indices, one instance each).
+            for (id, instance_buf) in &mesh_draws {
+                if let Some(custom) = self.custom_meshes.get(id) {
+                    render_pass.set_vertex_buffer(0, custom.vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, instance_buf.slice(..));
+                    render_pass.set_index_buffer(
+                        custom.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    render_pass.draw_indexed(0..custom.num_indices, 0, 0..1);
+                }
             }
 
             // Draw bulk instanced batches: dataset point cloud + geometry

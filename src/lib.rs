@@ -5,6 +5,7 @@ pub mod logger;
 pub mod camera;
 pub mod dataset;
 pub mod geometry;
+pub mod mesh;
 pub mod model;
 pub mod scene;
 pub mod primitives;

@@ -7,6 +7,10 @@ pub enum GeometryType {
     Sphere,
     Plane,
     Line, // For adding segment geometry later
+    /// An imported 3D solid model (STL/OBJ/glTF). The mesh data and GPU
+    /// buffers live in `State::custom_meshes`, keyed by the object id, so this
+    /// variant stays `Copy`.
+    Mesh,
 }
 
 #[derive(Debug, Clone, PartialEq)]
