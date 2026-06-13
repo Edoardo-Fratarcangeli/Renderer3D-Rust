@@ -13,10 +13,14 @@
 //!   [`export_panel`]).
 //! - Panels are plain functions over explicit state, so they can be driven
 //!   headless (no GPU) by the integration tests in `tests/ui`.
+//!
+//! The universal geometry import window lives in [`geometry_panel`] and
+//! follows the same architecture (worker thread + dirty flag).
 
 pub mod dataset_table;
 pub mod distribution_chart;
 pub mod export_panel;
+pub mod geometry_panel;
 pub mod import_dialog;
 pub mod label_filter;
 pub mod search_panel;

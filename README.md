@@ -1,9 +1,35 @@
 # Rust 3D Renderer
 
-A modern, high-performance 3D renderer written in Rust using `wgpu` (WebGPU) and `egui` for the user interface. This project demonstrates instanced rendering, Euler angle rotation, a CAD-like camera control system, and a highly polished, interactive UI.
+A **complete, high-performance 3D renderer** written in Rust with `wgpu`
+(WebGPU) and `egui`. It visualizes **very large numbers of geometries
+spatially and fast** — grouped into instanced batches, one draw call per
+primitive shape, with automatic LOD meshes for huge sphere clouds — and it
+**imports those geometries from many worlds**:
+
+| Source | How |
+|--------|-----|
+| ✍️ Plain geometry strings | paste a DSL like `cube 0 0 0 2 #ff8800` straight into the app |
+| 📊 Excel tables | `.xlsx` / `.xlsm` / `.xls` / `.ods`, header-mapped columns |
+| 🗃 CSV tables | same header mapping as Excel |
+| 🧾 JSON documents | arrays of geometry objects, tolerant field names |
+| 📄 Text files of many kinds | `.txt` / `.geo` / `.dsl` / `.xyz`, DSL-vs-points auto-detected |
+| 🤖 ML data blocks | NPY / NPZ / CSV / Parquet / IDX datasets with labels, PCA, filters |
+
+→ Format reference: [docs/GEOMETRY_IMPORT.md](docs/GEOMETRY_IMPORT.md) ·
+ML pipeline: [docs/ML_VISUALIZER.md](docs/ML_VISUALIZER.md)
+
+On top of that it is a full interactive scene editor: instanced rendering,
+Euler-angle rotation, a CAD-like camera, picking, undo/redo and a polished
+egui UI.
 
 ## 🚀 Features
 
+- **Universal Geometry Import** (📦 button in the toolbar):
+  - **Paste anything**: geometry DSL, XYZ point lists or JSON — auto-detected and parsed into a layer.
+  - **Import files**: CSV, Excel (first sheet, via `calamine`), JSON, XYZ and generic text files; parsing runs on a background thread.
+  - **Layers**: every import is a named layer with visibility toggle, camera focus (🎯), removal and a distinct default color; per-record colors/rotations/scales/labels supported everywhere.
+  - **Fast at scale**: records collapse into one instanced batch per shape (a million geometries ≈ 3 draw calls); buffers rebuild only when layers change; sphere batches >2000 instances switch to a low-poly LOD mesh.
+  - Clear errors with line numbers (`line 2: unknown shape 'spherex'`).
 - **ML Dataset 3D Visualizer** (📊 button in the toolbar):
   - **Polished tabbed window**: opens centered on screen with five tabs (Import / Explore / Labels / View / Export), a persistent dataset summary strip, colored status messages and friendly empty states.
   - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
@@ -57,6 +83,7 @@ The project includes a robust testing suite (GUI and integration tests) and a de
   - `tests/scene/`: Logic for picking, selection, and object defaults.
   - `tests/ui/`: UI layout, icons, defaults, plus **headless egui tests** that drive the real Dataset Visualizer window (every tab, background imports, filters) without a GPU.
   - `tests/dataset/`: loaders for every format, index/filter/search, PCA + caches, export roundtrips, end-to-end smoke tests and `#[ignore]` benchmarks.
+  - `tests/geometry_import/`: real CSV/Excel/JSON/XYZ/TXT files round-tripped through the universal geometry importer, batch grouping, error paths and a 500k-record benchmark.
   - `tests/visualization/`: color palette, geometry policy and instanced point-cloud batches.
   - In-module unit tests (`cargo test --lib`) cover private parsing/format helpers.
 - **Coverage**: measured with [`cargo llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
