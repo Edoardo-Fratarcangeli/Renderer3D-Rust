@@ -80,6 +80,43 @@ fn csv_streams_rows_and_detects_label_column() {
 }
 
 #[test]
+fn excel_loads_features_and_detects_label_column() {
+    use rust_xlsxwriter::Workbook;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("data.xlsx");
+
+    let mut workbook = Workbook::new();
+    let sheet = workbook.add_worksheet();
+    for (col, header) in ["a", "b", "label"].iter().enumerate() {
+        sheet.write_string(0, col as u16, *header).unwrap();
+    }
+    let rows: [(f64, f64, &str); 4] = [
+        (1.0, 2.0, "x"),
+        (3.0, 4.0, "y"),
+        (5.0, 6.0, "x"),
+        (7.0, 8.0, "y"),
+    ];
+    for (i, (a, b, label)) in rows.iter().enumerate() {
+        let r = (i + 1) as u32;
+        sheet.write_number(r, 0, *a).unwrap();
+        sheet.write_number(r, 1, *b).unwrap();
+        sheet.write_string(r, 2, *label).unwrap();
+    }
+    workbook.save(&path).unwrap();
+
+    let ds = load(&path, &LoadOptions::default()).unwrap();
+    assert_eq!(ds.n_rows(), 4);
+    assert_eq!(ds.n_cols(), 2);
+    assert_eq!(ds.metadata.column_names, vec!["a", "b"]);
+    assert_eq!(ds.metadata.format, "excel");
+    assert_eq!(ds.metadata.label_column.as_deref(), Some("label"));
+    assert_eq!(ds.label_names, vec!["x", "y"]);
+    assert_eq!(ds.value(0, 0), 1.0);
+    assert_eq!(ds.value(3, 1), 8.0);
+}
+
+#[test]
 fn csv_reports_non_numeric_cells() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bad.csv");

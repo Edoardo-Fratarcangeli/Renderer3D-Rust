@@ -71,9 +71,9 @@ fn data_tabs_show_empty_state_without_dataset() {
 }
 
 #[test]
-fn builtin_import_lands_on_explore_tab_with_success_status() {
+fn builtin_import_lands_on_labels_tab_with_success_status() {
     let view = loaded_view();
-    assert_eq!(view.tab, DatasetTab::Explore);
+    assert_eq!(view.tab, DatasetTab::Labels);
     let status = view.import.status.as_ref().expect("status after import");
     assert_eq!(status.kind, StatusKind::Success);
     assert!(status.text.contains("blobs"));
@@ -128,7 +128,7 @@ fn file_import_runs_on_worker_thread_and_installs() {
         .unwrap_or_else(|| panic!("dataset installed; status = {:?}", view.import.status));
     assert_eq!(loaded.dataset.n_rows(), 3);
     assert_eq!(view.import.status.as_ref().unwrap().kind, StatusKind::Success);
-    // A frame after install renders the Explore tab with the table.
+    // A frame after install renders the landing (Labels) tab.
     run_frame(&ctx, &mut view);
 }
 
@@ -258,11 +258,12 @@ fn status_lines_and_spinner_render_in_every_kind() {
     let mut view = loaded_view();
     view.show_window = true;
 
-    // Search error banner on the Explore tab.
-    view.tab = DatasetTab::Explore;
+    // A bad search query still surfaces an error through recompute (the search
+    // box itself no longer has a tab; filtering lives behind the Labels tab).
     view.search_text = "row:bad".into();
     view.recompute_visible();
     assert!(view.search_error.is_some());
+    view.tab = DatasetTab::Labels;
     run_frame(&ctx, &mut view);
 
     // Export status, success then error.
@@ -280,8 +281,8 @@ fn status_lines_and_spinner_render_in_every_kind() {
     run_frame(&ctx, &mut view);
     view.import.loading = false;
 
-    // Highlighted table row renders the selected style.
-    view.tab = DatasetTab::Explore;
+    // Highlight a row and render the View tab.
+    view.tab = DatasetTab::View;
     view.search_text.clear();
     view.recompute_visible();
     view.settings.highlighted_row = view.visible_rows.first().copied();

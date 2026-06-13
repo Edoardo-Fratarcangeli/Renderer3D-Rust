@@ -26,8 +26,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
     ui.vertical_centered(|ui| {
         ui.label(egui::RichText::new("Import a dataset").heading());
         ui.label(
-            egui::RichText::new("NPY · NPZ · CSV · Parquet · IDX — large files are memory mapped")
-                .weak(),
+            egui::RichText::new(
+                "NPY · NPZ · CSV · Excel · Parquet · IDX — large files are memory mapped",
+            )
+            .weak(),
         );
     });
     ui.add_space(8.0);

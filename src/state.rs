@@ -147,6 +147,18 @@ pub struct State {
 /// Above this many instances in one batch, spheres use the low-poly mesh.
 pub const LOD_SPHERE_THRESHOLD: u32 = 2000;
 
+/// Small transparent icon button used by every row of the bottom object list
+/// (scene objects, imported datasets, …) so they share one look and one
+/// implementation instead of repeating the `Button`/`RichText` boilerplate.
+fn list_icon_button(ui: &mut egui::Ui, icon: &str, color: egui::Color32, hover: &str) -> bool {
+    ui.add(
+        egui::Button::new(egui::RichText::new(icon).color(color))
+            .fill(egui::Color32::TRANSPARENT),
+    )
+    .on_hover_text(hover)
+    .clicked()
+}
+
 impl State {
     pub async fn new(window: Window) -> Self {
         let window = std::sync::Arc::new(window);
@@ -664,16 +676,16 @@ impl State {
             WindowEvent::MouseInput { state, button, .. } => {
                 match button {
                     MouseButton::Left => {
-                        self.is_drag_active = *state == ElementState::Pressed;
-                        // If clicking background (not on UI), close panels
                         if *state == ElementState::Pressed {
                             let is_over_ui = self.egui_state.egui_ctx().is_pointer_over_area()
                                 || self.egui_state.egui_ctx().wants_pointer_input();
 
-                            // Log for debugging if picking fails again
-                            // println!("Click at physical: {:?}, is_over_ui: {}", self.mouse_pos, is_over_ui);
-
+                            // Only begin an orbit drag (and run picking) when the
+                            // press lands on the 3D viewport. Clicking a button or
+                            // panel must never rotate the camera.
                             if !is_over_ui {
+                                self.is_drag_active = true;
+
                                 // Deselect panels
                                 self.show_add_panel = false;
                                 self.show_settings = false;
@@ -700,6 +712,9 @@ impl State {
                                     }
                                 }
                             }
+                        } else {
+                            // Releasing the button always ends any active drag.
+                            self.is_drag_active = false;
                         }
                     }
                     MouseButton::Middle => self.is_pan_active = *state == ElementState::Pressed,
@@ -950,6 +965,9 @@ impl State {
         let mut action_confirm_edit = false;
         let mut dataset_action = crate::ui::DatasetAction::None;
         let mut geometry_focus: Option<[f32; 3]> = None;
+        // Bottom-list actions for the imported dataset entry.
+        let mut dataset_focus: Option<[f32; 3]> = None;
+        let mut remove_dataset = false;
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             // Because we can't easily borrow fields disjointly multiple times in complex closure,
@@ -960,7 +978,7 @@ impl State {
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button("➕ New Object").clicked() {
+                        if ui.button("➕ Object").clicked() {
                             let id = self.next_id;
                             let default_obj = SceneObject::new(
                                 id,
@@ -974,7 +992,7 @@ impl State {
                         if ui.button("📊 Dataset").clicked() {
                             self.dataset_view.show_window = !self.dataset_view.show_window;
                         }
-                        if ui.button("📦 Geometry").clicked() {
+                        if ui.button("🧊 Solids").clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
                         }
                     });
@@ -1262,6 +1280,81 @@ impl State {
                                             for obj in &mut self.objects {
                                                 obj.selected = obj.id == id;
                                             }
+                                        }
+
+                                        // --- Imported dataset ---
+                                        // The dataset visualizer no longer owns
+                                        // an "Explore" list; its imported data
+                                        // lives here, in the same list as every
+                                        // other object.
+                                        let dataset_entry =
+                                            self.dataset_view.loaded.as_ref().map(|l| {
+                                                (
+                                                    l.dataset.metadata.name.clone(),
+                                                    l.dataset.n_rows(),
+                                                )
+                                            });
+                                        if let Some((name, n_rows)) = dataset_entry {
+                                            let visible = self.dataset_view.visible;
+                                            let centroid = self.dataset_view.centroid();
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!("📊 {}", name))
+                                                        .strong()
+                                                        .size(14.0),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "({} rows)",
+                                                        n_rows
+                                                    ))
+                                                    .weak(),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🗑",
+                                                            egui::Color32::from_rgb(255, 100, 100),
+                                                            "Remove dataset",
+                                                        ) {
+                                                            remove_dataset = true;
+                                                        }
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🎯",
+                                                            ui.visuals().text_color(),
+                                                            "Focus camera on dataset",
+                                                        ) {
+                                                            dataset_focus = centroid;
+                                                        }
+                                                        let (vis_icon, vis_color) = if visible {
+                                                            (
+                                                                "👁",
+                                                                egui::Color32::from_rgb(
+                                                                    100, 255, 100,
+                                                                ),
+                                                            )
+                                                        } else {
+                                                            (
+                                                                "🕶",
+                                                                egui::Color32::from_rgb(
+                                                                    255, 100, 100,
+                                                                ),
+                                                            )
+                                                        };
+                                                        if list_icon_button(
+                                                            ui,
+                                                            vis_icon,
+                                                            vis_color,
+                                                            "Visibility",
+                                                        ) {
+                                                            self.dataset_view.set_visible(!visible);
+                                                        }
+                                                    },
+                                                );
+                                            });
                                         }
                                     });
                             });
@@ -1718,6 +1811,12 @@ impl State {
         }
         if let Some(p) = geometry_focus {
             self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
+        if let Some(p) = dataset_focus {
+            self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
+        if remove_dataset {
+            self.dataset_view.clear_dataset();
         }
 
         // Rebuild geometry-layer instance buffers only when layers changed.

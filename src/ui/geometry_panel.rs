@@ -156,7 +156,7 @@ impl GeometryView {
         let mut focus = None;
         let mut open = true;
         let screen_center = ctx.screen_rect().center();
-        egui::Window::new("📦 Geometry Import")
+        egui::Window::new("🧊 Solids Import")
             .open(&mut open)
             .default_size([460.0, 480.0])
             .pivot(egui::Align2::CENTER_CENTER)
@@ -207,16 +207,16 @@ impl GeometryView {
         // --- File import ---
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new("Import a file").heading());
-            ui.label(
-                egui::RichText::new("CSV · Excel (xlsx/xls/ods) · JSON · XYZ · TXT").weak(),
-            );
+            // Tabular data (CSV/Excel) lives in the Dataset window now; Solids
+            // covers geometry descriptions and (soon) 3D mesh formats.
+            ui.label(egui::RichText::new("JSON · XYZ · TXT (DSL)").weak());
         });
         ui.horizontal(|ui| {
             ui.label("File");
             ui.add(
                 egui::TextEdit::singleline(&mut self.path_text)
                     .desired_width(f32::INFINITY)
-                    .hint_text("path/to/geometries.xlsx"),
+                    .hint_text("path/to/geometries.json"),
             );
         });
         ui.vertical_centered(|ui| {

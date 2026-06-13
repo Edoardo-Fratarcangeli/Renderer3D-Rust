@@ -46,6 +46,7 @@ pub fn load(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         "npy" => load_npy(path, opts),
         "npz" => load_npz(path, opts),
         "csv" => load_csv(path, opts),
+        "xlsx" | "xlsm" | "xls" | "ods" => load_excel(path, opts),
         "idx" | "idx3-ubyte" | "idx1-ubyte" | "ubyte" => load_idx(path, opts),
         #[cfg(feature = "parquet-support")]
         "parquet" => load_parquet(path, opts),
@@ -474,7 +475,138 @@ fn load_csv(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
             label_strs.push(record.get(li).unwrap_or("").trim().to_string());
         }
     }
-    let n_rows = data.len() / n_cols;
+
+    finish_table_dataset(
+        path,
+        "csv",
+        &headers,
+        &feature_idx,
+        label_idx,
+        data,
+        label_strs,
+    )
+}
+
+/// Read a tabular Excel/ODS workbook (first sheet) into a dataset.
+///
+/// Shares the header -> feature/label resolution and metadata construction
+/// with [`load_csv`] via [`finish_table_dataset`]; only the cell reading
+/// differs.
+fn load_excel(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
+    use calamine::{open_workbook_auto, Data, Reader};
+
+    fn cell_to_string(d: &Data) -> String {
+        match d {
+            Data::Empty => String::new(),
+            // Keep integers free of the ".0" suffix Excel floats would add.
+            Data::Float(f) if f.fract() == 0.0 && f.abs() < 1e15 => format!("{}", *f as i64),
+            other => other.to_string().trim().to_string(),
+        }
+    }
+
+    let mut workbook = open_workbook_auto(path)
+        .map_err(|e| DatasetError::Format(format!("Excel open failed: {}", e)))?;
+    let sheet_name = workbook
+        .sheet_names()
+        .first()
+        .cloned()
+        .ok_or_else(|| DatasetError::Format("workbook has no sheets".into()))?;
+    let range = workbook
+        .worksheet_range(&sheet_name)
+        .map_err(|e| DatasetError::Format(format!("sheet '{}': {}", sheet_name, e)))?;
+
+    let mut rows_iter = range.rows();
+    let headers: Vec<String> = rows_iter
+        .next()
+        .ok_or_else(|| DatasetError::Format("sheet is empty".into()))?
+        .iter()
+        .map(|c| cell_to_string(c).trim().to_string())
+        .collect();
+
+    let label_idx = match &opts.label_column {
+        Some(name) => Some(
+            headers
+                .iter()
+                .position(|h| h.eq_ignore_ascii_case(name))
+                .ok_or_else(|| {
+                    DatasetError::Format(format!("label column '{}' not found", name))
+                })?,
+        ),
+        None => detect_label_column(&headers),
+    };
+    let feature_idx: Vec<usize> = (0..headers.len())
+        .filter(|i| Some(*i) != label_idx)
+        .collect();
+    if feature_idx.is_empty() {
+        return Err(DatasetError::Format("sheet has no feature columns".into()));
+    }
+
+    let mut data: Vec<f32> = Vec::new();
+    let mut label_strs: Vec<String> = Vec::new();
+    let mut row_no = 0usize;
+    for row in rows_iter {
+        let cells: Vec<String> = row.iter().map(cell_to_string).collect();
+        // Skip fully blank rows (trailing rows are common in spreadsheets).
+        if cells.iter().all(|c| c.is_empty()) {
+            continue;
+        }
+        if let Some(cap) = opts.max_rows {
+            if row_no >= cap {
+                break;
+            }
+        }
+        for &ci in &feature_idx {
+            let cell = cells.get(ci).map(String::as_str).unwrap_or("").trim();
+            let v = cell.parse::<f32>().map_err(|_| {
+                DatasetError::Format(format!(
+                    "row {}: non numeric value '{}' in column '{}'",
+                    row_no + 1,
+                    cell,
+                    headers[ci]
+                ))
+            })?;
+            data.push(v);
+        }
+        if let Some(li) = label_idx {
+            label_strs.push(
+                cells
+                    .get(li)
+                    .map(String::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+            );
+        }
+        row_no += 1;
+    }
+
+    finish_table_dataset(
+        path,
+        "excel",
+        &headers,
+        &feature_idx,
+        label_idx,
+        data,
+        label_strs,
+    )
+}
+
+/// Resolve labels/metadata for a tabular import and pack it into a [`Dataset`].
+///
+/// Shared by [`load_csv`] and [`load_excel`]; `data` is row-major features
+/// (feature columns only) and `label_strs` holds one raw label per row when a
+/// label column was detected.
+fn finish_table_dataset(
+    path: &Path,
+    format: &str,
+    headers: &[String],
+    feature_idx: &[usize],
+    label_idx: Option<usize>,
+    data: Vec<f32>,
+    label_strs: Vec<String>,
+) -> Result<Dataset> {
+    let n_cols = feature_idx.len();
+    let n_rows = if n_cols == 0 { 0 } else { data.len() / n_cols };
 
     let (labels, label_names, label_column) = if let Some(li) = label_idx {
         let mut names: Vec<String> = label_strs.clone();
@@ -491,7 +623,7 @@ fn load_csv(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         unlabeled(n_rows)
     };
 
-    let mut metadata = DatasetMetadata::new(&file_stem(path), "csv", n_rows, n_cols);
+    let mut metadata = DatasetMetadata::new(&file_stem(path), format, n_rows, n_cols);
     metadata.source_path = path.to_string_lossy().to_string();
     metadata.column_names = feature_idx.iter().map(|&i| headers[i].clone()).collect();
     metadata.label_column = label_column;

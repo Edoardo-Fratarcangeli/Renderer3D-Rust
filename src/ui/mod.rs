@@ -8,9 +8,11 @@
 //! - [`DatasetView`] is the single owner of all visualizer UI state and is
 //!   embedded in `State`. Each frame, `State` calls [`DatasetView::show`].
 //! - The window is organized in tabs ([`DatasetTab`]); each tab delegates to
-//!   a focused panel module ([`import_dialog`], [`dataset_table`],
-//!   [`label_filter`], [`search_panel`], [`distribution_chart`],
-//!   [`export_panel`]).
+//!   a focused panel module ([`import_dialog`], [`label_filter`],
+//!   [`distribution_chart`], [`export_panel`]). Imported datasets are listed
+//!   in the shared object list of the main window (see `state`), not in a
+//!   dedicated tab. [`dataset_table`] / [`search_panel`] remain as reusable
+//!   helpers (e.g. [`dataset_table::row_text`]).
 //! - Panels are plain functions over explicit state, so they can be driven
 //!   headless (no GPU) by the integration tests in `tests/ui`.
 //!
@@ -138,12 +140,14 @@ impl StatusMessage {
 }
 
 /// Tabs of the visualizer window.
+///
+/// The per-row table ("Explore") was removed: imported datasets now appear as
+/// a single entry in the shared object list at the bottom of the main window,
+/// alongside scene objects and solid layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatasetTab {
     /// File / benchmark import.
     Import,
-    /// Search bar + virtual-scrolling table.
-    Explore,
     /// Per-label visibility filters + distribution chart.
     Labels,
     /// Point size and shape policy.
@@ -154,9 +158,8 @@ pub enum DatasetTab {
 
 impl DatasetTab {
     /// All tabs in display order.
-    pub const ALL: [DatasetTab; 5] = [
+    pub const ALL: [DatasetTab; 4] = [
         DatasetTab::Import,
-        DatasetTab::Explore,
         DatasetTab::Labels,
         DatasetTab::View,
         DatasetTab::Export,
@@ -166,7 +169,6 @@ impl DatasetTab {
     pub fn title(&self) -> &'static str {
         match self {
             DatasetTab::Import => "📂 Import",
-            DatasetTab::Explore => "🔍 Explore",
             DatasetTab::Labels => "🏷 Labels",
             DatasetTab::View => "🎨 View",
             DatasetTab::Export => "💾 Export",
@@ -222,6 +224,9 @@ pub struct DatasetView {
     pub export: ExportState,
     /// The active dataset, if any.
     pub loaded: Option<LoadedDataset>,
+    /// Whether the loaded dataset's point cloud is drawn (toggled from the
+    /// shared object list at the bottom of the main window).
+    pub visible: bool,
 
     /// Label ids currently visible.
     pub enabled_labels: HashSet<u32>,
@@ -263,6 +268,7 @@ impl DatasetView {
                 ..Default::default()
             },
             loaded: None,
+            visible: true,
             enabled_labels: HashSet::new(),
             search_text: String::new(),
             search_error: None,
@@ -291,12 +297,13 @@ impl DatasetView {
     }
 
     /// Install a freshly loaded dataset, reset filters/selection and jump
-    /// to the Explore tab.
+    /// to the Labels tab.
     pub fn install(&mut self, loaded: LoadedDataset) {
         self.enabled_labels = (0..loaded.dataset.label_names.len() as u32).collect();
         self.search_text.clear();
         self.search_error = None;
         self.settings.highlighted_row = None;
+        self.visible = true;
         self.loaded = Some(loaded);
         self.recompute_visible();
         let l = self.loaded.as_ref().unwrap();
@@ -317,7 +324,44 @@ impl DatasetView {
                 ""
             },
         )));
-        self.tab = DatasetTab::Explore;
+        self.tab = DatasetTab::Labels;
+    }
+
+    /// Centroid of the loaded projection, used to focus the camera on the
+    /// dataset from the shared object list.
+    pub fn centroid(&self) -> Option<[f32; 3]> {
+        let points = &self.loaded.as_ref()?.projection.points;
+        if points.is_empty() {
+            return None;
+        }
+        let mut sum = [0.0f64; 3];
+        for p in points {
+            sum[0] += p[0] as f64;
+            sum[1] += p[1] as f64;
+            sum[2] += p[2] as f64;
+        }
+        let n = points.len() as f64;
+        Some([
+            (sum[0] / n) as f32,
+            (sum[1] / n) as f32,
+            (sum[2] / n) as f32,
+        ])
+    }
+
+    /// Remove the loaded dataset and clear the rendered point cloud.
+    pub fn clear_dataset(&mut self) {
+        self.loaded = None;
+        self.visible_rows.clear();
+        self.settings.highlighted_row = None;
+        self.render_dirty = true;
+    }
+
+    /// Toggle whether the dataset's point cloud is drawn.
+    pub fn set_visible(&mut self, visible: bool) {
+        if self.visible != visible {
+            self.visible = visible;
+            self.render_dirty = true;
+        }
     }
 
     /// Re-evaluate filter + search into [`Self::visible_rows`].
@@ -351,14 +395,19 @@ impl DatasetView {
         self.render_dirty = true;
     }
 
-    /// Build the instance batches for the current visible set.
+    /// Build the instance batches for the current visible set. Returns an
+    /// empty result when no dataset is loaded or the dataset is hidden.
     pub fn build_point_cloud(&mut self) -> point_cloud::PointCloudBuildResult {
+        let empty = || point_cloud::PointCloudBuildResult {
+            batches: Vec::new(),
+            rendered_points: 0,
+            downsampled: false,
+        };
+        if !self.visible {
+            return empty();
+        }
         let Some(loaded) = &self.loaded else {
-            return point_cloud::PointCloudBuildResult {
-                batches: Vec::new(),
-                rendered_points: 0,
-                downsampled: false,
-            };
+            return empty();
         };
         let result = point_cloud::build_instances(
             &loaded.projection.points,
@@ -391,11 +440,12 @@ impl DatasetView {
         let screen_center = ctx.screen_rect().center();
         egui::Window::new("📊 Dataset Visualizer")
             .open(&mut open)
-            .default_size([540.0, 520.0])
+            // Fixed footprint: the window must not grow when a dataset is
+            // loaded. Long content scrolls inside instead of widening.
+            .fixed_size([540.0, 520.0])
             // Spawn centered on screen; remains draggable afterwards.
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(screen_center)
-            .resizable(true)
             .show(ctx, |ui| {
                 action = self.contents(ui);
             });
@@ -407,7 +457,7 @@ impl DatasetView {
 
     /// Window body: tab bar, summary strip and the active tab's panel.
     fn contents(&mut self, ui: &mut egui::Ui) -> DatasetAction {
-        let mut action = DatasetAction::None;
+        let action = DatasetAction::None;
 
         // --- Tab bar (centered) ---
         ui.vertical_centered(|ui| {
@@ -458,23 +508,6 @@ impl DatasetView {
             DatasetTab::Import => {
                 if let Some(req) = import_dialog::show(ui, &mut self.import) {
                     self.start_import(req);
-                }
-            }
-            DatasetTab::Explore => {
-                if search_panel::show(ui, &mut self.search_text, &self.search_error) {
-                    self.recompute_visible();
-                }
-                ui.add_space(4.0);
-                let loaded = self.loaded.as_ref().unwrap();
-                if let Some(focus) = dataset_table::show(
-                    ui,
-                    &loaded.dataset,
-                    &loaded.projection.points,
-                    &self.visible_rows,
-                    &mut self.settings.highlighted_row,
-                ) {
-                    action = DatasetAction::FocusPoint(focus);
-                    self.render_dirty = true;
                 }
             }
             DatasetTab::Labels => {
@@ -711,7 +744,7 @@ mod tests {
 
     #[test]
     fn tab_metadata_is_consistent() {
-        assert_eq!(DatasetTab::ALL.len(), 5);
+        assert_eq!(DatasetTab::ALL.len(), 4);
         // Titles unique and non-empty.
         for (i, a) in DatasetTab::ALL.iter().enumerate() {
             assert!(!a.title().is_empty());
@@ -724,6 +757,22 @@ mod tests {
         for tab in &DatasetTab::ALL[1..] {
             assert!(tab.needs_dataset());
         }
+    }
+
+    #[test]
+    fn dataset_visibility_gates_the_point_cloud() {
+        let loaded = prepare_dataset(
+            builtin::generate(builtin::BuiltinDataset::default_of("blobs").unwrap(), 1),
+            ProjectionMethod::Direct,
+            None,
+        )
+        .unwrap();
+        let mut view = DatasetView::new();
+        view.install(loaded);
+        assert!(view.build_point_cloud().rendered_points > 0);
+        view.set_visible(false);
+        assert_eq!(view.build_point_cloud().rendered_points, 0);
+        assert!(view.centroid().is_some());
     }
 
     #[test]

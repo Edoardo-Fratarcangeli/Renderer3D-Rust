@@ -24,15 +24,15 @@ egui UI.
 
 ## 🚀 Features
 
-- **Universal Geometry Import** (📦 button in the toolbar):
+- **Solids Import** (🧊 button in the toolbar):
   - **Paste anything**: geometry DSL, XYZ point lists or JSON — auto-detected and parsed into a layer.
-  - **Import files**: CSV, Excel (first sheet, via `calamine`), JSON, XYZ and generic text files; parsing runs on a background thread.
+  - **Import files**: JSON, XYZ and generic text/DSL files; parsing runs on a background thread. (Tabular CSV/Excel data import now lives in the Dataset window.)
   - **Layers**: every import is a named layer with visibility toggle, camera focus (🎯), removal and a distinct default color; per-record colors/rotations/scales/labels supported everywhere.
   - **Fast at scale**: records collapse into one instanced batch per shape (a million geometries ≈ 3 draw calls); buffers rebuild only when layers change; sphere batches >2000 instances switch to a low-poly LOD mesh.
   - Clear errors with line numbers (`line 2: unknown shape 'spherex'`).
 - **ML Dataset 3D Visualizer** (📊 button in the toolbar):
-  - **Polished tabbed window**: opens centered on screen with five tabs (Import / Explore / Labels / View / Export), a persistent dataset summary strip, colored status messages and friendly empty states.
-  - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
+  - **Polished tabbed window**: opens centered on screen, with a fixed footprint, and four tabs (Import / Labels / View / Export), a persistent dataset summary strip, colored status messages and friendly empty states. Imported datasets appear in the shared object list at the bottom of the main window (with visibility, focus and remove controls), alongside scene objects.
+  - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), Excel (xlsx/xls/ods, first sheet), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
   - **3D point cloud**: instanced rendering with deterministic per-label colors and optional per-label shapes; PCA (or direct-axis) projection computed on a background thread.
   - **Persistent caches**: metadata JSON, label index and 3D projection cached under `.r3d_cache/`, keyed by file content fingerprint.
   - **Table, filters & search**: virtual-scrolling table (click a row to focus the camera), per-label visibility toggles, query search (`substring`, `row:N`, `c0 > 0.5`), label distribution chart.
@@ -129,9 +129,9 @@ python tests/test_manager.py
 
 ### Navigating the UI
 
-- **➕ New Object**: Top left area, opens the draft window to prepare a new geometry.
+- **➕ Object**: Top left area, opens the draft window to prepare a new geometry.
 - **⚙ Settings**: Top right area, global settings for background, grids, and camera.
-- **Bottom Panel**: Collapsible list of all objects in the scene.
+- **Bottom Panel**: Collapsible list of everything in the scene — objects and any imported dataset.
 - **Object Controls**: Each item in the list has icons for:
   - `✏ Edit`: Open the property editor.
   - `🏷 Label`: Toggle the 3D label in the viewport.
