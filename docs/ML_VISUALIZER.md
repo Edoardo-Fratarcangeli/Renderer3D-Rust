@@ -4,6 +4,10 @@ Extension of Renderer3D-Rust into a 3D visualizer for ML datasets: import,
 3D preview, label filters, search and export — built on the existing
 `wgpu` instanced pipeline and `egui` UI.
 
+This is the **ML data block** entry of the universal import system; for
+geometry strings, CSV/Excel tables, JSON and text/XYZ files see
+[GEOMETRY_IMPORT.md](GEOMETRY_IMPORT.md).
+
 ## 1. Architectural plan
 
 Three strictly separated layers (UI never parses or indexes; data layers

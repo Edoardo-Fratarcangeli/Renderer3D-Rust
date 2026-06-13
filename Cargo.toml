@@ -20,6 +20,7 @@ memmap2 = "0.9"                                        # Memory-mapped large dat
 csv = "1.3"                                            # Streaming CSV loader
 zip = { version = "2", default-features = false, features = ["deflate"] } # NPZ archives
 parquet = { version = "53", optional = true }          # Optional Parquet loader
+calamine = "0.26"                                      # Excel (xlsx/xls/ods) geometry tables
 chrono = "0.4.43"
 resvg = "0.47.0"
 usvg = "0.47.0"
@@ -35,6 +36,8 @@ parquet-support = ["dep:parquet"]
 tempfile = "3"
 # Headless egui for UI integration tests (same version as the main dep).
 egui = "0.28"
+# Writes real .xlsx fixtures for the Excel geometry-import tests.
+rust_xlsxwriter = "0.79"
 
 [build-dependencies]
 winres = "0.1.12"

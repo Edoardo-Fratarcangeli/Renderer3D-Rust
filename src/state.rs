@@ -135,7 +135,17 @@ pub struct State {
     // ML Dataset visualizer
     pub dataset_view: crate::ui::DatasetView,
     dataset_point_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
+
+    // Universal geometry import (layers of instanced shapes)
+    pub geometry_view: crate::ui::geometry_panel::GeometryView,
+    geometry_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
+    // Low-poly sphere used for instanced batches above LOD_SPHERE_THRESHOLD
+    // instances, so huge point clouds stay fast.
+    sphere_lod_mesh: MeshBuffers,
 }
+
+/// Above this many instances in one batch, spheres use the low-poly mesh.
+pub const LOD_SPHERE_THRESHOLD: u32 = 2000;
 
 impl State {
     pub async fn new(window: Window) -> Self {
@@ -218,6 +228,7 @@ impl State {
         // --- Initialize Meshes ---
         let cube_mesh = upload_mesh(primitives::create_cube());
         let sphere_mesh = upload_mesh(primitives::create_sphere(0.5, 32, 32));
+        let sphere_lod_mesh = upload_mesh(primitives::create_sphere(0.5, 12, 8));
         let plane_mesh = upload_mesh(primitives::create_plane(1.0));
 
         // Grids
@@ -453,6 +464,9 @@ impl State {
             should_focus_name: false,
             dataset_view: crate::ui::DatasetView::new(),
             dataset_point_batches: Vec::new(),
+            geometry_view: crate::ui::geometry_panel::GeometryView::new(),
+            geometry_batches: Vec::new(),
+            sphere_lod_mesh,
         }
     }
 
@@ -935,6 +949,7 @@ impl State {
         let mut action_delete_obj_id = None;
         let mut action_confirm_edit = false;
         let mut dataset_action = crate::ui::DatasetAction::None;
+        let mut geometry_focus: Option<[f32; 3]> = None;
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             // Because we can't easily borrow fields disjointly multiple times in complex closure,
@@ -959,11 +974,16 @@ impl State {
                         if ui.button("📊 Dataset").clicked() {
                             self.dataset_view.show_window = !self.dataset_view.show_window;
                         }
+                        if ui.button("📦 Geometry").clicked() {
+                            self.geometry_view.show_window = !self.geometry_view.show_window;
+                        }
                     });
                 });
 
             // Dataset visualizer window (import, table, filters, search, export)
             dataset_action = self.dataset_view.show(ctx);
+            // Geometry import window (paste / files / layers)
+            geometry_focus = self.geometry_view.show(ctx);
 
             // Top Right Panel: Settings
             egui::Window::new("Settings")
@@ -1696,6 +1716,25 @@ impl State {
         if let crate::ui::DatasetAction::FocusPoint(p) = dataset_action {
             self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
         }
+        if let Some(p) = geometry_focus {
+            self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
+
+        // Rebuild geometry-layer instance buffers only when layers changed.
+        if self.geometry_view.take_render_dirty() {
+            self.geometry_batches.clear();
+            for (geometry, instances) in self.geometry_view.build_geometry_batches() {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Geometry Layer Instance Buffer"),
+                        contents: bytemuck::cast_slice(&instances),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                self.geometry_batches
+                    .push((geometry, buffer, instances.len() as u32));
+            }
+        }
 
         // Rebuild dataset point-cloud instance buffers only when the visible
         // selection / settings changed.
@@ -1943,13 +1982,22 @@ impl State {
                 render_pass.draw_indexed(0..mesh.num_indices, 0, 0..*count);
             }
 
-            // Draw Dataset Point Cloud (instanced, one batch per geometry)
-            for (geo_type, instance_buf, count) in &self.dataset_point_batches {
+            // Draw bulk instanced batches: dataset point cloud + geometry
+            // layers. Spheres switch to the low-poly LOD mesh above the
+            // threshold so very large imports stay interactive.
+            for (geo_type, instance_buf, count) in self
+                .dataset_point_batches
+                .iter()
+                .chain(self.geometry_batches.iter())
+            {
                 let mesh = match geo_type {
                     GeometryType::Cube => &self.cube_mesh,
+                    GeometryType::Sphere if *count > LOD_SPHERE_THRESHOLD => {
+                        &self.sphere_lod_mesh
+                    }
                     GeometryType::Sphere => &self.sphere_mesh,
                     GeometryType::Plane => &self.plane_mesh,
-                    _ => &self.sphere_mesh,
+                    _ => &self.sphere_lod_mesh,
                 };
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, instance_buf.slice(..));
