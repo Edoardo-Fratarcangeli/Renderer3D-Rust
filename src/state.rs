@@ -126,6 +126,11 @@ pub struct State {
     pub camera_target: cgmath::Point3<f32>,
     pub mouse_pos: [f32; 2],
 
+    // Measurement tool: when active, clicking surfaces records up to two
+    // world-space points and reports the distance between them.
+    pub measure_mode: bool,
+    pub measure_points: Vec<[f32; 3]>,
+
     // Editor State
     pub editing_obj_id: Option<usize>,
     pub editing_obj_draft: Option<SceneObject>,
@@ -483,6 +488,8 @@ impl State {
             draft_object: None,
             clipboard: Vec::new(),
             mouse_pos: [0.0, 0.0],
+            measure_mode: false,
+            measure_points: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             normal_arrow_mesh,
@@ -804,30 +811,44 @@ impl State {
                             // press lands on the 3D viewport. Clicking a button or
                             // panel must never rotate the camera.
                             if !is_over_ui {
-                                self.is_drag_active = true;
-
-                                // Deselect panels
-                                self.show_add_panel = false;
-                                self.show_settings = false;
-
-                                // Selection Picking
                                 let x = (2.0 * self.mouse_pos[0]) / self.size.width as f32 - 1.0;
                                 let y = 1.0 - (2.0 * self.mouse_pos[1]) / self.size.height as f32;
 
-                                let now = std::time::Instant::now();
-                                let is_double_click =
-                                    now.duration_since(self.last_click_time).as_millis() < 300;
-                                self.last_click_time = now;
+                                if self.measure_mode {
+                                    // Measurement: record the surface point under
+                                    // the cursor, keeping only the last two so the
+                                    // distance always reflects a single segment.
+                                    // Does not orbit the camera.
+                                    if let Some(p) = self.raycast_world(x, y) {
+                                        if self.measure_points.len() >= 2 {
+                                            self.measure_points.clear();
+                                        }
+                                        self.measure_points.push(p);
+                                    }
+                                } else {
+                                    self.is_drag_active = true;
 
-                                if let Some(hit_id) = self.select_object_at_ndc(x, y) {
-                                    if is_double_click {
-                                        // Initialize Edit from 3D Double Click
-                                        self.editing_obj_id = Some(hit_id);
-                                        if let Some(obj) =
-                                            self.objects.iter().find(|o| o.id == hit_id)
-                                        {
-                                            self.editing_obj_draft = Some(obj.clone());
-                                            self.should_focus_name = true;
+                                    // Deselect panels
+                                    self.show_add_panel = false;
+                                    self.show_settings = false;
+
+                                    let now = std::time::Instant::now();
+                                    let is_double_click = now
+                                        .duration_since(self.last_click_time)
+                                        .as_millis()
+                                        < 300;
+                                    self.last_click_time = now;
+
+                                    if let Some(hit_id) = self.select_object_at_ndc(x, y) {
+                                        if is_double_click {
+                                            // Initialize Edit from 3D Double Click
+                                            self.editing_obj_id = Some(hit_id);
+                                            if let Some(obj) =
+                                                self.objects.iter().find(|o| o.id == hit_id)
+                                            {
+                                                self.editing_obj_draft = Some(obj.clone());
+                                                self.should_focus_name = true;
+                                            }
                                         }
                                     }
                                 }
@@ -883,24 +904,58 @@ impl State {
         Some(cgmath::Point3::new(center.x, center.y, center.z))
     }
 
-    fn select_object_at_ndc(&mut self, x: f32, y: f32) -> Option<usize> {
-        let modifiers = self.egui_state.egui_ctx().input(|i| i.modifiers);
-        let multi_select = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
-
+    /// Build a world-space ray (origin, normalized direction) from a point in
+    /// normalized device coordinates.
+    fn build_ray_ndc(&self, x: f32, y: f32) -> (cgmath::Vector3<f32>, cgmath::Vector3<f32>) {
         let inv_vp = self
             .camera
             .build_view_projection_matrix()
             .invert()
             .unwrap_or(cgmath::Matrix4::identity());
+        let near = inv_vp * cgmath::Vector4::new(x, y, 0.0, 1.0);
+        let far = inv_vp * cgmath::Vector4::new(x, y, 1.0, 1.0);
+        let near_world = near.truncate() / near.w;
+        let far_world = far.truncate() / far.w;
+        (near_world, (far_world - near_world).normalize())
+    }
 
-        let near_point = inv_vp * cgmath::Vector4::new(x, y, 0.0, 1.0);
-        let far_point = inv_vp * cgmath::Vector4::new(x, y, 1.0, 1.0);
+    /// Closest world-space surface hit under the NDC point, across all visible
+    /// objects (imported meshes and primitives). Used by the measurement tool.
+    pub fn raycast_world(&self, x: f32, y: f32) -> Option<[f32; 3]> {
+        let (ray_origin, ray_dir) = self.build_ray_ndc(x, y);
+        let mut best: Option<(f32, [f32; 3])> = None;
+        for obj in &self.objects {
+            if !obj.visible {
+                continue;
+            }
+            let model = obj.instance.to_model_matrix();
+            let inv_model = model.invert().unwrap_or(cgmath::Matrix4::identity());
+            let local_origin = (inv_model * ray_origin.extend(1.0)).truncate();
+            let local_dir = (inv_model * ray_dir.extend(0.0)).truncate().normalize();
+            let hit = if obj.geometry_type == GeometryType::Mesh {
+                self.custom_meshes
+                    .get(&obj.id)
+                    .and_then(|m| m.data.ray_hit(local_origin, local_dir))
+            } else {
+                self.intersect_primitive(obj.geometry_type, local_origin, local_dir)
+            };
+            if let Some(t) = hit {
+                let p_local = local_origin + local_dir * t;
+                let p_world = (model * p_local.extend(1.0)).truncate();
+                let dist = (p_world - ray_origin).magnitude2();
+                if best.map_or(true, |(d, _)| dist < d) {
+                    best = Some((dist, [p_world.x, p_world.y, p_world.z]));
+                }
+            }
+        }
+        best.map(|(_, p)| p)
+    }
 
-        let near_world = near_point.truncate() / near_point.w;
-        let far_world = far_point.truncate() / far_point.w;
+    fn select_object_at_ndc(&mut self, x: f32, y: f32) -> Option<usize> {
+        let modifiers = self.egui_state.egui_ctx().input(|i| i.modifiers);
+        let multi_select = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
 
-        let ray_origin = near_world;
-        let ray_dir = (far_world - near_world).normalize();
+        let (ray_origin, ray_dir) = self.build_ray_ndc(x, y);
 
         let mut closest_hit: Option<(usize, f32)> = None;
 
@@ -1127,8 +1182,49 @@ impl State {
                         if ui.button("🧊 Solids").clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
                         }
+                        // Measurement tool toggle. While active, clicking two
+                        // surface points reports the distance between them.
+                        if ui
+                            .selectable_label(self.measure_mode, "📏 Measure")
+                            .on_hover_text("Click two surface points to measure the distance")
+                            .clicked()
+                        {
+                            self.measure_mode = !self.measure_mode;
+                            self.measure_points.clear();
+                        }
                     });
                 });
+
+            // Measurement read-out + clear, shown only while the tool is on.
+            if self.measure_mode {
+                egui::Area::new("measure_hud".into())
+                    .anchor(egui::Align2::LEFT_TOP, [10.0, 48.0])
+                    .show(ctx, |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            match self.measure_points.as_slice() {
+                                [] => {
+                                    ui.label("📏 Click the first point");
+                                }
+                                [_] => {
+                                    ui.label("📏 Click the second point");
+                                }
+                                [a, b, ..] => {
+                                    let d = ((a[0] - b[0]).powi(2)
+                                        + (a[1] - b[1]).powi(2)
+                                        + (a[2] - b[2]).powi(2))
+                                    .sqrt();
+                                    ui.label(
+                                        egui::RichText::new(format!("📏 Distance: {:.3}", d))
+                                            .strong(),
+                                    );
+                                }
+                            }
+                            if ui.button("Clear").clicked() {
+                                self.measure_points.clear();
+                            }
+                        });
+                    });
+            }
 
             // Dataset visualizer window (import, table, filters, search, export)
             dataset_action = self.dataset_view.show(ctx);
@@ -1911,6 +2007,54 @@ impl State {
                                 });
                         }
                     }
+                }
+            }
+
+            // Measurement overlay: markers, the segment and its length.
+            if self.measure_mode && !self.measure_points.is_empty() {
+                let ppp = ctx.pixels_per_point();
+                let w = self.size.width as f32;
+                let h = self.size.height as f32;
+                let vp = self.camera.build_view_projection_matrix();
+                let project = |world: [f32; 3]| -> Option<egui::Pos2> {
+                    let clip = vp * cgmath::Vector4::new(world[0], world[1], world[2], 1.0);
+                    if clip.w <= 0.0 {
+                        return None;
+                    }
+                    let ndc = clip.truncate() / clip.w;
+                    Some(egui::pos2(
+                        ((ndc.x + 1.0) * 0.5 * w) / ppp,
+                        ((1.0 - ndc.y) * 0.5 * h) / ppp,
+                    ))
+                };
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("measure_overlay"),
+                ));
+                let pts: Vec<egui::Pos2> =
+                    self.measure_points.iter().filter_map(|p| project(*p)).collect();
+                for p in &pts {
+                    painter.circle_filled(*p, 4.0, egui::Color32::YELLOW);
+                }
+                if pts.len() == 2 {
+                    painter.line_segment(
+                        [pts[0], pts[1]],
+                        egui::Stroke::new(2.0, egui::Color32::YELLOW),
+                    );
+                    let a = self.measure_points[0];
+                    let b = self.measure_points[1];
+                    let d = ((a[0] - b[0]).powi(2)
+                        + (a[1] - b[1]).powi(2)
+                        + (a[2] - b[2]).powi(2))
+                    .sqrt();
+                    let mid = egui::pos2((pts[0].x + pts[1].x) * 0.5, (pts[0].y + pts[1].y) * 0.5);
+                    painter.text(
+                        mid,
+                        egui::Align2::CENTER_BOTTOM,
+                        format!("{:.3}", d),
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE,
+                    );
                 }
             }
         });

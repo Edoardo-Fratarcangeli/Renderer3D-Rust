@@ -24,6 +24,7 @@ egui UI.
 
 ## 🚀 Features
 
+- **Measure tool** (📏 button in the toolbar): toggle it, then click two surface points (on meshes or primitives) to read the straight-line distance between them, drawn as a labelled segment in the viewport.
 - **Solids Import** (🧊 button in the toolbar):
   - **Import 3D models**: STL, OBJ and glTF/GLB solid meshes load on a background thread and appear as selectable objects in the scene (auto-scaled and centered). STEP (`.step`/`.stp`) is recognised but not yet tessellated.
   - **Paste anything**: geometry DSL, XYZ point lists or JSON — auto-detected and parsed into a layer.
