@@ -343,7 +343,151 @@ mod tests {
     fn unsupported_and_step_formats_error_clearly() {
         let step = MeshData::load(Path::new("model.step")).unwrap_err();
         assert!(step.to_string().contains("STEP"));
+        let stp = MeshData::load(Path::new("model.stp")).unwrap_err();
+        assert!(stp.to_string().contains("STEP"));
         let other = MeshData::load(Path::new("model.xyz")).unwrap_err();
         assert!(other.to_string().contains("unsupported"));
+        // No extension at all is also rejected.
+        assert!(MeshData::load(Path::new("model")).is_err());
+    }
+
+    #[test]
+    fn ray_returns_the_nearest_of_two_stacked_triangles() {
+        // Two quads at z = 0 and z = 2; a ray from +z must hit the nearer one.
+        let mut m = quad();
+        let base = m.vertices.len() as u32;
+        for p in [
+            [-1.0, -1.0, 2.0],
+            [1.0, -1.0, 2.0],
+            [1.0, 1.0, 2.0],
+            [-1.0, 1.0, 2.0],
+        ] {
+            m.vertices.push(Vertex {
+                position: p,
+                color: MESH_VERTEX_COLOR,
+                normal: [0.0, 0.0, 1.0],
+            });
+        }
+        m.indices
+            .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        let t = m
+            .ray_hit(
+                cgmath::Vector3::new(0.0, 0.0, 5.0),
+                cgmath::Vector3::new(0.0, 0.0, -1.0),
+            )
+            .unwrap();
+        assert!((t - 3.0).abs() < 1e-4, "expected nearest (z=2) hit, got {t}");
+    }
+
+    #[test]
+    fn ray_pointing_away_from_geometry_misses() {
+        let m = quad();
+        // Origin in front, but the ray travels further away (+z): no hit.
+        assert!(m
+            .ray_hit(
+                cgmath::Vector3::new(0.0, 0.0, 5.0),
+                cgmath::Vector3::new(0.0, 0.0, 1.0),
+            )
+            .is_none());
+    }
+
+    #[test]
+    fn ray_parallel_to_a_triangle_misses() {
+        let m = quad(); // lies in z = 0
+        assert!(m
+            .ray_hit(
+                cgmath::Vector3::new(0.0, 0.0, 0.0),
+                cgmath::Vector3::new(1.0, 0.0, 0.0),
+            )
+            .is_none());
+    }
+
+    #[test]
+    fn obj_files_load_and_get_normals() {
+        let dir = std::env::temp_dir().join(format!("r3d_mesh_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tri.obj");
+        // A single triangle in the z = 0 plane, no normals declared.
+        std::fs::write(
+            &path,
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        let mesh = MeshData::load(&path).unwrap();
+        assert_eq!(mesh.triangle_count(), 1);
+        assert_eq!(mesh.vertices.len(), 3);
+        // Synthesized normals must be unit length and point along ±z.
+        for v in &mesh.vertices {
+            assert!((v.normal[2].abs() - 1.0).abs() < 1e-5, "normal {:?}", v.normal);
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn gltf_files_load_positions_normals_and_indices() {
+        // Hand-build a minimal glTF 2.0: one triangle, an external .bin buffer
+        // (positions + normals + u16 indices). No base64 / extra deps needed.
+        let dir = std::env::temp_dir().join(format!("r3d_gltf_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let positions: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let normals: [[f32; 3]; 3] = [[0.0, 0.0, 1.0]; 3];
+        let indices: [u16; 3] = [0, 1, 2];
+
+        let mut bin = Vec::new();
+        for v in positions.iter().chain(normals.iter()) {
+            for c in v {
+                bin.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        let idx_offset = bin.len();
+        for i in indices {
+            bin.extend_from_slice(&i.to_le_bytes());
+        }
+        std::fs::write(dir.join("model.bin"), &bin).unwrap();
+
+        let json = format!(
+            r#"{{
+  "asset": {{ "version": "2.0" }},
+  "buffers": [{{ "uri": "model.bin", "byteLength": {total} }}],
+  "bufferViews": [
+    {{ "buffer": 0, "byteOffset": 0,  "byteLength": 36 }},
+    {{ "buffer": 0, "byteOffset": 36, "byteLength": 36 }},
+    {{ "buffer": 0, "byteOffset": {idx}, "byteLength": 6 }}
+  ],
+  "accessors": [
+    {{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+       "min": [0.0,0.0,0.0], "max": [1.0,1.0,0.0] }},
+    {{ "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3" }},
+    {{ "bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR" }}
+  ],
+  "meshes": [{{ "primitives": [
+    {{ "attributes": {{ "POSITION": 0, "NORMAL": 1 }}, "indices": 2 }}
+  ] }}]
+}}"#,
+            total = bin.len(),
+            idx = idx_offset
+        );
+        let gltf_path = dir.join("model.gltf");
+        std::fs::write(&gltf_path, json).unwrap();
+
+        let mesh = MeshData::load(&gltf_path).unwrap();
+        assert_eq!(mesh.triangle_count(), 1);
+        assert_eq!(mesh.vertices.len(), 3);
+        assert_eq!(mesh.indices, vec![0, 1, 2]);
+        // Provided normals are preserved (point along +z).
+        assert!(mesh.vertices.iter().all(|v| (v.normal[2] - 1.0).abs() < 1e-5));
+        assert_eq!(mesh.aabb(), ([0.0, 0.0, 0.0], [1.0, 1.0, 0.0]));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn empty_mesh_has_zero_extent_and_origin_center() {
+        let m = MeshData::default();
+        assert_eq!(m.aabb(), ([0.0; 3], [0.0; 3]));
+        assert_eq!(m.center(), [0.0, 0.0, 0.0]);
+        assert_eq!(m.max_extent(), 0.0);
+        assert_eq!(m.triangle_count(), 0);
+        assert!(m.ray_hit(cgmath::Vector3::unit_z(), -cgmath::Vector3::unit_z()).is_none());
     }
 }

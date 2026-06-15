@@ -156,24 +156,43 @@ NPY/IDX header parsing, dtype decoding for every `ElemType`, FNV hashing,
 CSV value formatting/escaping, comparison operators, projection cache
 corruption handling, RNG determinism, status/tab metadata.
 
-Coverage is measured with `cargo llvm-cov --tests --summary-only`.
-Region coverage of the visualizer modules (the target of the "maximum
-coverage" goal — `state.rs`/`main.rs` need a window + GPU and are exercised
-by the existing manual/scene tests instead):
+Coverage is measured with `cargo llvm-cov --summary-only`. To report only the
+unit-testable surface (i.e. excluding the GPU/window code, see below):
+
+```
+cargo llvm-cov --summary-only --ignore-filename-regex 'state.rs|main.rs'
+```
+
+Region coverage of the library modules:
 
 | Module | Regions covered |
 |--------|-----------------|
+| `camera`, `model`, `primitives`, `scene` | 100% |
 | `visualization/*` | 100% |
 | `dataset/mod`, `dataset/builtin` | 100% |
 | `dataset/preprocessor` | 98% |
-| `dataset/export`, `dataset/loader` | 94% |
-| `dataset/index` | 93% |
+| `mesh` | 96% |
+| `geometry/*` | 93–96% |
+| `dataset/export`, `dataset/loader`, `dataset/index` | 92–94% |
 | `dataset/metadata` | 90% |
-| `ui/*` | 90–99% (avg ≈ 93%) |
-| **Visualizer modules overall** | **≈ 95%** |
+| `ui/*` | 90–99% |
+| **Library modules (excluding `state.rs`/`main.rs`)** | **≈ 95%** |
 
-The remaining gaps are egui click-handler closures that only run on real
-pointer input, plus `unwrap_or(0)` style fallbacks on system clock errors.
+**GPU / window-bound code is excluded by necessity.** `state.rs` (the wgpu
+device, surface, render pass and the egui draw/`input` closures) and `main.rs`
+(the winit event loop and SVG icon rendering) need a real GPU adapter and an
+OS window, which are unavailable in headless CI. To keep this logic testable,
+the pure parts have been extracted into covered modules:
+
+- ray/primitive intersection → `scene::intersect_primitive`,
+- undo/redo application → `scene::apply_undo_command` + `UndoCommand`,
+- mesh loading, AABB and ray-pick → `mesh`,
+- projection, normalization and caching → `dataset::preprocessor`.
+
+What remains in `state.rs`/`main.rs` is GPU resource setup and event wiring,
+exercised manually by running the app. The other small gaps are egui
+click-handler closures that only fire on real pointer input and a few
+`unwrap_or(0)` fallbacks on system-clock errors.
 
 ## 5. Risks & mitigations
 

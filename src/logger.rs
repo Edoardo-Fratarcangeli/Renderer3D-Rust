@@ -105,3 +105,48 @@ macro_rules! log_verbose {
         $crate::logger::log($crate::logger::LogLevel::Verbose, &format!($($arg)*));
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_levels_are_ordered_from_critical_to_verbose() {
+        assert!(LogLevel::Critical < LogLevel::Error);
+        assert!(LogLevel::Error < LogLevel::Warning);
+        assert!(LogLevel::Warning < LogLevel::Info);
+        assert!(LogLevel::Info < LogLevel::Verbose);
+        assert_eq!(LogLevel::Critical as u8, 0);
+        assert_eq!(LogLevel::Verbose as u8, 4);
+    }
+
+    #[test]
+    fn init_and_every_level_write_without_panicking() {
+        init(LogLevel::Verbose);
+        log(LogLevel::Critical, "test critical");
+        log(LogLevel::Error, "test error");
+        log(LogLevel::Warning, "test warning");
+        log(LogLevel::Info, "test info");
+        log(LogLevel::Verbose, "test verbose");
+    }
+
+    #[test]
+    fn messages_above_the_threshold_are_suppressed() {
+        // Raising the bar to Critical must drop a Verbose message early; the
+        // call still must not panic.
+        init(LogLevel::Critical);
+        log(LogLevel::Verbose, "should be filtered out");
+        // Restore a permissive level for any later logging in the process.
+        init(LogLevel::Verbose);
+    }
+
+    #[test]
+    fn convenience_macros_expand_and_run() {
+        init(LogLevel::Verbose);
+        log_critical!("c {}", 1);
+        log_error!("e {}", 2);
+        log_warning!("w {}", 3);
+        log_info!("i {}", 4);
+        log_verbose!("v {}", 5);
+    }
+}

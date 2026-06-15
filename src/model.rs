@@ -71,6 +71,77 @@ pub struct InstanceRaw {
     pub color: [f32; 4],
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cgmath::SquareMatrix;
+
+    fn instance() -> Instance {
+        Instance {
+            position: cgmath::Vector3::new(1.0, 2.0, 3.0),
+            rotation: cgmath::Quaternion::new(1.0, 0.0, 0.0, 0.0), // identity
+            scale: cgmath::Vector3::new(2.0, 2.0, 2.0),
+        }
+    }
+
+    #[test]
+    fn model_matrix_translates_and_scales() {
+        let m = instance().to_model_matrix();
+        // Origin maps to the position.
+        let o = m * cgmath::Vector4::new(0.0, 0.0, 0.0, 1.0);
+        assert_eq!([o.x, o.y, o.z], [1.0, 2.0, 3.0]);
+        // A unit x vector is scaled by 2 then translated.
+        let p = m * cgmath::Vector4::new(1.0, 0.0, 0.0, 1.0);
+        assert_eq!([p.x, p.y, p.z], [3.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn identity_instance_matches_identity_matrix() {
+        let inst = Instance {
+            position: cgmath::Vector3::new(0.0, 0.0, 0.0),
+            rotation: cgmath::Quaternion::new(1.0, 0.0, 0.0, 0.0),
+            scale: cgmath::Vector3::new(1.0, 1.0, 1.0),
+        };
+        let m: [[f32; 4]; 4] = inst.to_model_matrix().into();
+        let id: [[f32; 4]; 4] = cgmath::Matrix4::identity().into();
+        assert_eq!(m, id);
+    }
+
+    #[test]
+    fn to_raw_defaults_to_opaque_white() {
+        let raw = instance().to_raw();
+        assert_eq!(raw.color, [1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn to_raw_with_color_encodes_selection_in_alpha() {
+        let unselected = instance().to_raw_with_color([0.2, 0.4, 0.6], false);
+        assert_eq!(unselected.color, [0.2, 0.4, 0.6, 1.0]);
+        let selected = instance().to_raw_with_color([0.2, 0.4, 0.6], true);
+        assert_eq!(selected.color, [0.2, 0.4, 0.6, 2.0]);
+    }
+
+    #[test]
+    fn vertex_layout_is_three_float3_attributes() {
+        let d = Vertex::desc();
+        assert_eq!(d.array_stride, std::mem::size_of::<Vertex>() as u64);
+        assert_eq!(d.step_mode, wgpu::VertexStepMode::Vertex);
+        assert_eq!(d.attributes.len(), 3);
+        assert_eq!(d.attributes[2].shader_location, 2);
+    }
+
+    #[test]
+    fn instance_layout_is_per_instance_with_five_attributes() {
+        let d = InstanceRaw::desc();
+        assert_eq!(d.array_stride, std::mem::size_of::<InstanceRaw>() as u64);
+        assert_eq!(d.step_mode, wgpu::VertexStepMode::Instance);
+        // Four matrix rows (loc 5..=8) + color (loc 9).
+        assert_eq!(d.attributes.len(), 5);
+        assert_eq!(d.attributes[0].shader_location, 5);
+        assert_eq!(d.attributes[4].shader_location, 9);
+    }
+}
+
 impl InstanceRaw {
     pub fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         use std::mem;

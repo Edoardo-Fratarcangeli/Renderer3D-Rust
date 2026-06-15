@@ -116,6 +116,45 @@ fn projection_dims_control_the_active_axes() {
 }
 
 #[test]
+fn import_and_view_tabs_render_in_direct_mode() {
+    // Exercise the Direct-projection UI branches: per-axis column pickers in
+    // the Import dialog and the column dropdowns in the View tab.
+    let ctx = egui::Context::default();
+    let mut view = loaded_view();
+    view.show_window = true;
+    view.import.use_pca = false;
+    view.import.dims = 2;
+
+    view.tab = DatasetTab::Import;
+    run_frame(&ctx, &mut view);
+    view.import.loading = true; // spinner branch
+    run_frame(&ctx, &mut view);
+    view.import.loading = false;
+
+    view.tab = DatasetTab::View;
+    run_frame(&ctx, &mut view); // projection grid with Direct column combos
+}
+
+#[test]
+fn reproject_switches_dimensions_in_place() {
+    let mut view = loaded_view();
+    let rows = view.loaded.as_ref().unwrap().dataset.n_rows();
+    view.reproject(ProjectionSpec {
+        method: ProjectionMethod::Direct,
+        dims: 2,
+        axes: [0, 1, 2],
+    });
+    let loaded = view.loaded.as_ref().unwrap();
+    assert_eq!(loaded.projection.points.len(), rows, "row count preserved");
+    assert!(loaded.projection.points.iter().all(|p| p[2] == 0.0));
+
+    // Reprojecting with no dataset is a no-op (early return, no panic).
+    let mut empty = DatasetView::new();
+    empty.reproject(ProjectionSpec::full(ProjectionMethod::Pca));
+    assert!(empty.loaded.is_none());
+}
+
+#[test]
 fn unknown_builtin_reports_error_status() {
     let mut view = DatasetView::new();
     view.start_import(ImportRequest {

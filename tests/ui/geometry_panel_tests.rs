@@ -68,6 +68,24 @@ fn file_import_worker_installs_layer() {
 }
 
 #[test]
+fn mesh_import_section_renders_and_reports_no_request_without_a_click() {
+    let ctx = egui::Context::default();
+    let mut view = GeometryView::new();
+    view.show_window = true;
+
+    // Render the "Import a 3D model" section with a path typed in and the
+    // loading spinner active.
+    view.mesh_path_text = "model.stl".into();
+    view.mesh_loading = true;
+    run_frame(&ctx, &mut view);
+    view.mesh_loading = false;
+    run_frame(&ctx, &mut view);
+
+    // No button was clicked, so there is no pending request to drain.
+    assert!(view.take_mesh_request().is_none());
+}
+
+#[test]
 fn dirty_flag_drives_buffer_rebuilds() {
     let mut view = GeometryView::new();
     view.paste_text = "cube 0 0 0".into();

@@ -4,3 +4,4 @@ mod defaults;
 mod geometry_panel_tests;
 mod icon_test;
 mod layout_tests;
+mod panel_helpers;

@@ -5,7 +5,7 @@ use winit::{event::*, window::Window};
 use crate::camera::{Camera, Uniforms};
 use crate::model::{InstanceRaw, Vertex};
 use crate::primitives;
-use crate::scene::{GeometryType, SceneObject};
+use crate::scene::{apply_undo_command, intersect_primitive, GeometryType, SceneObject, UndoCommand};
 
 // Camera Default Values (used for initialization and reset)
 pub const DEFAULT_CAMERA_YAW: f32 = 16.0;
@@ -49,14 +49,6 @@ pub struct CustomMesh {
     pub index_buffer: wgpu::Buffer,
     pub num_indices: u32,
     pub data: std::sync::Arc<crate::mesh::MeshData>,
-}
-
-#[derive(Clone)]
-pub enum UndoCommand {
-    Add(SceneObject),
-    Delete(SceneObject),
-    Edit { old: SceneObject, new: SceneObject },
-    MultiAction(Vec<UndoCommand>),
 }
 
 pub struct State {
@@ -632,39 +624,7 @@ impl State {
     }
 
     fn apply_undo_cmd(&mut self, cmd: UndoCommand, is_undo: bool) {
-        match cmd {
-            UndoCommand::Add(obj) => {
-                if is_undo {
-                    self.objects.retain(|o| o.id != obj.id);
-                } else {
-                    self.objects.push(obj);
-                }
-            }
-            UndoCommand::Delete(obj) => {
-                if is_undo {
-                    self.objects.push(obj);
-                } else {
-                    self.objects.retain(|o| o.id != obj.id);
-                }
-            }
-            UndoCommand::Edit { old, new } => {
-                let target = if is_undo { &old } else { &new };
-                if let Some(obj) = self.objects.iter_mut().find(|o| o.id == target.id) {
-                    *obj = target.clone();
-                }
-            }
-            UndoCommand::MultiAction(cmds) => {
-                if is_undo {
-                    for c in cmds.iter().rev() {
-                        self.apply_undo_cmd(c.clone(), is_undo);
-                    }
-                } else {
-                    for c in cmds {
-                        self.apply_undo_cmd(c.clone(), is_undo);
-                    }
-                }
-            }
-        }
+        apply_undo_command(&mut self.objects, &cmd, is_undo);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -937,7 +897,7 @@ impl State {
                     .get(&obj.id)
                     .and_then(|m| m.data.ray_hit(local_origin, local_dir))
             } else {
-                self.intersect_primitive(obj.geometry_type, local_origin, local_dir)
+                intersect_primitive(obj.geometry_type, local_origin, local_dir)
             };
             if let Some(t) = hit {
                 let p_local = local_origin + local_dir * t;
@@ -977,7 +937,7 @@ impl State {
                     .get(&obj.id)
                     .and_then(|m| m.data.ray_hit(local_origin, local_dir))
             } else {
-                self.intersect_primitive(obj.geometry_type, local_origin, local_dir)
+                intersect_primitive(obj.geometry_type, local_origin, local_dir)
             };
             if let Some(t) = hit {
                 let world_dir = (model * local_dir.extend(0.0)).truncate();
@@ -1006,77 +966,6 @@ impl State {
             Some(hit_id)
         } else {
             None
-        }
-    }
-
-    fn intersect_primitive(
-        &self,
-        geo_type: GeometryType,
-        local_origin: cgmath::Vector3<f32>,
-        local_dir: cgmath::Vector3<f32>,
-    ) -> Option<f32> {
-        match geo_type {
-            GeometryType::Cube => {
-                let mut tmin = -f32::INFINITY;
-                let mut tmax = f32::INFINITY;
-                for i in 0..3 {
-                    if local_dir[i].abs() < 1e-6 {
-                        if local_origin[i] < -0.5 || local_origin[i] > 0.5 {
-                            return None;
-                        }
-                    } else {
-                        let inv_d = 1.0 / local_dir[i];
-                        let mut t1 = (-0.5 - local_origin[i]) * inv_d;
-                        let mut t2 = (0.5 - local_origin[i]) * inv_d;
-                        if t1 > t2 {
-                            std::mem::swap(&mut t1, &mut t2);
-                        }
-                        tmin = tmin.max(t1);
-                        tmax = tmax.min(t2);
-                    }
-                }
-                if tmax >= tmin && tmax >= 0.0 {
-                    Some(tmin.max(0.0))
-                } else {
-                    None
-                }
-            }
-            GeometryType::Sphere => {
-                let oc = local_origin;
-                let a = local_dir.dot(local_dir);
-                let b = 2.0 * oc.dot(local_dir);
-                let c = oc.dot(oc) - 0.25; // radius 0.5 matches visuals
-                let discriminant = b * b - 4.0 * a * c;
-                if discriminant < 0.0 {
-                    None
-                } else {
-                    let mut t = (-b - discriminant.sqrt()) / (2.0 * a);
-                    if t < 0.0 {
-                        t = (-b + discriminant.sqrt()) / (2.0 * a);
-                    }
-                    if t >= 0.0 {
-                        Some(t)
-                    } else {
-                        None
-                    }
-                }
-            }
-            GeometryType::Plane => {
-                if local_dir.y.abs() < 1e-6 {
-                    return None;
-                }
-                let t = -local_origin.y / local_dir.y;
-                if t < 0.0 {
-                    return None;
-                }
-                let p = local_origin + local_dir * t;
-                if p.x.abs() <= 0.5 && p.z.abs() <= 0.5 {
-                    Some(t)
-                } else {
-                    None
-                }
-            }
-            _ => None,
         }
     }
 
