@@ -5,7 +5,7 @@
 // egui::Context. These tests cover the rendering paths and the
 // import-worker polling loop end to end.
 
-use rendering_3d::dataset::preprocessor::ProjectionMethod;
+use rendering_3d::dataset::preprocessor::{ProjectionMethod, ProjectionSpec};
 use rendering_3d::ui::{
     prepare_dataset, DatasetAction, DatasetTab, DatasetView, ImportRequest, ImportSource,
     StatusKind,
@@ -33,7 +33,7 @@ fn loaded_view() -> DatasetView {
     view.start_import(ImportRequest {
         source: ImportSource::Builtin("blobs"),
         max_rows: None,
-        method: ProjectionMethod::Pca,
+        projection: ProjectionSpec::full(ProjectionMethod::Pca),
     });
     assert!(view.loaded.is_some(), "builtin import is synchronous");
     view
@@ -81,12 +81,47 @@ fn builtin_import_lands_on_labels_tab_with_success_status() {
 }
 
 #[test]
+fn projection_dims_control_the_active_axes() {
+    // 2D import: the z axis must be flat.
+    let mut view2d = DatasetView::new();
+    view2d.start_import(ImportRequest {
+        source: ImportSource::Builtin("blobs"),
+        max_rows: None,
+        projection: ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 2,
+            axes: [0, 1, 2],
+        },
+    });
+    let pts = &view2d.loaded.as_ref().unwrap().projection.points;
+    assert!(pts.iter().all(|p| p[2] == 0.0), "2D import must flatten z");
+    assert!(pts.iter().any(|p| p[1] != 0.0), "2D import keeps y");
+
+    // 1D import: both y and z must be flat.
+    let mut view1d = DatasetView::new();
+    view1d.start_import(ImportRequest {
+        source: ImportSource::Builtin("blobs"),
+        max_rows: None,
+        projection: ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 1,
+            axes: [0, 1, 2],
+        },
+    });
+    let pts = &view1d.loaded.as_ref().unwrap().projection.points;
+    assert!(
+        pts.iter().all(|p| p[1] == 0.0 && p[2] == 0.0),
+        "1D import must flatten y and z"
+    );
+}
+
+#[test]
 fn unknown_builtin_reports_error_status() {
     let mut view = DatasetView::new();
     view.start_import(ImportRequest {
         source: ImportSource::Builtin("not_a_dataset"),
         max_rows: None,
-        method: ProjectionMethod::Pca,
+        projection: ProjectionSpec::full(ProjectionMethod::Pca),
     });
     assert!(view.loaded.is_none());
     assert_eq!(view.import.status.as_ref().unwrap().kind, StatusKind::Error);
@@ -117,7 +152,7 @@ fn file_import_runs_on_worker_thread_and_installs() {
     view.start_import(ImportRequest {
         source: ImportSource::Path(csv),
         max_rows: None,
-        method: ProjectionMethod::Direct,
+        projection: ProjectionSpec::full(ProjectionMethod::Direct),
     });
     assert!(view.is_loading());
 
@@ -140,7 +175,7 @@ fn failed_file_import_surfaces_error_status() {
     view.start_import(ImportRequest {
         source: ImportSource::Path("/definitely/missing.csv".into()),
         max_rows: None,
-        method: ProjectionMethod::Pca,
+        projection: ProjectionSpec::full(ProjectionMethod::Pca),
     });
     pump_until_idle(&ctx, &mut view, 30);
     assert!(view.loaded.is_none());
