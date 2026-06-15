@@ -149,3 +149,8 @@ python tests/test_manager.py
 - `cgmath`: Comprehensive linear algebra
 - `bytemuck`: Safe casting of raw bytes for GPU buffers
 - `pollster`: Blocking async executor for the main thread
+
+## 🛠️ Next steps
+
+- Real STEP (`.step`/`.stp`) import via a BREP tessellation backend (e.g. `truck`) — currently recognised but not yet tessellated.
+
