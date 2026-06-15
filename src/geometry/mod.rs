@@ -135,8 +135,8 @@ impl GeometryLayer {
         }
         let mut acc = [0.0f64; 3];
         for r in &self.records {
-            for a in 0..3 {
-                acc[a] += r.position[a] as f64;
+            for (a, slot) in acc.iter_mut().enumerate() {
+                *slot += r.position[a] as f64;
             }
         }
         let n = self.records.len() as f64;

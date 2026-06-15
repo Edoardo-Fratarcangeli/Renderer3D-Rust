@@ -124,8 +124,8 @@ fn blobs(clusters: usize, per_cluster: usize, dims: usize, seed: u64) -> Dataset
         .collect();
     for (ci, center) in centers.iter().enumerate() {
         for _ in 0..per_cluster {
-            for d in 0..dims {
-                data.push(center[d] + rng.next_gauss());
+            for &c in center.iter() {
+                data.push(c + rng.next_gauss());
             }
             labels.push(ci as u32);
         }

@@ -8,9 +8,11 @@
 //! - [`DatasetView`] is the single owner of all visualizer UI state and is
 //!   embedded in `State`. Each frame, `State` calls [`DatasetView::show`].
 //! - The window is organized in tabs ([`DatasetTab`]); each tab delegates to
-//!   a focused panel module ([`import_dialog`], [`dataset_table`],
-//!   [`label_filter`], [`search_panel`], [`distribution_chart`],
-//!   [`export_panel`]).
+//!   a focused panel module ([`import_dialog`], [`label_filter`],
+//!   [`distribution_chart`], [`export_panel`]). Imported datasets are listed
+//!   in the shared object list of the main window (see `state`), not in a
+//!   dedicated tab. [`dataset_table`] / [`search_panel`] remain as reusable
+//!   helpers (e.g. [`dataset_table::row_text`]).
 //! - Panels are plain functions over explicit state, so they can be driven
 //!   headless (no GPU) by the integration tests in `tests/ui`.
 //!
@@ -30,7 +32,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 use crate::dataset::index::{apply_filter, FilterSpec, SearchQuery};
-use crate::dataset::preprocessor::{self, Projection, ProjectionMethod};
+use crate::dataset::preprocessor::{self, Projection, ProjectionMethod, ProjectionSpec};
 use crate::dataset::{builtin, loader, Dataset, DatasetIndex};
 use crate::visualization::point_cloud::{self, PointCloudSettings};
 
@@ -72,8 +74,8 @@ pub struct ImportRequest {
     pub source: ImportSource,
     /// Optional hard cap on imported rows.
     pub max_rows: Option<usize>,
-    /// Projection used for the 3D preview.
-    pub method: ProjectionMethod,
+    /// Projection (method + dimensions + axes) used for the 3D preview.
+    pub projection: ProjectionSpec,
 }
 
 /// Severity of a [`StatusMessage`]; controls its color.
@@ -138,12 +140,14 @@ impl StatusMessage {
 }
 
 /// Tabs of the visualizer window.
+///
+/// The per-row table ("Explore") was removed: imported datasets now appear as
+/// a single entry in the shared object list at the bottom of the main window,
+/// alongside scene objects and solid layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatasetTab {
     /// File / benchmark import.
     Import,
-    /// Search bar + virtual-scrolling table.
-    Explore,
     /// Per-label visibility filters + distribution chart.
     Labels,
     /// Point size and shape policy.
@@ -154,9 +158,8 @@ pub enum DatasetTab {
 
 impl DatasetTab {
     /// All tabs in display order.
-    pub const ALL: [DatasetTab; 5] = [
+    pub const ALL: [DatasetTab; 4] = [
         DatasetTab::Import,
-        DatasetTab::Explore,
         DatasetTab::Labels,
         DatasetTab::View,
         DatasetTab::Export,
@@ -166,7 +169,6 @@ impl DatasetTab {
     pub fn title(&self) -> &'static str {
         match self {
             DatasetTab::Import => "📂 Import",
-            DatasetTab::Explore => "🔍 Explore",
             DatasetTab::Labels => "🏷 Labels",
             DatasetTab::View => "🎨 View",
             DatasetTab::Export => "💾 Export",
@@ -179,7 +181,7 @@ impl DatasetTab {
     }
 }
 
-/// State of the import form (path, row cap, projection method, progress).
+/// State of the import form (path, row cap, projection config, progress).
 #[derive(Default)]
 pub struct ImportState {
     /// Path typed in the file field.
@@ -188,12 +190,31 @@ pub struct ImportState {
     pub limit_rows: bool,
     /// Row cap value (used when `limit_rows`).
     pub max_rows: usize,
-    /// PCA (true) vs direct first-three-columns projection (false).
+    /// PCA (true) vs direct column projection (false).
     pub use_pca: bool,
+    /// Output spatial dimensions: 1, 2 or 3.
+    pub dims: u8,
+    /// For direct projection, the feature-column index mapped to X, Y, Z.
+    pub axes: [usize; 3],
     /// Last import outcome shown to the user.
     pub status: Option<StatusMessage>,
     /// True while the worker thread is importing.
     pub loading: bool,
+}
+
+impl ImportState {
+    /// Build a [`ProjectionSpec`] from the current form selections.
+    pub fn projection(&self) -> ProjectionSpec {
+        ProjectionSpec {
+            method: if self.use_pca {
+                ProjectionMethod::Pca
+            } else {
+                ProjectionMethod::Direct
+            },
+            dims: self.dims.clamp(1, 3),
+            axes: self.axes,
+        }
+    }
 }
 
 /// State of the export form.
@@ -222,6 +243,9 @@ pub struct DatasetView {
     pub export: ExportState,
     /// The active dataset, if any.
     pub loaded: Option<LoadedDataset>,
+    /// Whether the loaded dataset's point cloud is drawn (toggled from the
+    /// shared object list at the bottom of the main window).
+    pub visible: bool,
 
     /// Label ids currently visible.
     pub enabled_labels: HashSet<u32>,
@@ -256,6 +280,8 @@ impl DatasetView {
             import: ImportState {
                 use_pca: true,
                 max_rows: 100_000,
+                dims: 3,
+                axes: [0, 1, 2],
                 ..Default::default()
             },
             export: ExportState {
@@ -263,6 +289,7 @@ impl DatasetView {
                 ..Default::default()
             },
             loaded: None,
+            visible: true,
             enabled_labels: HashSet::new(),
             search_text: String::new(),
             search_error: None,
@@ -291,12 +318,13 @@ impl DatasetView {
     }
 
     /// Install a freshly loaded dataset, reset filters/selection and jump
-    /// to the Explore tab.
+    /// to the Labels tab.
     pub fn install(&mut self, loaded: LoadedDataset) {
         self.enabled_labels = (0..loaded.dataset.label_names.len() as u32).collect();
         self.search_text.clear();
         self.search_error = None;
         self.settings.highlighted_row = None;
+        self.visible = true;
         self.loaded = Some(loaded);
         self.recompute_visible();
         let l = self.loaded.as_ref().unwrap();
@@ -317,7 +345,44 @@ impl DatasetView {
                 ""
             },
         )));
-        self.tab = DatasetTab::Explore;
+        self.tab = DatasetTab::Labels;
+    }
+
+    /// Centroid of the loaded projection, used to focus the camera on the
+    /// dataset from the shared object list.
+    pub fn centroid(&self) -> Option<[f32; 3]> {
+        let points = &self.loaded.as_ref()?.projection.points;
+        if points.is_empty() {
+            return None;
+        }
+        let mut sum = [0.0f64; 3];
+        for p in points {
+            sum[0] += p[0] as f64;
+            sum[1] += p[1] as f64;
+            sum[2] += p[2] as f64;
+        }
+        let n = points.len() as f64;
+        Some([
+            (sum[0] / n) as f32,
+            (sum[1] / n) as f32,
+            (sum[2] / n) as f32,
+        ])
+    }
+
+    /// Remove the loaded dataset and clear the rendered point cloud.
+    pub fn clear_dataset(&mut self) {
+        self.loaded = None;
+        self.visible_rows.clear();
+        self.settings.highlighted_row = None;
+        self.render_dirty = true;
+    }
+
+    /// Toggle whether the dataset's point cloud is drawn.
+    pub fn set_visible(&mut self, visible: bool) {
+        if self.visible != visible {
+            self.visible = visible;
+            self.render_dirty = true;
+        }
     }
 
     /// Re-evaluate filter + search into [`Self::visible_rows`].
@@ -351,14 +416,43 @@ impl DatasetView {
         self.render_dirty = true;
     }
 
-    /// Build the instance batches for the current visible set.
+    /// Re-run the projection on the already-loaded dataset with a new spec
+    /// (used by the View tab to switch between 1D/2D/3D, PCA/Direct and axes
+    /// without re-importing). Row membership is unchanged, so filters and the
+    /// label index are preserved.
+    pub fn reproject(&mut self, spec: ProjectionSpec) {
+        let cache_dir = PathBuf::from(CACHE_DIR);
+        let result = match self.loaded.as_ref() {
+            Some(loaded) => preprocessor::project_spec(&loaded.dataset, &spec, Some(&cache_dir)),
+            None => return,
+        };
+        match result {
+            Ok(proj) => {
+                if let Some(loaded) = self.loaded.as_mut() {
+                    loaded.projection = proj;
+                }
+                self.recompute_visible();
+            }
+            Err(e) => {
+                self.import.status =
+                    Some(StatusMessage::error(format!("Reprojection failed: {}", e)));
+            }
+        }
+    }
+
+    /// Build the instance batches for the current visible set. Returns an
+    /// empty result when no dataset is loaded or the dataset is hidden.
     pub fn build_point_cloud(&mut self) -> point_cloud::PointCloudBuildResult {
+        let empty = || point_cloud::PointCloudBuildResult {
+            batches: Vec::new(),
+            rendered_points: 0,
+            downsampled: false,
+        };
+        if !self.visible {
+            return empty();
+        }
         let Some(loaded) = &self.loaded else {
-            return point_cloud::PointCloudBuildResult {
-                batches: Vec::new(),
-                rendered_points: 0,
-                downsampled: false,
-            };
+            return empty();
         };
         let result = point_cloud::build_instances(
             &loaded.projection.points,
@@ -391,11 +485,12 @@ impl DatasetView {
         let screen_center = ctx.screen_rect().center();
         egui::Window::new("📊 Dataset Visualizer")
             .open(&mut open)
-            .default_size([540.0, 520.0])
+            // Fixed footprint: the window must not grow when a dataset is
+            // loaded. Long content scrolls inside instead of widening.
+            .fixed_size([540.0, 520.0])
             // Spawn centered on screen; remains draggable afterwards.
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(screen_center)
-            .resizable(true)
             .show(ctx, |ui| {
                 action = self.contents(ui);
             });
@@ -407,7 +502,7 @@ impl DatasetView {
 
     /// Window body: tab bar, summary strip and the active tab's panel.
     fn contents(&mut self, ui: &mut egui::Ui) -> DatasetAction {
-        let mut action = DatasetAction::None;
+        let action = DatasetAction::None;
 
         // --- Tab bar (centered) ---
         ui.vertical_centered(|ui| {
@@ -460,23 +555,6 @@ impl DatasetView {
                     self.start_import(req);
                 }
             }
-            DatasetTab::Explore => {
-                if search_panel::show(ui, &mut self.search_text, &self.search_error) {
-                    self.recompute_visible();
-                }
-                ui.add_space(4.0);
-                let loaded = self.loaded.as_ref().unwrap();
-                if let Some(focus) = dataset_table::show(
-                    ui,
-                    &loaded.dataset,
-                    &loaded.projection.points,
-                    &self.visible_rows,
-                    &mut self.settings.highlighted_row,
-                ) {
-                    action = DatasetAction::FocusPoint(focus);
-                    self.render_dirty = true;
-                }
-            }
             DatasetTab::Labels => {
                 let loaded = self.loaded.as_ref().unwrap();
                 let stats = loaded.dataset.metadata.labels.clone();
@@ -521,6 +599,67 @@ impl DatasetView {
                     });
                 if changed {
                     self.render_dirty = true;
+                }
+
+                // --- Reconfigure the projection on the loaded dataset ---
+                ui.add_space(8.0);
+                ui.separator();
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("Projection").heading());
+                });
+
+                let col_names: Vec<String> = self
+                    .loaded
+                    .as_ref()
+                    .map(|l| l.dataset.metadata.column_names.clone())
+                    .unwrap_or_default();
+                let n_cols = col_names.len();
+                let mut apply = false;
+                egui::Grid::new("projection_grid")
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label("Method");
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut self.import.use_pca, true, "PCA");
+                            ui.radio_value(&mut self.import.use_pca, false, "Direct columns");
+                        });
+                        ui.end_row();
+
+                        ui.label("Dimensions");
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut self.import.dims, 1, "1D");
+                            ui.radio_value(&mut self.import.dims, 2, "2D");
+                            ui.radio_value(&mut self.import.dims, 3, "3D");
+                        });
+                        ui.end_row();
+
+                        // Direct projection: pick the column feeding each axis
+                        // from the real column names.
+                        if !self.import.use_pca && n_cols > 0 {
+                            let dims = self.import.dims.clamp(1, 3) as usize;
+                            for (a, axis) in ["X", "Y", "Z"].iter().enumerate().take(dims) {
+                                ui.label(format!("{} column", axis));
+                                let sel = self.import.axes[a].min(n_cols - 1);
+                                egui::ComboBox::from_id_source(format!("axis_combo_{}", a))
+                                    .selected_text(col_names[sel].clone())
+                                    .show_ui(ui, |ui| {
+                                        for (ci, name) in col_names.iter().enumerate() {
+                                            ui.selectable_value(&mut self.import.axes[a], ci, name);
+                                        }
+                                    });
+                                ui.end_row();
+                            }
+                        }
+                    });
+                ui.vertical_centered(|ui| {
+                    if ui.button("Apply projection").clicked() {
+                        apply = true;
+                    }
+                });
+                if apply {
+                    let spec = self.import.projection();
+                    self.reproject(spec);
                 }
             }
             DatasetTab::Export => {
@@ -575,7 +714,8 @@ impl DatasetView {
         match req.source {
             ImportSource::Builtin(name) => match builtin::BuiltinDataset::default_of(name) {
                 Some(kind) => {
-                    let loaded = prepare_dataset(builtin::generate(kind, 42), req.method, None);
+                    let loaded =
+                        prepare_dataset_spec(builtin::generate(kind, 42), &req.projection, None);
                     match loaded {
                         Ok(l) => self.install(l),
                         Err(e) => {
@@ -597,12 +737,12 @@ impl DatasetView {
                 )));
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.worker = Some(rx);
-                let method = req.method;
+                let spec = req.projection;
                 let max_rows = req.max_rows;
                 std::thread::spawn(move || {
                     let cache_dir = PathBuf::from(CACHE_DIR);
                     let result =
-                        load_dataset_pipeline(&path, max_rows, method, Some(&cache_dir))
+                        load_dataset_pipeline_spec(&path, max_rows, &spec, Some(&cache_dir))
                             .map_err(|e| e.to_string());
                     let _ = tx.send(result);
                 });
@@ -625,11 +765,21 @@ fn empty_state(ui: &mut egui::Ui) {
 
 /// Full import pipeline used by the worker thread: load file, build/reuse
 /// the label index cache, compute/reuse the 3D projection cache, persist
-/// metadata JSON.
+/// metadata JSON. Convenience wrapper using a full 3D projection.
 pub fn load_dataset_pipeline(
     path: &std::path::Path,
     max_rows: Option<usize>,
     method: ProjectionMethod,
+    cache_dir: Option<&std::path::Path>,
+) -> crate::dataset::Result<LoadedDataset> {
+    load_dataset_pipeline_spec(path, max_rows, &ProjectionSpec::full(method), cache_dir)
+}
+
+/// Full import pipeline for an explicit [`ProjectionSpec`] (dims + axes).
+pub fn load_dataset_pipeline_spec(
+    path: &std::path::Path,
+    max_rows: Option<usize>,
+    spec: &ProjectionSpec,
     cache_dir: Option<&std::path::Path>,
 ) -> crate::dataset::Result<LoadedDataset> {
     let opts = loader::LoadOptions {
@@ -637,26 +787,31 @@ pub fn load_dataset_pipeline(
         label_column: None,
     };
     let dataset = loader::load(path, &opts)?;
-    prepare_dataset_cached(dataset, method, cache_dir)
+    prepare_dataset_spec(dataset, spec, cache_dir)
 }
 
 /// Index + projection for an already-loaded dataset, with optional caching.
+/// Convenience wrapper using a full 3D projection.
 pub fn prepare_dataset(
     dataset: Dataset,
     method: ProjectionMethod,
     cache_dir: Option<&std::path::Path>,
 ) -> crate::dataset::Result<LoadedDataset> {
-    prepare_dataset_cached(dataset, method, cache_dir)
+    prepare_dataset_spec(dataset, &ProjectionSpec::full(method), cache_dir)
 }
 
-fn prepare_dataset_cached(
+/// Index + projection for an already-loaded dataset using an explicit
+/// [`ProjectionSpec`], with optional caching.
+pub fn prepare_dataset_spec(
     dataset: Dataset,
-    method: ProjectionMethod,
+    spec: &ProjectionSpec,
     cache_dir: Option<&std::path::Path>,
 ) -> crate::dataset::Result<LoadedDataset> {
+    // The label index is independent of the projection, so it is keyed only by
+    // the dataset content (PCA-3 tag) and shared across projection configs.
     let index = match cache_dir {
         Some(dir) => {
-            let key = preprocessor::cache_key(&dataset, method);
+            let key = preprocessor::cache_key(&dataset, ProjectionMethod::Pca);
             let index_path = dir.join(format!("{:016x}.index.json", key));
             match DatasetIndex::load_json(&index_path) {
                 Ok(idx) if idx.n_rows == dataset.n_rows() => idx,
@@ -670,10 +825,10 @@ fn prepare_dataset_cached(
         None => DatasetIndex::build(&dataset.labels, dataset.label_names.len()),
     };
 
-    let projection = preprocessor::project(&dataset, method, cache_dir)?;
+    let projection = preprocessor::project_spec(&dataset, spec, cache_dir)?;
 
     if let Some(dir) = cache_dir {
-        let key = preprocessor::cache_key(&dataset, method);
+        let key = preprocessor::cache_key_spec(&dataset, spec);
         let _ = dataset
             .metadata
             .save_json(&dir.join(format!("{:016x}.meta.json", key)));
@@ -711,7 +866,7 @@ mod tests {
 
     #[test]
     fn tab_metadata_is_consistent() {
-        assert_eq!(DatasetTab::ALL.len(), 5);
+        assert_eq!(DatasetTab::ALL.len(), 4);
         // Titles unique and non-empty.
         for (i, a) in DatasetTab::ALL.iter().enumerate() {
             assert!(!a.title().is_empty());
@@ -724,6 +879,22 @@ mod tests {
         for tab in &DatasetTab::ALL[1..] {
             assert!(tab.needs_dataset());
         }
+    }
+
+    #[test]
+    fn dataset_visibility_gates_the_point_cloud() {
+        let loaded = prepare_dataset(
+            builtin::generate(builtin::BuiltinDataset::default_of("blobs").unwrap(), 1),
+            ProjectionMethod::Direct,
+            None,
+        )
+        .unwrap();
+        let mut view = DatasetView::new();
+        view.install(loaded);
+        assert!(view.build_point_cloud().rendered_points > 0);
+        view.set_visible(false);
+        assert_eq!(view.build_point_cloud().rendered_points, 0);
+        assert!(view.centroid().is_some());
     }
 
     #[test]

@@ -38,7 +38,7 @@ pub fn show(ui: &mut egui::Ui, labels: &[LabelStat], enabled: &mut HashSet<u32>)
     ui.add_space(4.0);
 
     // Two columns keep long label lists compact and centered.
-    let half = (labels.len() + 1) / 2;
+    let half = labels.len().div_ceil(2);
     ui.columns(2, |cols| {
         for (id, stat) in labels.iter().enumerate() {
             let col = &mut cols[if id < half { 0 } else { 1 }];

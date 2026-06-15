@@ -59,7 +59,7 @@ pub fn build_instances(
 ) -> PointCloudBuildResult {
     let total = visible_rows.len();
     let stride = if total > MAX_RENDER_POINTS {
-        (total + MAX_RENDER_POINTS - 1) / MAX_RENDER_POINTS
+        total.div_ceil(MAX_RENDER_POINTS)
     } else {
         1
     };

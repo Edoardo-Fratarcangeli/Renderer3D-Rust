@@ -452,3 +452,86 @@ pub fn create_arrow(length: f32, thickness: f32, color: [f32; 3]) -> MeshData {
 
     MeshData { vertices, indices }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every index must reference a real vertex and all coordinates finite.
+    fn assert_indices_in_range(m: &MeshData) {
+        assert!(!m.vertices.is_empty(), "mesh has no vertices");
+        assert!(!m.indices.is_empty(), "mesh has no indices");
+        let n = m.vertices.len() as u16;
+        for &i in &m.indices {
+            assert!(i < n, "index {i} out of range (len {n})");
+        }
+        for v in &m.vertices {
+            for c in v.position.iter().chain(v.normal.iter()) {
+                assert!(c.is_finite(), "non-finite component {c}");
+            }
+        }
+    }
+
+    #[test]
+    fn cube_is_a_closed_triangle_mesh() {
+        let m = create_cube();
+        assert_indices_in_range(&m);
+        assert_eq!(m.indices.len() % 3, 0, "triangles");
+        // Unit cube spans [-0.5, 0.5] on every axis.
+        for v in &m.vertices {
+            for c in 0..3 {
+                assert!(v.position[c].abs() <= 0.5 + 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn sphere_vertices_lie_on_the_radius() {
+        let r = 0.5;
+        let m = create_sphere(r, 16, 16);
+        assert_indices_in_range(&m);
+        assert_eq!(m.indices.len() % 3, 0);
+        for v in &m.vertices {
+            let d = (v.position[0].powi(2) + v.position[1].powi(2) + v.position[2].powi(2)).sqrt();
+            assert!((d - r).abs() < 1e-3, "vertex off-sphere: {d}");
+        }
+    }
+
+    #[test]
+    fn sphere_segment_count_scales_vertices() {
+        let small = create_sphere(1.0, 8, 8);
+        let large = create_sphere(1.0, 32, 32);
+        assert!(large.vertices.len() > small.vertices.len());
+    }
+
+    #[test]
+    fn plane_is_flat_on_y() {
+        let m = create_plane(2.0);
+        assert_indices_in_range(&m);
+        assert_eq!(m.indices.len() % 3, 0);
+        assert!(m.vertices.iter().all(|v| v.position[1].abs() < 1e-6));
+    }
+
+    #[test]
+    fn grids_build_for_every_orientation() {
+        for plane_normal in 0u8..=2 {
+            let m = create_grid(10, 1.0, plane_normal);
+            assert_indices_in_range(&m);
+            // Grids are line lists: indices come in pairs.
+            assert_eq!(m.indices.len() % 2, 0);
+        }
+    }
+
+    #[test]
+    fn thick_axes_and_arrow_are_valid_meshes() {
+        let axes = create_thick_axes(3.0, 0.05);
+        assert_indices_in_range(&axes);
+        assert_eq!(axes.indices.len() % 3, 0);
+
+        let arrow = create_arrow(1.0, 0.04, [1.0, 1.0, 0.0]);
+        assert_indices_in_range(&arrow);
+        assert_eq!(arrow.indices.len() % 3, 0);
+        // The arrow carries the requested color.
+        assert!(arrow.vertices.iter().all(|v| v.color == [1.0, 1.0, 0.0]));
+    }
+}

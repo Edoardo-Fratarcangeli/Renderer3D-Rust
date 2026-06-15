@@ -18,18 +18,18 @@ use rendering_3d::state::{
 // UI Panel Tests
 #[test]
 fn test_show_settings() {
-    assert_eq!(DEFAULT_SHOW_SETTINGS, false, "Show Settings mismatch");
+    assert!(!DEFAULT_SHOW_SETTINGS, "Show Settings mismatch");
 }
 
 #[test]
 fn test_show_add_panel() {
-    assert_eq!(DEFAULT_SHOW_ADD_PANEL, false, "Show Add Panel mismatch");
+    assert!(!DEFAULT_SHOW_ADD_PANEL, "Show Add Panel mismatch");
 }
 
 #[test]
 fn test_bottom_panel_expanded() {
-    assert_eq!(
-        DEFAULT_BOTTOM_PANEL_EXPANDED, false,
+    assert!(
+        !DEFAULT_BOTTOM_PANEL_EXPANDED,
         "Bottom Panel Expanded mismatch"
     );
 }
@@ -37,22 +37,22 @@ fn test_bottom_panel_expanded() {
 // Grid Tests
 #[test]
 fn test_show_grid_xy() {
-    assert_eq!(DEFAULT_SHOW_GRID_XY, true, "Show Grid XY mismatch");
+    assert!(DEFAULT_SHOW_GRID_XY, "Show Grid XY mismatch");
 }
 
 #[test]
 fn test_show_grid_xz() {
-    assert_eq!(DEFAULT_SHOW_GRID_XZ, false, "Show Grid XZ mismatch");
+    assert!(!DEFAULT_SHOW_GRID_XZ, "Show Grid XZ mismatch");
 }
 
 #[test]
 fn test_show_grid_yz() {
-    assert_eq!(DEFAULT_SHOW_GRID_YZ, false, "Show Grid YZ mismatch");
+    assert!(!DEFAULT_SHOW_GRID_YZ, "Show Grid YZ mismatch");
 }
 
 #[test]
 fn test_show_axes() {
-    assert_eq!(DEFAULT_SHOW_AXES, true, "Show Axes mismatch");
+    assert!(DEFAULT_SHOW_AXES, "Show Axes mismatch");
 }
 
 // Background Test

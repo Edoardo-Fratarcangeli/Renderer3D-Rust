@@ -5,7 +5,7 @@
 // egui::Context. These tests cover the rendering paths and the
 // import-worker polling loop end to end.
 
-use rendering_3d::dataset::preprocessor::ProjectionMethod;
+use rendering_3d::dataset::preprocessor::{ProjectionMethod, ProjectionSpec};
 use rendering_3d::ui::{
     prepare_dataset, DatasetAction, DatasetTab, DatasetView, ImportRequest, ImportSource,
     StatusKind,
@@ -33,7 +33,7 @@ fn loaded_view() -> DatasetView {
     view.start_import(ImportRequest {
         source: ImportSource::Builtin("blobs"),
         max_rows: None,
-        method: ProjectionMethod::Pca,
+        projection: ProjectionSpec::full(ProjectionMethod::Pca),
     });
     assert!(view.loaded.is_some(), "builtin import is synchronous");
     view
@@ -71,13 +71,87 @@ fn data_tabs_show_empty_state_without_dataset() {
 }
 
 #[test]
-fn builtin_import_lands_on_explore_tab_with_success_status() {
+fn builtin_import_lands_on_labels_tab_with_success_status() {
     let view = loaded_view();
-    assert_eq!(view.tab, DatasetTab::Explore);
+    assert_eq!(view.tab, DatasetTab::Labels);
     let status = view.import.status.as_ref().expect("status after import");
     assert_eq!(status.kind, StatusKind::Success);
     assert!(status.text.contains("blobs"));
     assert_eq!(view.visible_rows.len(), view.loaded.as_ref().unwrap().dataset.n_rows());
+}
+
+#[test]
+fn projection_dims_control_the_active_axes() {
+    // 2D import: the z axis must be flat.
+    let mut view2d = DatasetView::new();
+    view2d.start_import(ImportRequest {
+        source: ImportSource::Builtin("blobs"),
+        max_rows: None,
+        projection: ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 2,
+            axes: [0, 1, 2],
+        },
+    });
+    let pts = &view2d.loaded.as_ref().unwrap().projection.points;
+    assert!(pts.iter().all(|p| p[2] == 0.0), "2D import must flatten z");
+    assert!(pts.iter().any(|p| p[1] != 0.0), "2D import keeps y");
+
+    // 1D import: both y and z must be flat.
+    let mut view1d = DatasetView::new();
+    view1d.start_import(ImportRequest {
+        source: ImportSource::Builtin("blobs"),
+        max_rows: None,
+        projection: ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 1,
+            axes: [0, 1, 2],
+        },
+    });
+    let pts = &view1d.loaded.as_ref().unwrap().projection.points;
+    assert!(
+        pts.iter().all(|p| p[1] == 0.0 && p[2] == 0.0),
+        "1D import must flatten y and z"
+    );
+}
+
+#[test]
+fn import_and_view_tabs_render_in_direct_mode() {
+    // Exercise the Direct-projection UI branches: per-axis column pickers in
+    // the Import dialog and the column dropdowns in the View tab.
+    let ctx = egui::Context::default();
+    let mut view = loaded_view();
+    view.show_window = true;
+    view.import.use_pca = false;
+    view.import.dims = 2;
+
+    view.tab = DatasetTab::Import;
+    run_frame(&ctx, &mut view);
+    view.import.loading = true; // spinner branch
+    run_frame(&ctx, &mut view);
+    view.import.loading = false;
+
+    view.tab = DatasetTab::View;
+    run_frame(&ctx, &mut view); // projection grid with Direct column combos
+}
+
+#[test]
+fn reproject_switches_dimensions_in_place() {
+    let mut view = loaded_view();
+    let rows = view.loaded.as_ref().unwrap().dataset.n_rows();
+    view.reproject(ProjectionSpec {
+        method: ProjectionMethod::Direct,
+        dims: 2,
+        axes: [0, 1, 2],
+    });
+    let loaded = view.loaded.as_ref().unwrap();
+    assert_eq!(loaded.projection.points.len(), rows, "row count preserved");
+    assert!(loaded.projection.points.iter().all(|p| p[2] == 0.0));
+
+    // Reprojecting with no dataset is a no-op (early return, no panic).
+    let mut empty = DatasetView::new();
+    empty.reproject(ProjectionSpec::full(ProjectionMethod::Pca));
+    assert!(empty.loaded.is_none());
 }
 
 #[test]
@@ -86,7 +160,7 @@ fn unknown_builtin_reports_error_status() {
     view.start_import(ImportRequest {
         source: ImportSource::Builtin("not_a_dataset"),
         max_rows: None,
-        method: ProjectionMethod::Pca,
+        projection: ProjectionSpec::full(ProjectionMethod::Pca),
     });
     assert!(view.loaded.is_none());
     assert_eq!(view.import.status.as_ref().unwrap().kind, StatusKind::Error);
@@ -117,7 +191,7 @@ fn file_import_runs_on_worker_thread_and_installs() {
     view.start_import(ImportRequest {
         source: ImportSource::Path(csv),
         max_rows: None,
-        method: ProjectionMethod::Direct,
+        projection: ProjectionSpec::full(ProjectionMethod::Direct),
     });
     assert!(view.is_loading());
 
@@ -128,7 +202,7 @@ fn file_import_runs_on_worker_thread_and_installs() {
         .unwrap_or_else(|| panic!("dataset installed; status = {:?}", view.import.status));
     assert_eq!(loaded.dataset.n_rows(), 3);
     assert_eq!(view.import.status.as_ref().unwrap().kind, StatusKind::Success);
-    // A frame after install renders the Explore tab with the table.
+    // A frame after install renders the landing (Labels) tab.
     run_frame(&ctx, &mut view);
 }
 
@@ -140,7 +214,7 @@ fn failed_file_import_surfaces_error_status() {
     view.start_import(ImportRequest {
         source: ImportSource::Path("/definitely/missing.csv".into()),
         max_rows: None,
-        method: ProjectionMethod::Pca,
+        projection: ProjectionSpec::full(ProjectionMethod::Pca),
     });
     pump_until_idle(&ctx, &mut view, 30);
     assert!(view.loaded.is_none());
@@ -258,11 +332,12 @@ fn status_lines_and_spinner_render_in_every_kind() {
     let mut view = loaded_view();
     view.show_window = true;
 
-    // Search error banner on the Explore tab.
-    view.tab = DatasetTab::Explore;
+    // A bad search query still surfaces an error through recompute (the search
+    // box itself no longer has a tab; filtering lives behind the Labels tab).
     view.search_text = "row:bad".into();
     view.recompute_visible();
     assert!(view.search_error.is_some());
+    view.tab = DatasetTab::Labels;
     run_frame(&ctx, &mut view);
 
     // Export status, success then error.
@@ -280,8 +355,8 @@ fn status_lines_and_spinner_render_in_every_kind() {
     run_frame(&ctx, &mut view);
     view.import.loading = false;
 
-    // Highlighted table row renders the selected style.
-    view.tab = DatasetTab::Explore;
+    // Highlight a row and render the View tab.
+    view.tab = DatasetTab::View;
     view.search_text.clear();
     view.recompute_visible();
     view.settings.highlighted_row = view.visible_rows.first().copied();

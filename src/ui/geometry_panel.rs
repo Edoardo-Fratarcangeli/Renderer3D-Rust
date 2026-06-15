@@ -31,6 +31,15 @@ pub struct GeometryView {
     /// Imported layers, drawn in order.
     pub layers: Vec<GeometryLayer>,
 
+    /// File path field for 3D solid model import (STL/OBJ/glTF).
+    pub mesh_path_text: String,
+    /// True while the host is loading a 3D model on a worker thread.
+    pub mesh_loading: bool,
+    /// A 3D-model path the user asked to import; the host
+    /// ([`crate::state::State`]) drains it, loads the mesh on a worker thread
+    /// and adds it to the scene as a new object.
+    mesh_request: Option<std::path::PathBuf>,
+
     /// Counter used to name pasted layers and pick default colors.
     next_layer_id: usize,
     render_dirty: bool,
@@ -52,6 +61,9 @@ impl GeometryView {
             status: None,
             loading: false,
             layers: Vec::new(),
+            mesh_path_text: String::new(),
+            mesh_loading: false,
+            mesh_request: None,
             next_layer_id: 0,
             render_dirty: false,
             worker: None,
@@ -123,6 +135,12 @@ impl GeometryView {
         build_batches(&self.layers)
     }
 
+    /// Take a pending 3D-model import request, if the user clicked "Import 3D
+    /// model" this frame. The host loads the file and adds it to the scene.
+    pub fn take_mesh_request(&mut self) -> Option<std::path::PathBuf> {
+        self.mesh_request.take()
+    }
+
     fn poll_worker(&mut self) {
         let Some(rx) = &self.worker else { return };
         match rx.try_recv() {
@@ -156,7 +174,7 @@ impl GeometryView {
         let mut focus = None;
         let mut open = true;
         let screen_center = ctx.screen_rect().center();
-        egui::Window::new("📦 Geometry Import")
+        egui::Window::new("🧊 Solids Import")
             .open(&mut open)
             .default_size([460.0, 480.0])
             .pivot(egui::Align2::CENTER_CENTER)
@@ -173,6 +191,39 @@ impl GeometryView {
 
     fn contents(&mut self, ui: &mut egui::Ui) -> Option<[f32; 3]> {
         let mut focus = None;
+
+        // --- 3D solid model import (STL / OBJ / glTF) ---
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("Import a 3D model").heading());
+            ui.label(egui::RichText::new("STL · OBJ · glTF / GLB · STEP").weak());
+        });
+        ui.horizontal(|ui| {
+            ui.label("Model");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.mesh_path_text)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("path/to/model.stl"),
+            );
+        });
+        ui.vertical_centered(|ui| {
+            ui.horizontal(|ui| {
+                let can_load = !self.mesh_loading && !self.mesh_path_text.trim().is_empty();
+                if ui
+                    .add_enabled(can_load, egui::Button::new("📥 Import 3D model"))
+                    .clicked()
+                {
+                    self.mesh_request =
+                        Some(std::path::PathBuf::from(self.mesh_path_text.trim()));
+                    self.mesh_loading = true;
+                }
+                if self.mesh_loading {
+                    ui.spinner();
+                }
+            });
+        });
+
+        ui.add_space(8.0);
+        ui.separator();
 
         // --- Paste area ---
         ui.vertical_centered(|ui| {
@@ -207,16 +258,16 @@ impl GeometryView {
         // --- File import ---
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new("Import a file").heading());
-            ui.label(
-                egui::RichText::new("CSV · Excel (xlsx/xls/ods) · JSON · XYZ · TXT").weak(),
-            );
+            // Tabular data (CSV/Excel) lives in the Dataset window now; Solids
+            // covers geometry descriptions and (soon) 3D mesh formats.
+            ui.label(egui::RichText::new("JSON · XYZ · TXT (DSL)").weak());
         });
         ui.horizontal(|ui| {
             ui.label("File");
             ui.add(
                 egui::TextEdit::singleline(&mut self.path_text)
                     .desired_width(f32::INFINITY)
-                    .hint_text("path/to/geometries.xlsx"),
+                    .hint_text("path/to/geometries.json"),
             );
         });
         ui.vertical_centered(|ui| {

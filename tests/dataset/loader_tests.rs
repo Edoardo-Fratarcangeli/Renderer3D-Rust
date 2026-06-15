@@ -80,6 +80,101 @@ fn csv_streams_rows_and_detects_label_column() {
 }
 
 #[test]
+fn excel_loads_features_and_detects_label_column() {
+    use rust_xlsxwriter::Workbook;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("data.xlsx");
+
+    let mut workbook = Workbook::new();
+    let sheet = workbook.add_worksheet();
+    for (col, header) in ["a", "b", "label"].iter().enumerate() {
+        sheet.write_string(0, col as u16, *header).unwrap();
+    }
+    let rows: [(f64, f64, &str); 4] = [
+        (1.0, 2.0, "x"),
+        (3.0, 4.0, "y"),
+        (5.0, 6.0, "x"),
+        (7.0, 8.0, "y"),
+    ];
+    for (i, (a, b, label)) in rows.iter().enumerate() {
+        let r = (i + 1) as u32;
+        sheet.write_number(r, 0, *a).unwrap();
+        sheet.write_number(r, 1, *b).unwrap();
+        sheet.write_string(r, 2, *label).unwrap();
+    }
+    workbook.save(&path).unwrap();
+
+    let ds = load(&path, &LoadOptions::default()).unwrap();
+    assert_eq!(ds.n_rows(), 4);
+    assert_eq!(ds.n_cols(), 2);
+    assert_eq!(ds.metadata.column_names, vec!["a", "b"]);
+    assert_eq!(ds.metadata.format, "excel");
+    assert_eq!(ds.metadata.label_column.as_deref(), Some("label"));
+    assert_eq!(ds.label_names, vec!["x", "y"]);
+    assert_eq!(ds.value(0, 0), 1.0);
+    assert_eq!(ds.value(3, 1), 8.0);
+}
+
+#[test]
+fn excel_edge_cases_caps_blanks_unlabeled_and_errors() {
+    use rust_xlsxwriter::Workbook;
+
+    let dir = tempfile::tempdir().unwrap();
+
+    // (a) max_rows cap + a blank trailing row that must be skipped.
+    let capped = dir.path().join("capped.xlsx");
+    {
+        let mut wb = Workbook::new();
+        let s = wb.add_worksheet();
+        for (c, h) in ["a", "b"].iter().enumerate() {
+            s.write_string(0, c as u16, *h).unwrap();
+        }
+        for r in 1..=5u32 {
+            s.write_number(r, 0, r as f64).unwrap();
+            s.write_number(r, 1, (r * 10) as f64).unwrap();
+        }
+        // Row 6 left entirely blank.
+        wb.save(&capped).unwrap();
+    }
+    let opts = LoadOptions {
+        max_rows: Some(3),
+        label_column: None,
+    };
+    let ds = load(&capped, &opts).unwrap();
+    assert_eq!(ds.n_rows(), 3, "max_rows must cap Excel rows");
+    // No label column -> unlabeled fallback.
+    assert_eq!(ds.label_names, vec!["unlabeled"]);
+
+    // (b) a sheet whose only column is the label -> no feature columns.
+    let no_feat = dir.path().join("nofeat.xlsx");
+    {
+        let mut wb = Workbook::new();
+        let s = wb.add_worksheet();
+        s.write_string(0, 0, "label").unwrap();
+        s.write_string(1, 0, "x").unwrap();
+        wb.save(&no_feat).unwrap();
+    }
+    let err = load(&no_feat, &LoadOptions::default()).unwrap_err();
+    assert!(err.to_string().contains("no feature columns"), "got: {err}");
+
+    // (c) a non-numeric feature cell is a clear error.
+    let bad = dir.path().join("bad.xlsx");
+    {
+        let mut wb = Workbook::new();
+        let s = wb.add_worksheet();
+        for (c, h) in ["a", "label"].iter().enumerate() {
+            s.write_string(0, c as u16, *h).unwrap();
+        }
+        s.write_string(1, 0, "oops").unwrap();
+        s.write_string(1, 1, "k").unwrap();
+        wb.save(&bad).unwrap();
+    }
+    let err = load(&bad, &LoadOptions::default()).unwrap_err();
+    assert!(err.to_string().contains("non numeric"), "got: {err}");
+}
+
+#[test]
 fn csv_reports_non_numeric_cells() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bad.csv");

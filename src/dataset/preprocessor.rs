@@ -37,6 +37,61 @@ impl ProjectionMethod {
     }
 }
 
+/// A fully specified projection: which method, how many spatial dimensions to
+/// map (1, 2 or 3), and — for [`ProjectionMethod::Direct`] — which feature
+/// column feeds each output axis. This is what makes the dataset import
+/// configurable (project to a 1D line, a 2D plane, or the full 3D space, over
+/// a chosen subset of columns / principal components).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectionSpec {
+    pub method: ProjectionMethod,
+    /// Number of spatial dimensions actually used (clamped to 1..=3). Unused
+    /// axes are left at 0, so a 2D projection lies on the z = 0 plane and a 1D
+    /// projection on the x axis.
+    pub dims: u8,
+    /// For `Direct`: the source feature-column index mapped to X, Y, Z. Only
+    /// the first `dims` entries matter. Ignored for `Pca` (axes are the top
+    /// principal components).
+    pub axes: [usize; 3],
+}
+
+impl Default for ProjectionSpec {
+    fn default() -> Self {
+        Self::full(ProjectionMethod::Pca)
+    }
+}
+
+impl ProjectionSpec {
+    /// Full 3D projection over the first three columns / components.
+    pub fn full(method: ProjectionMethod) -> Self {
+        Self {
+            method,
+            dims: 3,
+            axes: [0, 1, 2],
+        }
+    }
+
+    /// Effective dimension count, clamped to the supported 1..=3 range.
+    pub fn dims(&self) -> usize {
+        self.dims.clamp(1, 3) as usize
+    }
+
+    /// Stable, unique cache/identity tag, e.g. `"pca-2"` or
+    /// `"direct-3-0_4_7"`.
+    pub fn tag(&self) -> String {
+        match self.method {
+            ProjectionMethod::Pca => format!("pca-{}", self.dims()),
+            ProjectionMethod::Direct => format!(
+                "direct-{}-{}_{}_{}",
+                self.dims(),
+                self.axes[0],
+                self.axes[1],
+                self.axes[2]
+            ),
+        }
+    }
+}
+
 /// Projected 3D coordinates, normalized to fit the view cube.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Projection {
@@ -46,28 +101,42 @@ pub struct Projection {
     pub from_cache: bool,
 }
 
-/// Compute (or load from cache) the 3D projection of a dataset.
+/// Compute (or load from cache) the full 3D projection of a dataset.
 ///
+/// Convenience wrapper over [`project_spec`] using a full 3D spec.
 /// `cache_dir = None` disables caching entirely.
 pub fn project(
     dataset: &Dataset,
     method: ProjectionMethod,
     cache_dir: Option<&Path>,
 ) -> Result<Projection> {
-    let cache_path = cache_dir.map(|dir| cache_file_path(dir, dataset, method));
+    project_spec(dataset, &ProjectionSpec::full(method), cache_dir)
+}
+
+/// Compute (or load from cache) the projection described by `spec`.
+///
+/// The result is always a `Vec<[f32; 3]>`; for 1D/2D projections the unused
+/// axes are held at 0. `cache_dir = None` disables caching entirely.
+pub fn project_spec(
+    dataset: &Dataset,
+    spec: &ProjectionSpec,
+    cache_dir: Option<&Path>,
+) -> Result<Projection> {
+    let cache_path = cache_dir.map(|dir| cache_file_path_spec(dir, dataset, spec));
     if let Some(path) = &cache_path {
         if let Ok(points) = load_projection_cache(path, dataset.n_rows()) {
             return Ok(Projection {
                 points,
-                method: method.tag().to_string(),
+                method: spec.tag(),
                 from_cache: true,
             });
         }
     }
 
-    let mut points = match method {
-        ProjectionMethod::Direct => project_direct(dataset),
-        ProjectionMethod::Pca => project_pca(dataset)?,
+    let dims = spec.dims();
+    let mut points = match spec.method {
+        ProjectionMethod::Direct => project_direct_axes(dataset, dims, spec.axes),
+        ProjectionMethod::Pca => project_pca_n(dataset, dims)?,
     };
     normalize_points(&mut points);
 
@@ -77,34 +146,37 @@ pub fn project(
     }
     Ok(Projection {
         points,
-        method: method.tag().to_string(),
+        method: spec.tag(),
         from_cache: false,
     })
 }
 
-fn project_direct(dataset: &Dataset) -> Vec<[f32; 3]> {
+/// Map `dims` chosen feature columns onto the X/Y/Z axes; unused axes stay 0.
+fn project_direct_axes(dataset: &Dataset, dims: usize, axes: [usize; 3]) -> Vec<[f32; 3]> {
+    let dims = dims.min(3);
     let mut buf = Vec::new();
     (0..dataset.n_rows())
         .map(|i| {
             dataset.row(i, &mut buf);
-            [
-                buf.first().copied().unwrap_or(0.0),
-                buf.get(1).copied().unwrap_or(0.0),
-                buf.get(2).copied().unwrap_or(0.0),
-            ]
+            let mut p = [0.0f32; 3];
+            for (a, slot) in p.iter_mut().enumerate().take(dims) {
+                *slot = buf.get(axes[a]).copied().unwrap_or(0.0);
+            }
+            p
         })
         .collect()
 }
 
-fn project_pca(dataset: &Dataset) -> Result<Vec<[f32; 3]>> {
+fn project_pca_n(dataset: &Dataset, n_components: usize) -> Result<Vec<[f32; 3]>> {
     let d = dataset.n_cols();
     let n = dataset.n_rows();
+    let n_components = n_components.clamp(1, 3);
     if n == 0 {
         return Ok(Vec::new());
     }
-    if d <= 3 {
-        // Nothing to reduce: fall back to direct axes.
-        return Ok(project_direct(dataset));
+    if d <= n_components {
+        // Not enough columns to reduce: use the columns directly.
+        return Ok(project_direct_axes(dataset, n_components, [0, 1, 2]));
     }
     if d > MAX_DIMS {
         return Err(DatasetError::Unsupported(format!(
@@ -159,9 +231,9 @@ fn project_pca(dataset: &Dataset) -> Result<Vec<[f32; 3]>> {
         }
     }
 
-    // Top-3 eigenvectors via power iteration with deflation.
-    let mut components: Vec<Vec<f64>> = Vec::with_capacity(3);
-    for k in 0..3 {
+    // Top-`n_components` eigenvectors via power iteration with deflation.
+    let mut components: Vec<Vec<f64>> = Vec::with_capacity(n_components);
+    for k in 0..n_components {
         let mut v: Vec<f64> = (0..d)
             .map(|i| {
                 // Deterministic pseudo-random start (xorshift on index).
@@ -175,13 +247,13 @@ fn project_pca(dataset: &Dataset) -> Result<Vec<[f32; 3]>> {
         for _ in 0..POWER_ITERATIONS {
             // w = C v
             let mut w = vec![0.0f64; d];
-            for r in 0..d {
+            for (r, w_r) in w.iter_mut().enumerate() {
                 let mut acc = 0.0;
                 let base = r * d;
                 for c in 0..d {
                     acc += cov[base + c] * v[c];
                 }
-                w[r] = acc;
+                *w_r = acc;
             }
             // Deflate against previously found components.
             for comp in &components {
@@ -266,6 +338,11 @@ pub fn normalize_points(points: &mut [[f32; 3]]) {
 // projection method, so edits to the source invalidate the cache naturally.
 
 pub fn cache_key(dataset: &Dataset, method: ProjectionMethod) -> u64 {
+    cache_key_spec(dataset, &ProjectionSpec::full(method))
+}
+
+/// Cache key for a fully specified projection (see [`cache_key`]).
+pub fn cache_key_spec(dataset: &Dataset, spec: &ProjectionSpec) -> u64 {
     let meta = &dataset.metadata;
     let (size, mtime) = std::fs::metadata(&meta.source_path)
         .map(|m| {
@@ -286,12 +363,16 @@ pub fn cache_key(dataset: &Dataset, method: ProjectionMethod) -> u64 {
         &mtime.to_le_bytes(),
         &(meta.n_rows as u64).to_le_bytes(),
         &(meta.n_cols as u64).to_le_bytes(),
-        method.tag().as_bytes(),
+        spec.tag().as_bytes(),
     ])
 }
 
 pub fn cache_file_path(cache_dir: &Path, dataset: &Dataset, method: ProjectionMethod) -> PathBuf {
-    cache_dir.join(format!("{:016x}.proj", cache_key(dataset, method)))
+    cache_file_path_spec(cache_dir, dataset, &ProjectionSpec::full(method))
+}
+
+pub fn cache_file_path_spec(cache_dir: &Path, dataset: &Dataset, spec: &ProjectionSpec) -> PathBuf {
+    cache_dir.join(format!("{:016x}.proj", cache_key_spec(dataset, spec)))
 }
 
 pub fn save_projection_cache(path: &Path, points: &[[f32; 3]]) -> Result<()> {
@@ -338,6 +419,89 @@ mod tests {
     fn method_tags_are_distinct() {
         assert_eq!(ProjectionMethod::Pca.tag(), "pca");
         assert_eq!(ProjectionMethod::Direct.tag(), "direct");
+    }
+
+    fn grid_dataset() -> Dataset {
+        // 4 rows, 4 distinct columns so column selection is observable.
+        let data = vec![
+            0.0, 10.0, 20.0, 30.0, //
+            1.0, 11.0, 21.0, 31.0, //
+            2.0, 12.0, 22.0, 32.0, //
+            3.0, 13.0, 23.0, 33.0,
+        ];
+        Dataset {
+            metadata: super::super::metadata::DatasetMetadata::new("g", "builtin", 4, 4),
+            source: super::super::FeatureSource::InMemory(data),
+            labels: vec![0; 4],
+            label_names: vec!["unlabeled".into()],
+        }
+    }
+
+    #[test]
+    fn spec_tags_are_unique_per_config() {
+        let a = ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 2,
+            axes: [0, 3, 2],
+        };
+        let b = ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 2,
+            axes: [0, 1, 2],
+        };
+        assert_ne!(a.tag(), b.tag());
+        assert_eq!(ProjectionSpec::full(ProjectionMethod::Pca).tag(), "pca-3");
+    }
+
+    #[test]
+    fn one_dimensional_projection_flattens_y_and_z() {
+        let ds = grid_dataset();
+        let spec = ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 1,
+            axes: [0, 1, 2],
+        };
+        let proj = project_spec(&ds, &spec, None).unwrap();
+        for p in &proj.points {
+            assert_eq!(p[1], 0.0);
+            assert_eq!(p[2], 0.0);
+        }
+        // The single active axis still spans the view cube.
+        let max = proj.points.iter().map(|p| p[0].abs()).fold(0.0f32, f32::max);
+        assert!((max - VIEW_HALF_EXTENT).abs() < 1e-3);
+    }
+
+    #[test]
+    fn two_dimensional_projection_flattens_z_only() {
+        let ds = grid_dataset();
+        let spec = ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 2,
+            axes: [0, 1, 2],
+        };
+        let proj = project_spec(&ds, &spec, None).unwrap();
+        assert!(proj.points.iter().all(|p| p[2] == 0.0));
+        assert!(proj.points.iter().any(|p| p[1] != 0.0));
+    }
+
+    #[test]
+    fn direct_axes_select_the_requested_columns() {
+        let ds = grid_dataset();
+        // Map column 3 -> X, column 0 -> Y.
+        let spec = ProjectionSpec {
+            method: ProjectionMethod::Direct,
+            dims: 2,
+            axes: [3, 0, 1],
+        };
+        let proj = project_spec(&ds, &spec, None).unwrap();
+        // Column 3 is constant-stride like column 0, so after normalization the
+        // X and Y spreads must match (both span the cube symmetrically).
+        let span = |axis: usize| {
+            let mx = proj.points.iter().map(|p| p[axis]).fold(f32::MIN, f32::max);
+            let mn = proj.points.iter().map(|p| p[axis]).fold(f32::MAX, f32::min);
+            mx - mn
+        };
+        assert!(span(0) > 0.0 && span(1) > 0.0);
     }
 
     #[test]

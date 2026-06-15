@@ -5,7 +5,7 @@ use winit::{event::*, window::Window};
 use crate::camera::{Camera, Uniforms};
 use crate::model::{InstanceRaw, Vertex};
 use crate::primitives;
-use crate::scene::{GeometryType, SceneObject};
+use crate::scene::{apply_undo_command, intersect_primitive, GeometryType, SceneObject, UndoCommand};
 
 // Camera Default Values (used for initialization and reset)
 pub const DEFAULT_CAMERA_YAW: f32 = 16.0;
@@ -41,12 +41,14 @@ pub struct MeshBuffers {
     pub num_indices: u32,
 }
 
-#[derive(Clone)]
-pub enum UndoCommand {
-    Add(SceneObject),
-    Delete(SceneObject),
-    Edit { old: SceneObject, new: SceneObject },
-    MultiAction(Vec<UndoCommand>),
+/// GPU buffers + CPU geometry for an imported 3D model. Unlike the built-in
+/// [`MeshBuffers`] (16-bit indices), imported meshes use 32-bit indices. The
+/// CPU [`crate::mesh::MeshData`] is retained for ray-pick selection.
+pub struct CustomMesh {
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    pub num_indices: u32,
+    pub data: std::sync::Arc<crate::mesh::MeshData>,
 }
 
 pub struct State {
@@ -116,6 +118,11 @@ pub struct State {
     pub camera_target: cgmath::Point3<f32>,
     pub mouse_pos: [f32; 2],
 
+    // Measurement tool: when active, clicking surfaces records up to two
+    // world-space points and reports the distance between them.
+    pub measure_mode: bool,
+    pub measure_points: Vec<[f32; 3]>,
+
     // Editor State
     pub editing_obj_id: Option<usize>,
     pub editing_obj_draft: Option<SceneObject>,
@@ -139,6 +146,10 @@ pub struct State {
     // Universal geometry import (layers of instanced shapes)
     pub geometry_view: crate::ui::geometry_panel::GeometryView,
     geometry_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
+
+    // Imported 3D solid models (STL/OBJ/glTF), keyed by scene-object id.
+    pub custom_meshes: std::collections::HashMap<usize, CustomMesh>,
+    mesh_worker: Option<std::sync::mpsc::Receiver<Result<(crate::mesh::MeshData, String), String>>>,
     // Low-poly sphere used for instanced batches above LOD_SPHERE_THRESHOLD
     // instances, so huge point clouds stay fast.
     sphere_lod_mesh: MeshBuffers,
@@ -146,6 +157,18 @@ pub struct State {
 
 /// Above this many instances in one batch, spheres use the low-poly mesh.
 pub const LOD_SPHERE_THRESHOLD: u32 = 2000;
+
+/// Small transparent icon button used by every row of the bottom object list
+/// (scene objects, imported datasets, …) so they share one look and one
+/// implementation instead of repeating the `Button`/`RichText` boilerplate.
+fn list_icon_button(ui: &mut egui::Ui, icon: &str, color: egui::Color32, hover: &str) -> bool {
+    ui.add(
+        egui::Button::new(egui::RichText::new(icon).color(color))
+            .fill(egui::Color32::TRANSPARENT),
+    )
+    .on_hover_text(hover)
+    .clicked()
+}
 
 impl State {
     pub async fn new(window: Window) -> Self {
@@ -457,6 +480,8 @@ impl State {
             draft_object: None,
             clipboard: Vec::new(),
             mouse_pos: [0.0, 0.0],
+            measure_mode: false,
+            measure_points: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             normal_arrow_mesh,
@@ -466,8 +491,114 @@ impl State {
             dataset_point_batches: Vec::new(),
             geometry_view: crate::ui::geometry_panel::GeometryView::new(),
             geometry_batches: Vec::new(),
+            custom_meshes: std::collections::HashMap::new(),
+            mesh_worker: None,
             sphere_lod_mesh,
         }
+    }
+
+    /// Spawn a worker thread that loads a 3D model file off the UI thread.
+    pub fn spawn_mesh_load(&mut self, path: std::path::PathBuf) {
+        self.geometry_view.mesh_loading = true;
+        self.geometry_view.status = Some(crate::ui::StatusMessage::info(format!(
+            "Loading {} ...",
+            path.display()
+        )));
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.mesh_worker = Some(rx);
+        std::thread::spawn(move || {
+            let label = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("model")
+                .to_string();
+            let result = crate::mesh::MeshData::load(&path)
+                .map(|mesh| (mesh, label))
+                .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Drain the mesh-load worker, adding the model to the scene on success.
+    fn poll_mesh_worker(&mut self) {
+        let Some(rx) = &self.mesh_worker else { return };
+        match rx.try_recv() {
+            Ok(Ok((mesh, label))) => {
+                self.mesh_worker = None;
+                self.geometry_view.mesh_loading = false;
+                self.add_mesh_object(mesh, label);
+            }
+            Ok(Err(msg)) => {
+                self.mesh_worker = None;
+                self.geometry_view.mesh_loading = false;
+                self.geometry_view.status =
+                    Some(crate::ui::StatusMessage::error(format!("Import failed: {}", msg)));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.mesh_worker = None;
+                self.geometry_view.mesh_loading = false;
+                self.geometry_view.status =
+                    Some(crate::ui::StatusMessage::error("Import worker died unexpectedly"));
+            }
+        }
+    }
+
+    /// Upload a loaded mesh to the GPU and add it as a selected scene object,
+    /// auto-scaled and centered at the origin so it is immediately visible.
+    pub fn add_mesh_object(&mut self, mesh: crate::mesh::MeshData, label: String) {
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Custom Mesh Vertex Buffer"),
+                contents: bytemuck::cast_slice(&mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Custom Mesh Index Buffer"),
+                contents: bytemuck::cast_slice(&mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+        let num_indices = mesh.indices.len() as u32;
+        let tri_count = mesh.triangle_count();
+
+        // Fit the model into roughly a 6-unit box centered at the origin.
+        let extent = mesh.max_extent();
+        let scale = if extent > 1e-6 { 6.0 / extent } else { 1.0 };
+        let center = mesh.center();
+
+        let id = self.next_id;
+        self.next_id += 1;
+
+        for obj in &mut self.objects {
+            obj.selected = false;
+        }
+        let mut obj = SceneObject::new(id, label, [0.0, 0.0, 0.0], GeometryType::Mesh);
+        obj.instance.scale = cgmath::Vector3::new(scale, scale, scale);
+        obj.instance.position =
+            cgmath::Vector3::new(-center[0] * scale, -center[1] * scale, -center[2] * scale);
+        obj.selected = true;
+
+        self.custom_meshes.insert(
+            id,
+            CustomMesh {
+                vertex_buffer,
+                index_buffer,
+                num_indices,
+                data: std::sync::Arc::new(mesh),
+            },
+        );
+        self.push_undo(UndoCommand::Add(obj.clone()));
+        self.objects.push(obj);
+
+        // Center the camera on the freshly imported model.
+        self.camera_target = cgmath::Point3::new(0.0, 0.0, 0.0);
+        self.geometry_view.status = Some(crate::ui::StatusMessage::success(format!(
+            "Imported model with {} triangles",
+            tri_count
+        )));
     }
 
     pub fn push_undo(&mut self, cmd: UndoCommand) {
@@ -493,39 +624,7 @@ impl State {
     }
 
     fn apply_undo_cmd(&mut self, cmd: UndoCommand, is_undo: bool) {
-        match cmd {
-            UndoCommand::Add(obj) => {
-                if is_undo {
-                    self.objects.retain(|o| o.id != obj.id);
-                } else {
-                    self.objects.push(obj);
-                }
-            }
-            UndoCommand::Delete(obj) => {
-                if is_undo {
-                    self.objects.push(obj);
-                } else {
-                    self.objects.retain(|o| o.id != obj.id);
-                }
-            }
-            UndoCommand::Edit { old, new } => {
-                let target = if is_undo { &old } else { &new };
-                if let Some(obj) = self.objects.iter_mut().find(|o| o.id == target.id) {
-                    *obj = target.clone();
-                }
-            }
-            UndoCommand::MultiAction(cmds) => {
-                if is_undo {
-                    for c in cmds.iter().rev() {
-                        self.apply_undo_cmd(c.clone(), is_undo);
-                    }
-                } else {
-                    for c in cmds {
-                        self.apply_undo_cmd(c.clone(), is_undo);
-                    }
-                }
-            }
-        }
+        apply_undo_command(&mut self.objects, &cmd, is_undo);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -664,42 +763,59 @@ impl State {
             WindowEvent::MouseInput { state, button, .. } => {
                 match button {
                     MouseButton::Left => {
-                        self.is_drag_active = *state == ElementState::Pressed;
-                        // If clicking background (not on UI), close panels
                         if *state == ElementState::Pressed {
                             let is_over_ui = self.egui_state.egui_ctx().is_pointer_over_area()
                                 || self.egui_state.egui_ctx().wants_pointer_input();
 
-                            // Log for debugging if picking fails again
-                            // println!("Click at physical: {:?}, is_over_ui: {}", self.mouse_pos, is_over_ui);
-
+                            // Only begin an orbit drag (and run picking) when the
+                            // press lands on the 3D viewport. Clicking a button or
+                            // panel must never rotate the camera.
                             if !is_over_ui {
-                                // Deselect panels
-                                self.show_add_panel = false;
-                                self.show_settings = false;
-
-                                // Selection Picking
                                 let x = (2.0 * self.mouse_pos[0]) / self.size.width as f32 - 1.0;
                                 let y = 1.0 - (2.0 * self.mouse_pos[1]) / self.size.height as f32;
 
-                                let now = std::time::Instant::now();
-                                let is_double_click =
-                                    now.duration_since(self.last_click_time).as_millis() < 300;
-                                self.last_click_time = now;
+                                if self.measure_mode {
+                                    // Measurement: record the surface point under
+                                    // the cursor, keeping only the last two so the
+                                    // distance always reflects a single segment.
+                                    // Does not orbit the camera.
+                                    if let Some(p) = self.raycast_world(x, y) {
+                                        if self.measure_points.len() >= 2 {
+                                            self.measure_points.clear();
+                                        }
+                                        self.measure_points.push(p);
+                                    }
+                                } else {
+                                    self.is_drag_active = true;
 
-                                if let Some(hit_id) = self.select_object_at_ndc(x, y) {
-                                    if is_double_click {
-                                        // Initialize Edit from 3D Double Click
-                                        self.editing_obj_id = Some(hit_id);
-                                        if let Some(obj) =
-                                            self.objects.iter().find(|o| o.id == hit_id)
-                                        {
-                                            self.editing_obj_draft = Some(obj.clone());
-                                            self.should_focus_name = true;
+                                    // Deselect panels
+                                    self.show_add_panel = false;
+                                    self.show_settings = false;
+
+                                    let now = std::time::Instant::now();
+                                    let is_double_click = now
+                                        .duration_since(self.last_click_time)
+                                        .as_millis()
+                                        < 300;
+                                    self.last_click_time = now;
+
+                                    if let Some(hit_id) = self.select_object_at_ndc(x, y) {
+                                        if is_double_click {
+                                            // Initialize Edit from 3D Double Click
+                                            self.editing_obj_id = Some(hit_id);
+                                            if let Some(obj) =
+                                                self.objects.iter().find(|o| o.id == hit_id)
+                                            {
+                                                self.editing_obj_draft = Some(obj.clone());
+                                                self.should_focus_name = true;
+                                            }
                                         }
                                     }
                                 }
                             }
+                        } else {
+                            // Releasing the button always ends any active drag.
+                            self.is_drag_active = false;
                         }
                     }
                     MouseButton::Middle => self.is_pan_active = *state == ElementState::Pressed,
@@ -748,24 +864,58 @@ impl State {
         Some(cgmath::Point3::new(center.x, center.y, center.z))
     }
 
-    fn select_object_at_ndc(&mut self, x: f32, y: f32) -> Option<usize> {
-        let modifiers = self.egui_state.egui_ctx().input(|i| i.modifiers);
-        let multi_select = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
-
+    /// Build a world-space ray (origin, normalized direction) from a point in
+    /// normalized device coordinates.
+    fn build_ray_ndc(&self, x: f32, y: f32) -> (cgmath::Vector3<f32>, cgmath::Vector3<f32>) {
         let inv_vp = self
             .camera
             .build_view_projection_matrix()
             .invert()
             .unwrap_or(cgmath::Matrix4::identity());
+        let near = inv_vp * cgmath::Vector4::new(x, y, 0.0, 1.0);
+        let far = inv_vp * cgmath::Vector4::new(x, y, 1.0, 1.0);
+        let near_world = near.truncate() / near.w;
+        let far_world = far.truncate() / far.w;
+        (near_world, (far_world - near_world).normalize())
+    }
 
-        let near_point = inv_vp * cgmath::Vector4::new(x, y, 0.0, 1.0);
-        let far_point = inv_vp * cgmath::Vector4::new(x, y, 1.0, 1.0);
+    /// Closest world-space surface hit under the NDC point, across all visible
+    /// objects (imported meshes and primitives). Used by the measurement tool.
+    pub fn raycast_world(&self, x: f32, y: f32) -> Option<[f32; 3]> {
+        let (ray_origin, ray_dir) = self.build_ray_ndc(x, y);
+        let mut best: Option<(f32, [f32; 3])> = None;
+        for obj in &self.objects {
+            if !obj.visible {
+                continue;
+            }
+            let model = obj.instance.to_model_matrix();
+            let inv_model = model.invert().unwrap_or(cgmath::Matrix4::identity());
+            let local_origin = (inv_model * ray_origin.extend(1.0)).truncate();
+            let local_dir = (inv_model * ray_dir.extend(0.0)).truncate().normalize();
+            let hit = if obj.geometry_type == GeometryType::Mesh {
+                self.custom_meshes
+                    .get(&obj.id)
+                    .and_then(|m| m.data.ray_hit(local_origin, local_dir))
+            } else {
+                intersect_primitive(obj.geometry_type, local_origin, local_dir)
+            };
+            if let Some(t) = hit {
+                let p_local = local_origin + local_dir * t;
+                let p_world = (model * p_local.extend(1.0)).truncate();
+                let dist = (p_world - ray_origin).magnitude2();
+                if best.is_none_or(|(d, _)| dist < d) {
+                    best = Some((dist, [p_world.x, p_world.y, p_world.z]));
+                }
+            }
+        }
+        best.map(|(_, p)| p)
+    }
 
-        let near_world = near_point.truncate() / near_point.w;
-        let far_world = far_point.truncate() / far_point.w;
+    fn select_object_at_ndc(&mut self, x: f32, y: f32) -> Option<usize> {
+        let modifiers = self.egui_state.egui_ctx().input(|i| i.modifiers);
+        let multi_select = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
 
-        let ray_origin = near_world;
-        let ray_dir = (far_world - near_world).normalize();
+        let (ray_origin, ray_dir) = self.build_ray_ndc(x, y);
 
         let mut closest_hit: Option<(usize, f32)> = None;
 
@@ -780,7 +930,16 @@ impl State {
             let local_origin = (inv_model * ray_origin.extend(1.0)).truncate();
             let local_dir = (inv_model * ray_dir.extend(0.0)).truncate().normalize();
 
-            if let Some(t) = self.intersect_primitive(obj.geometry_type, local_origin, local_dir) {
+            // Imported meshes ray-test against their triangles; primitives use
+            // their analytic intersector.
+            let hit = if obj.geometry_type == GeometryType::Mesh {
+                self.custom_meshes
+                    .get(&obj.id)
+                    .and_then(|m| m.data.ray_hit(local_origin, local_dir))
+            } else {
+                intersect_primitive(obj.geometry_type, local_origin, local_dir)
+            };
+            if let Some(t) = hit {
                 let world_dir = (model * local_dir.extend(0.0)).truncate();
                 let world_t = t * world_dir.magnitude();
 
@@ -807,77 +966,6 @@ impl State {
             Some(hit_id)
         } else {
             None
-        }
-    }
-
-    fn intersect_primitive(
-        &self,
-        geo_type: GeometryType,
-        local_origin: cgmath::Vector3<f32>,
-        local_dir: cgmath::Vector3<f32>,
-    ) -> Option<f32> {
-        match geo_type {
-            GeometryType::Cube => {
-                let mut tmin = -f32::INFINITY;
-                let mut tmax = f32::INFINITY;
-                for i in 0..3 {
-                    if local_dir[i].abs() < 1e-6 {
-                        if local_origin[i] < -0.5 || local_origin[i] > 0.5 {
-                            return None;
-                        }
-                    } else {
-                        let inv_d = 1.0 / local_dir[i];
-                        let mut t1 = (-0.5 - local_origin[i]) * inv_d;
-                        let mut t2 = (0.5 - local_origin[i]) * inv_d;
-                        if t1 > t2 {
-                            std::mem::swap(&mut t1, &mut t2);
-                        }
-                        tmin = tmin.max(t1);
-                        tmax = tmax.min(t2);
-                    }
-                }
-                if tmax >= tmin && tmax >= 0.0 {
-                    Some(tmin.max(0.0))
-                } else {
-                    None
-                }
-            }
-            GeometryType::Sphere => {
-                let oc = local_origin;
-                let a = local_dir.dot(local_dir);
-                let b = 2.0 * oc.dot(local_dir);
-                let c = oc.dot(oc) - 0.25; // radius 0.5 matches visuals
-                let discriminant = b * b - 4.0 * a * c;
-                if discriminant < 0.0 {
-                    None
-                } else {
-                    let mut t = (-b - discriminant.sqrt()) / (2.0 * a);
-                    if t < 0.0 {
-                        t = (-b + discriminant.sqrt()) / (2.0 * a);
-                    }
-                    if t >= 0.0 {
-                        Some(t)
-                    } else {
-                        None
-                    }
-                }
-            }
-            GeometryType::Plane => {
-                if local_dir.y.abs() < 1e-6 {
-                    return None;
-                }
-                let t = -local_origin.y / local_dir.y;
-                if t < 0.0 {
-                    return None;
-                }
-                let p = local_origin + local_dir * t;
-                if p.x.abs() <= 0.5 && p.z.abs() <= 0.5 {
-                    Some(t)
-                } else {
-                    None
-                }
-            }
-            _ => None,
         }
     }
 
@@ -909,6 +997,9 @@ impl State {
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // Drain any in-flight 3D-model import before drawing this frame.
+        self.poll_mesh_worker();
+
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -950,6 +1041,9 @@ impl State {
         let mut action_confirm_edit = false;
         let mut dataset_action = crate::ui::DatasetAction::None;
         let mut geometry_focus: Option<[f32; 3]> = None;
+        // Bottom-list actions for the imported dataset entry.
+        let mut dataset_focus: Option<[f32; 3]> = None;
+        let mut remove_dataset = false;
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             // Because we can't easily borrow fields disjointly multiple times in complex closure,
@@ -960,7 +1054,7 @@ impl State {
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button("➕ New Object").clicked() {
+                        if ui.button("➕ Object").clicked() {
                             let id = self.next_id;
                             let default_obj = SceneObject::new(
                                 id,
@@ -974,11 +1068,52 @@ impl State {
                         if ui.button("📊 Dataset").clicked() {
                             self.dataset_view.show_window = !self.dataset_view.show_window;
                         }
-                        if ui.button("📦 Geometry").clicked() {
+                        if ui.button("🧊 Solids").clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
+                        }
+                        // Measurement tool toggle. While active, clicking two
+                        // surface points reports the distance between them.
+                        if ui
+                            .selectable_label(self.measure_mode, "📏 Measure")
+                            .on_hover_text("Click two surface points to measure the distance")
+                            .clicked()
+                        {
+                            self.measure_mode = !self.measure_mode;
+                            self.measure_points.clear();
                         }
                     });
                 });
+
+            // Measurement read-out + clear, shown only while the tool is on.
+            if self.measure_mode {
+                egui::Area::new("measure_hud".into())
+                    .anchor(egui::Align2::LEFT_TOP, [10.0, 48.0])
+                    .show(ctx, |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            match self.measure_points.as_slice() {
+                                [] => {
+                                    ui.label("📏 Click the first point");
+                                }
+                                [_] => {
+                                    ui.label("📏 Click the second point");
+                                }
+                                [a, b, ..] => {
+                                    let d = ((a[0] - b[0]).powi(2)
+                                        + (a[1] - b[1]).powi(2)
+                                        + (a[2] - b[2]).powi(2))
+                                    .sqrt();
+                                    ui.label(
+                                        egui::RichText::new(format!("📏 Distance: {:.3}", d))
+                                            .strong(),
+                                    );
+                                }
+                            }
+                            if ui.button("Clear").clicked() {
+                                self.measure_points.clear();
+                            }
+                        });
+                    });
+            }
 
             // Dataset visualizer window (import, table, filters, search, export)
             dataset_action = self.dataset_view.show(ctx);
@@ -1164,7 +1299,8 @@ impl State {
                                                         egui::Align::Center,
                                                     ),
                                                     |ui| {
-                                                        // Edit icon
+                                                        // Edit / delete / label / visibility icons
+                                                        // share the same look via `list_icon_button`.
                                                         let is_editing = action_edit_obj_id
                                                             == Some(obj.id)
                                                             || self.editing_obj_id == Some(obj.id);
@@ -1173,16 +1309,7 @@ impl State {
                                                         } else {
                                                             ui.visuals().text_color()
                                                         };
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new("✏")
-                                                                        .color(edit_color),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Edit")
-                                                            .clicked()
+                                                        if list_icon_button(ui, "✏", edit_color, "Edit")
                                                         {
                                                             action_edit_obj_id = Some(obj.id);
                                                             self.editing_obj_draft =
@@ -1190,67 +1317,38 @@ impl State {
                                                             self.should_focus_name = true;
                                                         }
 
-                                                        // Delete icon
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new("🗑").color(
-                                                                        egui::Color32::from_rgb(
-                                                                            255, 100, 100,
-                                                                        ),
-                                                                    ),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Delete")
-                                                            .clicked()
-                                                        {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🗑",
+                                                            egui::Color32::from_rgb(255, 100, 100),
+                                                            "Delete",
+                                                        ) {
                                                             action_delete_obj_id = Some(obj.id);
                                                         }
 
-                                                        // Label toggle icon
-                                                        let label_icon = "🏷";
                                                         let label_color = if obj.show_label {
                                                             egui::Color32::from_rgb(0, 200, 255)
                                                         } else {
                                                             egui::Color32::from_rgb(150, 150, 150)
                                                         };
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new(label_icon)
-                                                                        .color(label_color),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Toggle Label")
-                                                            .clicked()
-                                                        {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🏷",
+                                                            label_color,
+                                                            "Toggle Label",
+                                                        ) {
                                                             obj.show_label = !obj.show_label;
                                                         }
 
-                                                        // Visibility icon (Colori opposti)
-                                                        let vis_icon = if obj.visible {
-                                                            "👁"
+                                                        // Visibility (opposite colors when hidden).
+                                                        let (vis_icon, vis_color) = if obj.visible {
+                                                            ("👁", egui::Color32::from_rgb(100, 255, 100))
                                                         } else {
-                                                            "🕶"
+                                                            ("🕶", egui::Color32::from_rgb(255, 100, 100))
                                                         };
-                                                        let vis_color = if obj.visible {
-                                                            egui::Color32::from_rgb(100, 255, 100)
-                                                        } else {
-                                                            egui::Color32::from_rgb(255, 100, 100)
-                                                        };
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new(vis_icon)
-                                                                        .color(vis_color),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Visibility")
-                                                            .clicked()
-                                                        {
+                                                        if list_icon_button(
+                                                            ui, vis_icon, vis_color, "Visibility",
+                                                        ) {
                                                             obj.visible = !obj.visible;
                                                         }
                                                     },
@@ -1262,6 +1360,81 @@ impl State {
                                             for obj in &mut self.objects {
                                                 obj.selected = obj.id == id;
                                             }
+                                        }
+
+                                        // --- Imported dataset ---
+                                        // The dataset visualizer no longer owns
+                                        // an "Explore" list; its imported data
+                                        // lives here, in the same list as every
+                                        // other object.
+                                        let dataset_entry =
+                                            self.dataset_view.loaded.as_ref().map(|l| {
+                                                (
+                                                    l.dataset.metadata.name.clone(),
+                                                    l.dataset.n_rows(),
+                                                )
+                                            });
+                                        if let Some((name, n_rows)) = dataset_entry {
+                                            let visible = self.dataset_view.visible;
+                                            let centroid = self.dataset_view.centroid();
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!("📊 {}", name))
+                                                        .strong()
+                                                        .size(14.0),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "({} rows)",
+                                                        n_rows
+                                                    ))
+                                                    .weak(),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🗑",
+                                                            egui::Color32::from_rgb(255, 100, 100),
+                                                            "Remove dataset",
+                                                        ) {
+                                                            remove_dataset = true;
+                                                        }
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🎯",
+                                                            ui.visuals().text_color(),
+                                                            "Focus camera on dataset",
+                                                        ) {
+                                                            dataset_focus = centroid;
+                                                        }
+                                                        let (vis_icon, vis_color) = if visible {
+                                                            (
+                                                                "👁",
+                                                                egui::Color32::from_rgb(
+                                                                    100, 255, 100,
+                                                                ),
+                                                            )
+                                                        } else {
+                                                            (
+                                                                "🕶",
+                                                                egui::Color32::from_rgb(
+                                                                    255, 100, 100,
+                                                                ),
+                                                            )
+                                                        };
+                                                        if list_icon_button(
+                                                            ui,
+                                                            vis_icon,
+                                                            vis_color,
+                                                            "Visibility",
+                                                        ) {
+                                                            self.dataset_view.set_visible(!visible);
+                                                        }
+                                                    },
+                                                );
+                                            });
                                         }
                                     });
                             });
@@ -1688,6 +1861,54 @@ impl State {
                     }
                 }
             }
+
+            // Measurement overlay: markers, the segment and its length.
+            if self.measure_mode && !self.measure_points.is_empty() {
+                let ppp = ctx.pixels_per_point();
+                let w = self.size.width as f32;
+                let h = self.size.height as f32;
+                let vp = self.camera.build_view_projection_matrix();
+                let project = |world: [f32; 3]| -> Option<egui::Pos2> {
+                    let clip = vp * cgmath::Vector4::new(world[0], world[1], world[2], 1.0);
+                    if clip.w <= 0.0 {
+                        return None;
+                    }
+                    let ndc = clip.truncate() / clip.w;
+                    Some(egui::pos2(
+                        ((ndc.x + 1.0) * 0.5 * w) / ppp,
+                        ((1.0 - ndc.y) * 0.5 * h) / ppp,
+                    ))
+                };
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("measure_overlay"),
+                ));
+                let pts: Vec<egui::Pos2> =
+                    self.measure_points.iter().filter_map(|p| project(*p)).collect();
+                for p in &pts {
+                    painter.circle_filled(*p, 4.0, egui::Color32::YELLOW);
+                }
+                if pts.len() == 2 {
+                    painter.line_segment(
+                        [pts[0], pts[1]],
+                        egui::Stroke::new(2.0, egui::Color32::YELLOW),
+                    );
+                    let a = self.measure_points[0];
+                    let b = self.measure_points[1];
+                    let d = ((a[0] - b[0]).powi(2)
+                        + (a[1] - b[1]).powi(2)
+                        + (a[2] - b[2]).powi(2))
+                    .sqrt();
+                    let mid = egui::pos2((pts[0].x + pts[1].x) * 0.5, (pts[0].y + pts[1].y) * 0.5);
+                    painter.text(
+                        mid,
+                        egui::Align2::CENTER_BOTTOM,
+                        format!("{:.3}", d),
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+            }
         });
 
         // Apply deferred actions
@@ -1718,6 +1939,17 @@ impl State {
         }
         if let Some(p) = geometry_focus {
             self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
+        if let Some(p) = dataset_focus {
+            self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
+        if remove_dataset {
+            self.dataset_view.clear_dataset();
+        }
+
+        // Kick off a 3D-model import requested from the Solids window.
+        if let Some(path) = self.geometry_view.take_mesh_request() {
+            self.spawn_mesh_load(path);
         }
 
         // Rebuild geometry-layer instance buffers only when layers changed.
@@ -1788,7 +2020,12 @@ impl State {
 
         if let Some(id_to_delete) = action_delete_obj_id {
             if let Some(index) = self.objects.iter().position(|o| o.id == id_to_delete) {
-                self.objects.remove(index);
+                // Record the deletion so it is undoable, consistent with the
+                // Delete-key path. Any imported-mesh GPU buffers in
+                // `custom_meshes` are intentionally retained so undo can
+                // restore the object without re-uploading.
+                let removed = self.objects.remove(index);
+                self.push_undo(UndoCommand::Delete(removed));
             }
             if self.editing_obj_id == Some(id_to_delete) {
                 self.editing_obj_id = None;
@@ -1857,6 +2094,30 @@ impl State {
                 draw_list.push((geo_type, buffer, instances.len() as u32));
             }
         }
+
+        // Imported 3D models: one draw per object (each has its own mesh), so
+        // build a single-instance buffer per visible mesh object up front to
+        // keep the buffers alive for the whole render pass.
+        let mesh_draws: Vec<(usize, wgpu::Buffer)> = self
+            .objects
+            .iter()
+            .filter(|o| {
+                o.visible
+                    && o.geometry_type == GeometryType::Mesh
+                    && self.custom_meshes.contains_key(&o.id)
+            })
+            .map(|o| {
+                let instance = [o.instance.to_raw_with_color(o.color, o.selected)];
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Custom Mesh Instance Buffer"),
+                        contents: bytemuck::cast_slice(&instance),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                (o.id, buffer)
+            })
+            .collect();
 
         // Prepare Normal Arrow Buffer outside render pass to avoid lifetime issues
         let normal_arrows: Vec<InstanceRaw> = self
@@ -1980,6 +2241,19 @@ impl State {
                 render_pass
                     .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..mesh.num_indices, 0, 0..*count);
+            }
+
+            // Draw imported 3D models (32-bit indices, one instance each).
+            for (id, instance_buf) in &mesh_draws {
+                if let Some(custom) = self.custom_meshes.get(id) {
+                    render_pass.set_vertex_buffer(0, custom.vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, instance_buf.slice(..));
+                    render_pass.set_index_buffer(
+                        custom.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    render_pass.draw_indexed(0..custom.num_indices, 0, 0..1);
+                }
             }
 
             // Draw bulk instanced batches: dataset point cloud + geometry

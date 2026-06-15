@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn error_display_variants() {
-        let io: DatasetError = std::io::Error::new(std::io::ErrorKind::Other, "boom").into();
+        let io: DatasetError = std::io::Error::other("boom").into();
         assert!(io.to_string().contains("I/O error"));
         assert!(DatasetError::Format("x".into()).to_string().contains("format error"));
         assert!(DatasetError::Unsupported("y".into())

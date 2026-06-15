@@ -7,7 +7,6 @@
 
 use super::{ImportRequest, ImportSource, ImportState};
 use crate::dataset::builtin::BuiltinDataset;
-use crate::dataset::preprocessor::ProjectionMethod;
 
 /// Short, user-facing description for each builtin benchmark button.
 pub fn builtin_description(name: &str) -> &'static str {
@@ -26,8 +25,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
     ui.vertical_centered(|ui| {
         ui.label(egui::RichText::new("Import a dataset").heading());
         ui.label(
-            egui::RichText::new("NPY · NPZ · CSV · Parquet · IDX — large files are memory mapped")
-                .weak(),
+            egui::RichText::new(
+                "NPY · NPZ · CSV · Excel · Parquet · IDX — large files are memory mapped",
+            )
+            .weak(),
         );
     });
     ui.add_space(8.0);
@@ -56,17 +57,39 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
 
             ui.label("Projection");
             ui.horizontal(|ui| {
-                ui.radio_value(&mut state.use_pca, true, "PCA (3 components)");
-                ui.radio_value(&mut state.use_pca, false, "First 3 columns");
+                ui.radio_value(&mut state.use_pca, true, "PCA");
+                ui.radio_value(&mut state.use_pca, false, "Direct columns");
             });
             ui.end_row();
+
+            ui.label("Dimensions");
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut state.dims, 3, "3D");
+                ui.radio_value(&mut state.dims, 2, "2D");
+                ui.radio_value(&mut state.dims, 1, "1D");
+            });
+            ui.end_row();
+
+            // For direct projection, choose which feature columns feed the
+            // axes (by 0-based index; column names are not known until load —
+            // refine them later from the View tab).
+            if !state.use_pca {
+                let dims = state.dims.clamp(1, 3) as usize;
+                ui.label("Columns");
+                ui.horizontal(|ui| {
+                    for (a, axis) in ["X", "Y", "Z"].iter().enumerate().take(dims) {
+                        ui.add(
+                            egui::DragValue::new(&mut state.axes[a])
+                                .range(0..=usize::MAX)
+                                .prefix(format!("{}: ", axis)),
+                        );
+                    }
+                });
+                ui.end_row();
+            }
         });
 
-    let method = if state.use_pca {
-        ProjectionMethod::Pca
-    } else {
-        ProjectionMethod::Direct
-    };
+    let projection = state.projection();
 
     ui.add_space(8.0);
     ui.vertical_centered(|ui| {
@@ -81,7 +104,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
                 request = Some(ImportRequest {
                     source: ImportSource::Path(state.path_text.trim().into()),
                     max_rows: state.limit_rows.then_some(state.max_rows),
-                    method,
+                    projection,
                 });
             }
             if state.loading {
@@ -106,7 +129,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
                     request = Some(ImportRequest {
                         source: ImportSource::Builtin(name),
                         max_rows: None,
-                        method,
+                        projection,
                     });
                 }
                 ui.label(egui::RichText::new(builtin_description(name)).weak().small());
