@@ -132,7 +132,7 @@ impl MeshData {
                 continue;
             }
             let t = f * edge2.dot(q);
-            if t > EPS && best.map_or(true, |b| t < b) {
+            if t > EPS && best.is_none_or(|b| t < b) {
                 best = Some(t);
             }
         }

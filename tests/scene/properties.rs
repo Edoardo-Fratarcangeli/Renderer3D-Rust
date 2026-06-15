@@ -12,7 +12,7 @@ fn test_plane_properties_defaults() {
         GeometryType::Plane,
     );
     assert_eq!(obj.plane_surface, 1.0);
-    assert_eq!(obj.show_normal, false);
+    assert!(!obj.show_normal);
 }
 
 #[test]

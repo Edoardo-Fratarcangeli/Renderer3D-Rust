@@ -903,7 +903,7 @@ impl State {
                 let p_local = local_origin + local_dir * t;
                 let p_world = (model * p_local.extend(1.0)).truncate();
                 let dist = (p_world - ray_origin).magnitude2();
-                if best.map_or(true, |(d, _)| dist < d) {
+                if best.is_none_or(|(d, _)| dist < d) {
                     best = Some((dist, [p_world.x, p_world.y, p_world.z]));
                 }
             }
@@ -1299,7 +1299,8 @@ impl State {
                                                         egui::Align::Center,
                                                     ),
                                                     |ui| {
-                                                        // Edit icon
+                                                        // Edit / delete / label / visibility icons
+                                                        // share the same look via `list_icon_button`.
                                                         let is_editing = action_edit_obj_id
                                                             == Some(obj.id)
                                                             || self.editing_obj_id == Some(obj.id);
@@ -1308,16 +1309,7 @@ impl State {
                                                         } else {
                                                             ui.visuals().text_color()
                                                         };
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new("✏")
-                                                                        .color(edit_color),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Edit")
-                                                            .clicked()
+                                                        if list_icon_button(ui, "✏", edit_color, "Edit")
                                                         {
                                                             action_edit_obj_id = Some(obj.id);
                                                             self.editing_obj_draft =
@@ -1325,67 +1317,38 @@ impl State {
                                                             self.should_focus_name = true;
                                                         }
 
-                                                        // Delete icon
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new("🗑").color(
-                                                                        egui::Color32::from_rgb(
-                                                                            255, 100, 100,
-                                                                        ),
-                                                                    ),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Delete")
-                                                            .clicked()
-                                                        {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🗑",
+                                                            egui::Color32::from_rgb(255, 100, 100),
+                                                            "Delete",
+                                                        ) {
                                                             action_delete_obj_id = Some(obj.id);
                                                         }
 
-                                                        // Label toggle icon
-                                                        let label_icon = "🏷";
                                                         let label_color = if obj.show_label {
                                                             egui::Color32::from_rgb(0, 200, 255)
                                                         } else {
                                                             egui::Color32::from_rgb(150, 150, 150)
                                                         };
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new(label_icon)
-                                                                        .color(label_color),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Toggle Label")
-                                                            .clicked()
-                                                        {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🏷",
+                                                            label_color,
+                                                            "Toggle Label",
+                                                        ) {
                                                             obj.show_label = !obj.show_label;
                                                         }
 
-                                                        // Visibility icon (Colori opposti)
-                                                        let vis_icon = if obj.visible {
-                                                            "👁"
+                                                        // Visibility (opposite colors when hidden).
+                                                        let (vis_icon, vis_color) = if obj.visible {
+                                                            ("👁", egui::Color32::from_rgb(100, 255, 100))
                                                         } else {
-                                                            "🕶"
+                                                            ("🕶", egui::Color32::from_rgb(255, 100, 100))
                                                         };
-                                                        let vis_color = if obj.visible {
-                                                            egui::Color32::from_rgb(100, 255, 100)
-                                                        } else {
-                                                            egui::Color32::from_rgb(255, 100, 100)
-                                                        };
-                                                        if ui
-                                                            .add(
-                                                                egui::Button::new(
-                                                                    egui::RichText::new(vis_icon)
-                                                                        .color(vis_color),
-                                                                )
-                                                                .fill(egui::Color32::TRANSPARENT),
-                                                            )
-                                                            .on_hover_text("Visibility")
-                                                            .clicked()
-                                                        {
+                                                        if list_icon_button(
+                                                            ui, vis_icon, vis_color, "Visibility",
+                                                        ) {
                                                             obj.visible = !obj.visible;
                                                         }
                                                     },
@@ -2057,7 +2020,12 @@ impl State {
 
         if let Some(id_to_delete) = action_delete_obj_id {
             if let Some(index) = self.objects.iter().position(|o| o.id == id_to_delete) {
-                self.objects.remove(index);
+                // Record the deletion so it is undoable, consistent with the
+                // Delete-key path. Any imported-mesh GPU buffers in
+                // `custom_meshes` are intentionally retained so undo can
+                // restore the object without re-uploading.
+                let removed = self.objects.remove(index);
+                self.push_undo(UndoCommand::Delete(removed));
             }
             if self.editing_obj_id == Some(id_to_delete) {
                 self.editing_obj_id = None;

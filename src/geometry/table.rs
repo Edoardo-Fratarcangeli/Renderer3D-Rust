@@ -36,7 +36,7 @@ fn col(headers: &[String], names: &[&str]) -> Option<usize> {
         .position(|h| names.iter().any(|n| h.trim().eq_ignore_ascii_case(n)))
 }
 
-fn cell<'a>(row: &'a [String], idx: Option<usize>) -> Option<&'a str> {
+fn cell(row: &[String], idx: Option<usize>) -> Option<&str> {
     idx.and_then(|i| row.get(i)).map(|s| s.trim()).filter(|s| !s.is_empty())
 }
 
@@ -158,7 +158,8 @@ pub fn from_csv(path: &Path, default_color: [f32; 3]) -> Result<Vec<GeometryReco
 
 /// Read the first sheet of an Excel workbook (xlsx/xlsm/xls/ods).
 pub fn from_excel(path: &Path, default_color: [f32; 3]) -> Result<Vec<GeometryRecord>> {
-    use calamine::{open_workbook_auto, Data, Reader};
+    use crate::util::excel_cell_to_string as cell_to_string;
+    use calamine::{open_workbook_auto, Reader};
 
     let mut workbook = open_workbook_auto(path)
         .map_err(|e| GeometryError::Format(format!("Excel open failed: {}", e)))?;
@@ -182,17 +183,6 @@ pub fn from_excel(path: &Path, default_color: [f32; 3]) -> Result<Vec<GeometryRe
         .map(|row| row.iter().map(cell_to_string).collect::<Vec<String>>())
         .filter(|row: &Vec<String>| row.iter().any(|c| !c.is_empty()))
         .collect();
-
-    fn cell_to_string(d: &Data) -> String {
-        match d {
-            Data::Empty => String::new(),
-            // Keep integers free of the ".0" suffix Excel floats would add.
-            Data::Float(f) if f.fract() == 0.0 && f.abs() < 1e15 => {
-                format!("{}", *f as i64)
-            }
-            other => other.to_string().trim().to_string(),
-        }
-    }
 
     RecordTable { headers, rows }.to_records(default_color)
 }

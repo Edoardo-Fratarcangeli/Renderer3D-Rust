@@ -18,21 +18,12 @@ use super::{
 };
 
 /// Options controlling the import.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LoadOptions {
     /// Hard cap on imported rows (None = all rows).
     pub max_rows: Option<usize>,
     /// CSV label column name; if None it is auto-detected.
     pub label_column: Option<String>,
-}
-
-impl Default for LoadOptions {
-    fn default() -> Self {
-        Self {
-            max_rows: None,
-            label_column: None,
-        }
-    }
 }
 
 /// Load a dataset, dispatching on the file extension.
@@ -493,16 +484,8 @@ fn load_csv(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
 /// with [`load_csv`] via [`finish_table_dataset`]; only the cell reading
 /// differs.
 fn load_excel(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
-    use calamine::{open_workbook_auto, Data, Reader};
-
-    fn cell_to_string(d: &Data) -> String {
-        match d {
-            Data::Empty => String::new(),
-            // Keep integers free of the ".0" suffix Excel floats would add.
-            Data::Float(f) if f.fract() == 0.0 && f.abs() < 1e15 => format!("{}", *f as i64),
-            other => other.to_string().trim().to_string(),
-        }
-    }
+    use crate::util::excel_cell_to_string as cell_to_string;
+    use calamine::{open_workbook_auto, Reader};
 
     let mut workbook = open_workbook_auto(path)
         .map_err(|e| DatasetError::Format(format!("Excel open failed: {}", e)))?;

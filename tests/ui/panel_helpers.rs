@@ -80,7 +80,7 @@ fn dataset_table_renders_and_row_text_is_consistent() {
     // row_text is stable and contains the row index and its label.
     let n_cols = loaded.dataset.n_cols().min(MAX_TABLE_COLS);
     let text = row_text(&loaded.dataset, 0, n_cols, false);
-    assert!(text.contains(&loaded.dataset.label_name(0)));
+    assert!(text.contains(loaded.dataset.label_name(0)));
     assert!(text.trim_start().starts_with('0'));
 }
 

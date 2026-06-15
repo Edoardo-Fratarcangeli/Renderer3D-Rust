@@ -11,4 +11,5 @@ pub mod scene;
 pub mod primitives;
 pub mod state;
 pub mod ui;
+pub(crate) mod util;
 pub mod visualization;

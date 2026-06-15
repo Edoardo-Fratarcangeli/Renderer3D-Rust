@@ -247,13 +247,13 @@ fn project_pca_n(dataset: &Dataset, n_components: usize) -> Result<Vec<[f32; 3]>
         for _ in 0..POWER_ITERATIONS {
             // w = C v
             let mut w = vec![0.0f64; d];
-            for r in 0..d {
+            for (r, w_r) in w.iter_mut().enumerate() {
                 let mut acc = 0.0;
                 let base = r * d;
                 for c in 0..d {
                     acc += cov[base + c] * v[c];
                 }
-                w[r] = acc;
+                *w_r = acc;
             }
             // Deflate against previously found components.
             for comp in &components {
