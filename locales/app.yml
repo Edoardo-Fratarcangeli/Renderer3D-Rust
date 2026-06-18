@@ -1,0 +1,242 @@
+# Application UI translations (rust-i18n combined format).
+# Add a language by appending its code under each key; register it in
+# src/i18n.rs (LANGUAGES). English (en) is the fallback for any missing key.
+_version: 2
+
+# ── Settings window ──────────────────────────────────────────────────────────
+"settings.window_title":
+  en: Settings
+  it: Impostazioni
+  es: Ajustes
+  fr: Paramètres
+  de: Einstellungen
+"settings.global_heading":
+  en: Global Settings
+  it: Impostazioni globali
+  es: Ajustes globales
+  fr: Paramètres globaux
+  de: Globale Einstellungen
+"settings.language":
+  en: Language
+  it: Lingua
+  es: Idioma
+  fr: Langue
+  de: Sprache
+"settings.camera_view":
+  en: Camera & View
+  it: Telecamera e vista
+  es: Cámara y vista
+  fr: Caméra et vue
+  de: Kamera & Ansicht
+"settings.focus_selected":
+  en: Focus Selected
+  it: Inquadra selezione
+  es: Enfocar selección
+  fr: Cadrer la sélection
+  de: Auswahl fokussieren
+"settings.reset_view":
+  en: Reset View (0,0,0)
+  it: Reimposta vista (0,0,0)
+  es: Restablecer vista (0,0,0)
+  fr: Réinitialiser la vue (0,0,0)
+  de: Ansicht zurücksetzen (0,0,0)
+"settings.zoom_limits":
+  en: "Zoom Limits:"
+  it: "Limiti di zoom:"
+  es: "Límites de zoom:"
+  fr: "Limites de zoom :"
+  de: "Zoom-Grenzen:"
+"settings.grid_options":
+  en: Grid Options
+  it: Opzioni griglia
+  es: Opciones de cuadrícula
+  fr: Options de grille
+  de: Rasteroptionen
+"settings.grid_xy":
+  en: XY Plane
+  it: Piano XY
+  es: Plano XY
+  fr: Plan XY
+  de: XY-Ebene
+"settings.grid_xz":
+  en: XZ Plane
+  it: Piano XZ
+  es: Plano XZ
+  fr: Plan XZ
+  de: XZ-Ebene
+"settings.grid_yz":
+  en: YZ Plane
+  it: Piano YZ
+  es: Plano YZ
+  fr: Plan YZ
+  de: YZ-Ebene
+"settings.show_axes":
+  en: Show Axes
+  it: Mostra assi
+  es: Mostrar ejes
+  fr: Afficher les axes
+  de: Achsen anzeigen
+
+# ── Status bar ───────────────────────────────────────────────────────────────
+"status.camera_eye":
+  en: Camera Eye
+  it: Posizione camera
+  es: Ojo de cámara
+  fr: Œil caméra
+  de: Kameraposition
+"status.target":
+  en: Target
+  it: Bersaglio
+  es: Objetivo
+  fr: Cible
+  de: Ziel
+"status.yaw":
+  en: Yaw
+  it: Imbardata
+  es: Guiñada
+  fr: Lacet
+  de: Gieren
+"status.pitch":
+  en: Pitch
+  it: Beccheggio
+  es: Cabeceo
+  fr: Tangage
+  de: Nicken
+
+# ── Add New Object window ────────────────────────────────────────────────────
+"add.window_title":
+  en: Add New Object
+  it: Aggiungi nuovo oggetto
+  es: Añadir nuevo objeto
+  fr: Ajouter un nouvel objet
+  de: Neues Objekt hinzufügen
+"add.transform":
+  en: Transform
+  it: Trasformazione
+  es: Transformación
+  fr: Transformation
+  de: Transformation
+"add.show_label":
+  en: Show Label in Viewport
+  it: Mostra etichetta nella vista
+  es: Mostrar etiqueta en la vista
+  fr: Afficher l'étiquette dans la vue
+  de: Beschriftung in der Ansicht anzeigen
+"add.geometry_props":
+  en: Geometry Properties
+  it: Proprietà geometria
+  es: Propiedades de geometría
+  fr: Propriétés de géométrie
+  de: Geometrie-Eigenschaften
+"add.side_length":
+  en: "Side Length:"
+  it: "Lunghezza lato:"
+  es: "Longitud del lado:"
+  fr: "Longueur du côté :"
+  de: "Seitenlänge:"
+"add.radius":
+  en: "Radius:"
+  it: "Raggio:"
+  es: "Radio:"
+  fr: "Rayon :"
+  de: "Radius:"
+"add.surface_area":
+  en: "Surface Area:"
+  it: "Area superficie:"
+  es: "Área de superficie:"
+  fr: "Aire de surface :"
+  de: "Oberfläche:"
+"add.show_normal":
+  en: Show Normal Arrow
+  it: Mostra freccia normale
+  es: Mostrar flecha normal
+  fr: Afficher la flèche normale
+  de: Normalenpfeil anzeigen
+
+# ── Shapes ─────────────────────────────────────────────────────────────────
+"shape.cube":
+  en: Cube
+  it: Cubo
+  es: Cubo
+  fr: Cube
+  de: Würfel
+"shape.sphere":
+  en: Sphere
+  it: Sfera
+  es: Esfera
+  fr: Sphère
+  de: Kugel
+"shape.plane":
+  en: Plane
+  it: Piano
+  es: Plano
+  fr: Plan
+  de: Ebene
+
+# ── Shared labels ────────────────────────────────────────────────────────────
+"common.background":
+  en: Background
+  it: Sfondo
+  es: Fondo
+  fr: Arrière-plan
+  de: Hintergrund
+"common.name":
+  en: "Name:"
+  it: "Nome:"
+  es: "Nombre:"
+  fr: "Nom :"
+  de: "Name:"
+"common.type":
+  en: "Type:"
+  it: "Tipo:"
+  es: "Tipo:"
+  fr: "Type :"
+  de: "Typ:"
+"common.position":
+  en: "Pos:"
+  it: "Pos:"
+  es: "Pos:"
+  fr: "Pos :"
+  de: "Pos:"
+"common.rotation":
+  en: "Rot:"
+  it: "Rot:"
+  es: "Rot:"
+  fr: "Rot :"
+  de: "Rot:"
+"common.scale":
+  en: "Scale:"
+  it: "Scala:"
+  es: "Escala:"
+  fr: "Échelle :"
+  de: "Skalierung:"
+"common.color":
+  en: "Color:"
+  it: "Colore:"
+  es: "Color:"
+  fr: "Couleur :"
+  de: "Farbe:"
+"common.min_prefix":
+  en: "Min: "
+  it: "Min: "
+  es: "Mín: "
+  fr: "Min : "
+  de: "Min: "
+"common.max_prefix":
+  en: "Max: "
+  it: "Max: "
+  es: "Máx: "
+  fr: "Max : "
+  de: "Max: "
+"common.cancel":
+  en: Cancel
+  it: Annulla
+  es: Cancelar
+  fr: Annuler
+  de: Abbrechen
+"common.add":
+  en: Add
+  it: Aggiungi
+  es: Añadir
+  fr: Ajouter
+  de: Hinzufügen

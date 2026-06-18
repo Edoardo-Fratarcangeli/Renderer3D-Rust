@@ -1121,44 +1121,63 @@ impl State {
             geometry_focus = self.geometry_view.show(ctx);
 
             // Top Right Panel: Settings
-            egui::Window::new("Settings")
+            egui::Window::new(t!("settings.window_title").to_string())
                 .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
                 .collapsible(true)
                 .open(&mut self.show_settings)
                 .show(ctx, |ui| {
-                    ui.heading("Global Settings");
-                    ui.add(egui::Slider::new(&mut self.bg_color, 0.0..=1.0).text("Background"));
+                    ui.heading(t!("settings.global_heading").to_string());
+
+                    // Interface language picker (persists the choice).
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{}:", t!("settings.language")));
+                        let current = crate::i18n::current();
+                        egui::ComboBox::from_id_source("language_combo")
+                            .selected_text(crate::i18n::display_name(&current))
+                            .show_ui(ui, |ui| {
+                                for &(code, name) in crate::i18n::LANGUAGES {
+                                    if ui.selectable_label(current == code, name).clicked() {
+                                        crate::i18n::set_language(code);
+                                    }
+                                }
+                            });
+                    });
+
+                    ui.add(
+                        egui::Slider::new(&mut self.bg_color, 0.0..=1.0)
+                            .text(t!("common.background").to_string()),
+                    );
 
                     ui.separator();
-                    ui.heading("Camera & View");
-                    if ui.button("Focus Selected").clicked() {
+                    ui.heading(t!("settings.camera_view").to_string());
+                    if ui.button(t!("settings.focus_selected").to_string()).clicked() {
                         action_focus_selected = true;
                     }
-                    if ui.button("Reset View (0,0,0)").clicked() {
+                    if ui.button(t!("settings.reset_view").to_string()).clicked() {
                         action_reset_view = true;
                     }
 
                     ui.separator();
-                    ui.label("Zoom Limits:");
+                    ui.label(t!("settings.zoom_limits").to_string());
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::DragValue::new(&mut self.min_zoom)
                                 .speed(0.1)
-                                .prefix("Min: "),
+                                .prefix(t!("common.min_prefix").to_string()),
                         );
                         ui.add(
                             egui::DragValue::new(&mut self.max_zoom)
                                 .speed(1.0)
-                                .prefix("Max: "),
+                                .prefix(t!("common.max_prefix").to_string()),
                         );
                     });
 
                     ui.separator();
-                    ui.heading("Grid Options");
-                    ui.checkbox(&mut self.show_grid_xy, "XY Plane");
-                    ui.checkbox(&mut self.show_grid_xz, "XZ Plane");
-                    ui.checkbox(&mut self.show_grid_yz, "YZ Plane");
-                    ui.checkbox(&mut self.show_axes, "Show Axes");
+                    ui.heading(t!("settings.grid_options").to_string());
+                    ui.checkbox(&mut self.show_grid_xy, t!("settings.grid_xy").to_string());
+                    ui.checkbox(&mut self.show_grid_xz, t!("settings.grid_xz").to_string());
+                    ui.checkbox(&mut self.show_grid_yz, t!("settings.grid_yz").to_string());
+                    ui.checkbox(&mut self.show_axes, t!("settings.show_axes").to_string());
                 });
 
             // Gear Button
@@ -1179,18 +1198,27 @@ impl State {
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "Camera Eye: {:.2}, {:.2}, {:.2}",
-                            self.camera.eye.x, self.camera.eye.y, self.camera.eye.z
+                            "{}: {:.2}, {:.2}, {:.2}",
+                            t!("status.camera_eye"),
+                            self.camera.eye.x,
+                            self.camera.eye.y,
+                            self.camera.eye.z
                         ));
                         ui.separator();
                         ui.label(format!(
-                            "Target: {:.2}, {:.2}, {:.2}",
-                            self.camera_target.x, self.camera_target.y, self.camera_target.z
+                            "{}: {:.2}, {:.2}, {:.2}",
+                            t!("status.target"),
+                            self.camera_target.x,
+                            self.camera_target.y,
+                            self.camera_target.z
                         ));
                         ui.separator();
                         ui.label(format!(
-                            "Yaw: {:.1}° Pitch: {:.1}°",
-                            self.camera_yaw, self.camera_pitch
+                            "{}: {:.1}° {}: {:.1}°",
+                            t!("status.yaw"),
+                            self.camera_yaw,
+                            t!("status.pitch"),
+                            self.camera_pitch
                         ));
                     });
                 });
@@ -1447,12 +1475,12 @@ impl State {
                 let mut open = true;
                 let mut action_discard = false;
                 let mut action_confirm = false;
-                egui::Window::new("Add New Object")
+                egui::Window::new(t!("add.window_title").to_string())
                     .open(&mut open)
                     .resizable(true)
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label("Name:");
+                            ui.label(t!("common.name").to_string());
                             let res = ui.text_edit_singleline(&mut draft.label);
                             if self.should_focus_name {
                                 res.request_focus();
@@ -1461,37 +1489,43 @@ impl State {
                         });
                         ui.separator();
                         ui.horizontal(|ui| {
-                            ui.label("Type:");
+                            ui.label(t!("common.type").to_string());
+                            let type_label = match draft.geometry_type {
+                                GeometryType::Cube => t!("shape.cube").to_string(),
+                                GeometryType::Sphere => t!("shape.sphere").to_string(),
+                                GeometryType::Plane => t!("shape.plane").to_string(),
+                                _ => format!("{:?}", draft.geometry_type),
+                            };
                             egui::ComboBox::from_id_source("draft_type_combo")
-                                .selected_text(format!("{:?}", draft.geometry_type))
+                                .selected_text(type_label)
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut draft.geometry_type,
                                         GeometryType::Cube,
-                                        "Cube",
+                                        t!("shape.cube").to_string(),
                                     );
                                     ui.selectable_value(
                                         &mut draft.geometry_type,
                                         GeometryType::Sphere,
-                                        "Sphere",
+                                        t!("shape.sphere").to_string(),
                                     );
                                     ui.selectable_value(
                                         &mut draft.geometry_type,
                                         GeometryType::Plane,
-                                        "Plane",
+                                        t!("shape.plane").to_string(),
                                     );
                                 });
                         });
 
-                        ui.heading("Transform");
+                        ui.heading(t!("add.transform").to_string());
                         ui.horizontal(|ui| {
-                            ui.label("Pos:");
+                            ui.label(t!("common.position").to_string());
                             ui.add(egui::DragValue::new(&mut draft.instance.position.x).speed(0.1));
                             ui.add(egui::DragValue::new(&mut draft.instance.position.y).speed(0.1));
                             ui.add(egui::DragValue::new(&mut draft.instance.position.z).speed(0.1));
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Rot:");
+                            ui.label(t!("common.rotation").to_string());
                             let mut changed = false;
                             changed |= ui
                                 .add(
@@ -1519,7 +1553,7 @@ impl State {
                             }
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Scale:");
+                            ui.label(t!("common.scale").to_string());
                             ui.add(
                                 egui::DragValue::new(&mut draft.instance.scale.x)
                                     .speed(0.01)
@@ -1539,17 +1573,17 @@ impl State {
 
                         ui.separator();
                         ui.horizontal(|ui| {
-                            ui.label("Color:");
+                            ui.label(t!("common.color").to_string());
                             ui.color_edit_button_rgb(&mut draft.color);
                         });
-                        ui.checkbox(&mut draft.show_label, "Show Label in Viewport");
+                        ui.checkbox(&mut draft.show_label, t!("add.show_label").to_string());
 
                         ui.separator();
-                        ui.heading("Geometry Properties");
+                        ui.heading(t!("add.geometry_props").to_string());
                         match draft.geometry_type {
                             GeometryType::Cube => {
                                 ui.horizontal(|ui| {
-                                    ui.label("Side Length:");
+                                    ui.label(t!("add.side_length").to_string());
                                     if ui
                                         .add(egui::DragValue::new(&mut draft.cube_side).speed(0.1))
                                         .changed()
@@ -1561,7 +1595,7 @@ impl State {
                             }
                             GeometryType::Sphere => {
                                 ui.horizontal(|ui| {
-                                    ui.label("Radius:");
+                                    ui.label(t!("add.radius").to_string());
                                     if ui
                                         .add(
                                             egui::DragValue::new(&mut draft.sphere_radius)
@@ -1576,7 +1610,7 @@ impl State {
                             }
                             GeometryType::Plane => {
                                 ui.horizontal(|ui| {
-                                    ui.label("Surface Area:");
+                                    ui.label(t!("add.surface_area").to_string());
                                     if ui
                                         .add(
                                             egui::DragValue::new(&mut draft.plane_surface)
@@ -1589,7 +1623,7 @@ impl State {
                                         draft.instance.scale = cgmath::Vector3::new(s, 1.0, s);
                                     }
                                 });
-                                ui.checkbox(&mut draft.show_normal, "Show Normal Arrow");
+                                ui.checkbox(&mut draft.show_normal, t!("add.show_normal").to_string());
                             }
                             _ => {}
                         }
@@ -1598,7 +1632,10 @@ impl State {
                         ui.separator();
                         ui.horizontal(|ui| {
                             if ui
-                                .add_sized([80.0, 24.0], egui::Button::new("Cancel"))
+                                .add_sized(
+                                    [80.0, 24.0],
+                                    egui::Button::new(t!("common.cancel").to_string()),
+                                )
                                 .clicked()
                                 || ui.input(|i| i.key_pressed(egui::Key::Escape))
                             {
@@ -1608,7 +1645,10 @@ impl State {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     if ui
-                                        .add_sized([80.0, 24.0], egui::Button::new("Add"))
+                                        .add_sized(
+                                            [80.0, 24.0],
+                                            egui::Button::new(t!("common.add").to_string()),
+                                        )
                                         .clicked()
                                         || ui.input(|i| i.key_pressed(egui::Key::Enter))
                                     {

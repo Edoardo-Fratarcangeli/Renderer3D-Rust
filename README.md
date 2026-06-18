@@ -42,6 +42,8 @@ egui UI.
   - **Export**: writes the currently filtered subset to CSV.
   - See [docs/ML_VISUALIZER.md](docs/ML_VISUALIZER.md) for the architecture.
 
+- **Multilingual UI**: English, Italian, Spanish, French and German, auto-detected from the OS and switchable live from **Settings → Language** (see [docs/I18N.md](docs/I18N.md)).
+- **Native installers**: self-contained installers for Windows (NSIS wizard), macOS (`.dmg` + localized `.pkg`) and Linux (`.AppImage`/`.deb`), built per-platform in CI (see [docs/PACKAGING.md](docs/PACKAGING.md)).
 - **Instanced Rendering**: Efficiently renders multiple instances of objects with low overhead.
 - **WGPU Graphics**: Uses the modern `wgpu` crate for cross-platform, type-safe graphics programming.
 - **Advanced Selection System**:
