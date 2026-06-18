@@ -55,7 +55,7 @@ pub fn show(
         if truncated {
             ui.label(strong("…"));
         }
-        ui.label(strong("label"));
+        ui.label(strong(&t!("dataset.table_label")));
     });
     ui.separator();
 
@@ -99,10 +99,13 @@ pub fn show(
     ui.add_space(4.0);
     ui.vertical_centered(|ui| {
         ui.label(
-            egui::RichText::new(format!(
-                "{} rows match the current filter — click a row to focus its point",
-                visible_rows.len()
-            ))
+            egui::RichText::new(
+                t!(
+                    "dataset.table_match_hint",
+                    count = visible_rows.len().to_string()
+                )
+                .to_string(),
+            )
             .weak(),
         );
     });

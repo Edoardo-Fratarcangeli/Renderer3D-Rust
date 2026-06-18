@@ -18,7 +18,7 @@ pub fn show(ui: &mut egui::Ui, text: &mut String, error: &Option<String>) -> boo
         changed = resp.changed();
         if ui
             .add_enabled(!text.is_empty(), egui::Button::new("✖"))
-            .on_hover_text("Clear search")
+            .on_hover_text(t!("dataset.search_clear").to_string())
             .clicked()
         {
             text.clear();

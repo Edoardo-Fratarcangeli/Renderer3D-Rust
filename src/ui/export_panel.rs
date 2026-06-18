@@ -13,12 +13,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState, n_visible: usize) -> Opt
     let mut out = None;
 
     ui.vertical_centered(|ui| {
-        ui.label(egui::RichText::new("Export filtered subset").heading());
+        ui.label(egui::RichText::new(t!("dataset.export_heading").to_string()).heading());
         ui.label(
-            egui::RichText::new(format!(
-                "{} rows currently match the filter and will be written as CSV",
-                n_visible
-            ))
+            egui::RichText::new(
+                t!("dataset.export_hint", count = n_visible.to_string()).to_string(),
+            )
             .weak(),
         );
     });
@@ -28,7 +27,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState, n_visible: usize) -> Opt
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("Path");
+            ui.label(t!("dataset.field_path").to_string());
             ui.add(
                 egui::TextEdit::singleline(&mut state.path_text)
                     .desired_width(f32::INFINITY)
@@ -39,7 +38,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState, n_visible: usize) -> Opt
 
     ui.add_space(8.0);
     ui.vertical_centered(|ui| {
-        let button = egui::Button::new(egui::RichText::new("💾 Export").size(14.0))
+        let button = egui::Button::new(egui::RichText::new(t!("dataset.export_button").to_string()).size(14.0))
             .min_size(egui::vec2(120.0, 28.0));
         let can_export = !state.path_text.trim().is_empty();
         if ui.add_enabled(can_export, button).clicked() {
