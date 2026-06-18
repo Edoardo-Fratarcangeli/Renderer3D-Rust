@@ -43,7 +43,10 @@ packaging/linux/*.metainfo.xml        localized AppStream metadata (software cen
 
 ## Releasing (automated)
 
-1. Bump the version (`VERSION`, `Cargo.toml`) and commit.
+1. Bump the version (`VERSION`, `Cargo.toml`) and commit. Keep `Cargo.toml`'s
+   `version` in sync with the tag: the in-app updater compares the running
+   `CARGO_PKG_VERSION` against the release, so a stale value breaks update
+   detection.
 2. Tag and push:
    ```bash
    git tag v1.2.0
