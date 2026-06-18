@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Rust 3D Renderer
+Name[it]=Rust 3D Renderer
+GenericName=3D Renderer
+GenericName[it]=Renderer 3D
+GenericName[es]=Renderizador 3D
+GenericName[fr]=Moteur de rendu 3D
+GenericName[de]=3D-Renderer
+Comment=Visualize very large 3D geometry sets, 3D models and ML datasets
+Comment[it]=Visualizza grandi insiemi di geometrie 3D, modelli 3D e dataset di ML
+Comment[es]=Visualiza grandes conjuntos de geometría 3D, modelos 3D y datos de ML
+Comment[fr]=Visualisez de grands ensembles de géométrie 3D, modèles 3D et données ML
+Comment[de]=Visualisiere große 3D-Geometriemengen, 3D-Modelle und ML-Datensätze
+Exec=rendering_3d
+Icon=tech.fratarcangeli.rendering3d
+Terminal=false
+Categories=Graphics;3DGraphics;Science;DataVisualization;
+Keywords=3D;render;rendering;wgpu;geometry;visualization;mesh;point cloud;
+StartupNotify=true
+StartupWMClass=rendering_3d

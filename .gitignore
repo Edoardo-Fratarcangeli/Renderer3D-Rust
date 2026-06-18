@@ -7,6 +7,16 @@
 /.r3d_cache/
 /export.csv
 
+# Packaging output & generated artifacts
+/dist/
+/releases/
+packaging/icons/
+packaging/windows/header.bmp
+packaging/windows/sidebar.bmp
+# Update signing keys must never be committed
+*.key
+*.key.pub
+
 # VS Code
 .vscode/*
 !.vscode/launch.json

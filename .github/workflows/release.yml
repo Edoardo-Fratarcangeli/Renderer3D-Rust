@@ -1,0 +1,191 @@
+name: Release installers
+
+# Push a tag like v1.1.0 to build native installers for Windows, macOS and Linux
+# and attach them to a GitHub Release. Can also be run manually for a dry build.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without leading v), for manual runs"
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PRODUCT: "Rust 3D Renderer"
+
+jobs:
+  # ───────────────────────────── Build matrix ──────────────────────────────
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, platform: linux }
+          - { os: windows-latest, platform: windows }
+          - { os: macos-14, platform: macos }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building version: $V"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+
+      - name: Install cargo-packager
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: cargo install cargo-packager --locked
+
+      # ── Linux ────────────────────────────────────────────────────────────
+      - name: Linux — system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libvulkan-dev libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev \
+            librsvg2-bin imagemagick icnsutils libfuse2 file desktop-file-utils
+
+      - name: Linux — build + package (.AppImage, .deb)
+        if: matrix.platform == 'linux'
+        shell: bash
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+        run: |
+          ./scripts/gen-icons.sh
+          cargo build --release
+          cargo packager --release --formats appimage deb --verbose
+
+      # ── macOS ────────────────────────────────────────────────────────────
+      - name: macOS — build universal binary + package (.dmg, .app, .pkg)
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+        run: |
+          ./scripts/gen-icons.sh
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          mkdir -p target/release
+          lipo -create -output target/release/rendering_3d \
+            target/x86_64-apple-darwin/release/rendering_3d \
+            target/aarch64-apple-darwin/release/rendering_3d
+          # .app (updater bundle) + .dmg (drag-to-Applications)
+          cargo packager --release --formats app dmg --verbose
+          # Localized .pkg wizard built around the generated .app
+          APP_PATH="$(find dist -maxdepth 1 -name '*.app' | head -n1)"
+          if [ -n "$APP_PATH" ]; then
+            chmod +x packaging/macos/build-pkg.sh
+            packaging/macos/build-pkg.sh "$APP_PATH" "${{ steps.ver.outputs.version }}" \
+              "dist/Rust-3D-Renderer-${{ steps.ver.outputs.version }}-universal.pkg"
+          fi
+
+      # ── Windows ──────────────────────────────────────────────────────────
+      - name: Windows — install NSIS + ImageMagick
+        if: matrix.platform == 'windows'
+        run: choco install nsis imagemagick -y --no-progress
+
+      - name: Windows — build + custom NSIS installer
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          export PATH="/c/Program Files (x86)/NSIS:/c/Program Files/ImageMagick:$PATH"
+          ./scripts/gen-icons.sh
+          # Installer banner (150x57) and sidebar (164x314) generated from the icon.
+          magick -size 150x57  xc:'#1b1f24' \
+            \( packaging/icons/128x128.png -resize 44x44 \) -gravity west -geometry +8+0 -composite \
+            -fill white -gravity east -pointsize 13 -annotate +10+0 'Rust 3D Renderer' \
+            BMP3:packaging/windows/header.bmp
+          magick -size 164x314 gradient:'#2b3340'-'#11151b' \
+            \( packaging/icons/icon.png -resize 110x110 \) -gravity north -geometry +0+40 -composite \
+            BMP3:packaging/windows/sidebar.bmp
+          cargo build --release
+          mkdir -p dist
+          makensis -DAPP_VERSION="${{ steps.ver.outputs.version }}" packaging/windows/installer.nsi
+
+      # ── Collect artifacts ─────────────────────────────────────────────────
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.sig
+            dist/*.deb
+            dist/*.deb.sig
+            dist/*.dmg
+            dist/*.pkg
+            dist/*.app.tar.gz
+            dist/*.app.tar.gz.sig
+            dist/*-setup.exe
+            dist/*-setup.exe.sig
+
+  # ───────────────────────────── Release ───────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten
+        shell: bash
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ \;
+          ls -la dist
+
+      - name: Generate auto-update manifest (latest.json)
+        shell: bash
+        run: |
+          BASE="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
+          python3 scripts/gen-latest-json.py \
+            --version "${GITHUB_REF_NAME#v}" \
+            --dist dist \
+            --base-url "$BASE" \
+            --out dist/latest.json || echo "Skipping manifest (no signatures present)."
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+            dist/*.pkg
+            dist/*-setup.exe
+            dist/latest.json
+            dist/*.sig
