@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Get project root
-$ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path "$ProjectRoot/Cargo.toml")) {
     $ProjectRoot = (Get-Location).Path
 }

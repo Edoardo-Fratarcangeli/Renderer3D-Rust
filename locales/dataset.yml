@@ -243,7 +243,7 @@ _version: 2
   it: …oppure prova un dataset benchmark
   es: …o prueba un conjunto de referencia
   fr: …ou essayez un jeu de données de référence
-  de: …oder probiere ein Benchmark-Datensatz
+  de: …oder probiere einen Benchmark-Datensatz
 "dataset.builtin_blobs":
   en: 5 gaussian clusters, 8D
   it: 5 cluster gaussiani, 8D

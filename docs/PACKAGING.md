@@ -36,7 +36,7 @@ packaging/windows/installer.nsi       custom multilingual NSIS wizard
 packaging/windows/strings/*.nsh       EN/IT/ES/FR/DE installer strings
 packaging/macos/build-pkg.sh          builds the localized .pkg wizard
 packaging/macos/distribution.xml      .pkg wizard layout
-packaging/macos/resources/<lang>.lproj localized welcome/readme/conclusion panes
+packaging/macos/resources/<lang>.lproj localized welcome/readme/conclusion/license panes
 packaging/linux/rendering-3d.desktop  localized desktop entry
 packaging/linux/*.metainfo.xml        localized AppStream metadata (software centers)
 ```
@@ -81,9 +81,9 @@ makensis -DAPP_VERSION=1.1.0 packaging/windows/installer.nsi
   All wizard text — welcome, the "What is this software?" page, components and
   finish — comes from `packaging/windows/strings/<Language>.nsh`. Add a language
   by adding a `MUI_LANGUAGE` line in `installer.nsi` plus a matching `.nsh`.
-- **macOS**: `productbuild` resolves the welcome/readme/conclusion panes from
+- **macOS**: `productbuild` resolves the welcome/readme/conclusion/license panes from
   `packaging/macos/resources/<lang>.lproj/`. Add a language by adding a `.lproj`
-  folder.
+  folder with all four HTML files.
 - **Linux**: localized `Name`/`Comment` in the `.desktop` file and localized
   `summary`/`description` in the AppStream `metainfo.xml` are shown by GNOME
   Software / KDE Discover in the user's language.

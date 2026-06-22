@@ -59,11 +59,18 @@ VIAddVersionKey "FileVersion"     "${APP_VERSION}"
 VIAddVersionKey "ProductVersion"  "${APP_VERSION}"
 
 ; ── MUI appearance ───────────────────────────────────────────────────────────
-!define MUI_ICON   "${ICON_DIR}\icon.ico"
-!define MUI_UNICON "${ICON_DIR}\icon.ico"
-!define MUI_HEADERIMAGE
-!define MUI_HEADERIMAGE_BITMAP        "packaging\windows\header.bmp"
-!define MUI_WELCOMEFINISHPAGE_BITMAP  "packaging\windows\sidebar.bmp"
+; Artwork files are optional — makensis falls back to built-in defaults when absent.
+!if /FileExists "${ICON_DIR}\icon.ico"
+  !define MUI_ICON   "${ICON_DIR}\icon.ico"
+  !define MUI_UNICON "${ICON_DIR}\icon.ico"
+!endif
+!if /FileExists "packaging\windows\header.bmp"
+  !define MUI_HEADERIMAGE
+  !define MUI_HEADERIMAGE_BITMAP "packaging\windows\header.bmp"
+!endif
+!if /FileExists "packaging\windows\sidebar.bmp"
+  !define MUI_WELCOMEFINISHPAGE_BITMAP "packaging\windows\sidebar.bmp"
+!endif
 !define MUI_ABORTWARNING
 
 ; Remember the chosen installer language for next time / uninstall.
