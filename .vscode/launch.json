@@ -26,6 +26,13 @@
             "program": "${workspaceFolder}/tests/test_manager.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "📦 Build Windows Installer",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}\\scripts\\build-installer.ps1",
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

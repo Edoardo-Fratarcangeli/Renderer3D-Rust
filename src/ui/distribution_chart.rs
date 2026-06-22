@@ -61,12 +61,15 @@ pub fn show(ui: &mut egui::Ui, labels: &[LabelStat], enabled: &HashSet<u32>) {
             egui::FontId::proportional(11.0),
             ui.visuals().text_color(),
         );
-        resp.on_hover_text(format!(
-            "{}: {} rows ({:.1}%)",
-            stat.name,
-            stat.count,
-            percentage(stat.count, labels)
-        ));
+        resp.on_hover_text(
+            t!(
+                "dataset.bar_hover",
+                name = stat.name,
+                count = stat.count.to_string(),
+                pct = format!("{:.1}", percentage(stat.count, labels))
+            )
+            .to_string(),
+        );
         ui.add_space(3.0);
     }
 }

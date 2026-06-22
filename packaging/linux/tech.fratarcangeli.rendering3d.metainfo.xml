@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: shown localized in GNOME Software, KDE Discover, etc. -->
+<component type="desktop-application">
+  <id>tech.fratarcangeli.rendering3d</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Rust 3D Renderer</name>
+  <name xml:lang="it">Rust 3D Renderer</name>
+
+  <summary>High-performance 3D renderer for very large geometry sets</summary>
+  <summary xml:lang="it">Renderer 3D ad alte prestazioni per grandi insiemi di geometrie</summary>
+  <summary xml:lang="es">Renderizador 3D de alto rendimiento para grandes conjuntos de geometría</summary>
+  <summary xml:lang="fr">Moteur de rendu 3D haute performance pour de grands ensembles de géométrie</summary>
+  <summary xml:lang="de">Leistungsstarker 3D-Renderer für sehr große Geometriemengen</summary>
+
+  <description>
+    <p>
+      Rust 3D Renderer is an interactive, GPU-accelerated 3D viewer and scene
+      editor built with WGPU and egui. It renders millions of geometries fast
+      using instanced draw calls and automatic level-of-detail.
+    </p>
+    <p xml:lang="it">
+      Rust 3D Renderer è un visualizzatore ed editor di scene 3D interattivo,
+      accelerato da GPU, realizzato con WGPU ed egui. Renderizza milioni di
+      geometrie velocemente grazie alle draw call istanziate e al livello di
+      dettaglio automatico.
+    </p>
+    <p xml:lang="es">
+      Rust 3D Renderer es un visor y editor de escenas 3D interactivo,
+      acelerado por GPU, creado con WGPU y egui. Renderiza millones de
+      geometrías rápidamente mediante llamadas de dibujo instanciadas.
+    </p>
+    <p xml:lang="fr">
+      Rust 3D Renderer est une visionneuse et un éditeur de scènes 3D
+      interactif, accéléré par GPU, conçu avec WGPU et egui. Il affiche des
+      millions de géométries rapidement grâce aux appels de dessin instanciés.
+    </p>
+    <p xml:lang="de">
+      Rust 3D Renderer ist ein interaktiver, GPU-beschleunigter 3D-Betrachter
+      und Szeneneditor, entwickelt mit WGPU und egui. Er rendert Millionen von
+      Geometrien schnell durch instanzierte Draw-Calls.
+    </p>
+    <ul>
+      <li>Imports geometry from a text DSL, Excel/CSV/JSON tables and STL/OBJ/glTF models</li>
+      <li>Visualizes ML datasets (NPY/NPZ/CSV/Parquet/IDX) as labelled 3D point clouds</li>
+      <li>Full scene editor: picking, multi-selection, undo/redo, CAD-like camera</li>
+      <li>Multilingual interface (English, Italian, Spanish, French, German)</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">tech.fratarcangeli.rendering3d.desktop</launchable>
+  <url type="homepage">https://github.com/Edoardo-Fratarcangeli/Renderer3D-Rust</url>
+  <url type="bugtracker">https://github.com/Edoardo-Fratarcangeli/Renderer3D-Rust/issues</url>
+
+  <developer id="tech.fratarcangeli">
+    <name>Edoardo Fratarcangeli</name>
+  </developer>
+
+  <content_rating type="oars-1.1"/>
+
+  <categories>
+    <category>Graphics</category>
+    <category>Science</category>
+  </categories>
+
+  <releases>
+    <release version="1.1.0" date="2026-06-18"/>
+  </releases>
+</component>

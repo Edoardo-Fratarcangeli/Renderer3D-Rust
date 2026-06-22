@@ -500,9 +500,9 @@ impl State {
     /// Spawn a worker thread that loads a 3D model file off the UI thread.
     pub fn spawn_mesh_load(&mut self, path: std::path::PathBuf) {
         self.geometry_view.mesh_loading = true;
-        self.geometry_view.status = Some(crate::ui::StatusMessage::info(format!(
-            "Loading {} ...",
-            path.display()
+        self.geometry_view.status = Some(crate::ui::StatusMessage::info(t!(
+            "status.loading",
+            path = path.display().to_string()
         )));
         let (tx, rx) = std::sync::mpsc::channel();
         self.mesh_worker = Some(rx);
@@ -531,15 +531,17 @@ impl State {
             Ok(Err(msg)) => {
                 self.mesh_worker = None;
                 self.geometry_view.mesh_loading = false;
-                self.geometry_view.status =
-                    Some(crate::ui::StatusMessage::error(format!("Import failed: {}", msg)));
+                self.geometry_view.status = Some(crate::ui::StatusMessage::error(t!(
+                    "status.import_failed",
+                    msg = msg
+                )));
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.mesh_worker = None;
                 self.geometry_view.mesh_loading = false;
                 self.geometry_view.status =
-                    Some(crate::ui::StatusMessage::error("Import worker died unexpectedly"));
+                    Some(crate::ui::StatusMessage::error(t!("status.worker_died")));
             }
         }
     }
@@ -595,9 +597,9 @@ impl State {
 
         // Center the camera on the freshly imported model.
         self.camera_target = cgmath::Point3::new(0.0, 0.0, 0.0);
-        self.geometry_view.status = Some(crate::ui::StatusMessage::success(format!(
-            "Imported model with {} triangles",
-            tri_count
+        self.geometry_view.status = Some(crate::ui::StatusMessage::success(t!(
+            "status.imported_model",
+            count = tri_count
         )));
     }
 
@@ -1054,7 +1056,7 @@ impl State {
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button("➕ Object").clicked() {
+                        if ui.button(t!("toolbar.object").to_string()).clicked() {
                             let id = self.next_id;
                             let default_obj = SceneObject::new(
                                 id,
@@ -1065,17 +1067,17 @@ impl State {
                             self.draft_object = Some(default_obj);
                             self.should_focus_name = true;
                         }
-                        if ui.button("📊 Dataset").clicked() {
+                        if ui.button(t!("toolbar.dataset").to_string()).clicked() {
                             self.dataset_view.show_window = !self.dataset_view.show_window;
                         }
-                        if ui.button("🧊 Solids").clicked() {
+                        if ui.button(t!("toolbar.solids").to_string()).clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
                         }
                         // Measurement tool toggle. While active, clicking two
                         // surface points reports the distance between them.
                         if ui
-                            .selectable_label(self.measure_mode, "📏 Measure")
-                            .on_hover_text("Click two surface points to measure the distance")
+                            .selectable_label(self.measure_mode, t!("toolbar.measure").to_string())
+                            .on_hover_text(t!("toolbar.measure_hint").to_string())
                             .clicked()
                         {
                             self.measure_mode = !self.measure_mode;
@@ -1092,10 +1094,10 @@ impl State {
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
                             match self.measure_points.as_slice() {
                                 [] => {
-                                    ui.label("📏 Click the first point");
+                                    ui.label(t!("measure.first_point").to_string());
                                 }
                                 [_] => {
-                                    ui.label("📏 Click the second point");
+                                    ui.label(t!("measure.second_point").to_string());
                                 }
                                 [a, b, ..] => {
                                     let d = ((a[0] - b[0]).powi(2)
@@ -1103,12 +1105,16 @@ impl State {
                                         + (a[2] - b[2]).powi(2))
                                     .sqrt();
                                     ui.label(
-                                        egui::RichText::new(format!("📏 Distance: {:.3}", d))
-                                            .strong(),
+                                        egui::RichText::new(format!(
+                                            "{} {:.3}",
+                                            t!("measure.distance"),
+                                            d
+                                        ))
+                                        .strong(),
                                     );
                                 }
                             }
-                            if ui.button("Clear").clicked() {
+                            if ui.button(t!("common.clear").to_string()).clicked() {
                                 self.measure_points.clear();
                             }
                         });
@@ -1121,44 +1127,63 @@ impl State {
             geometry_focus = self.geometry_view.show(ctx);
 
             // Top Right Panel: Settings
-            egui::Window::new("Settings")
+            egui::Window::new(t!("settings.window_title").to_string())
                 .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
                 .collapsible(true)
                 .open(&mut self.show_settings)
                 .show(ctx, |ui| {
-                    ui.heading("Global Settings");
-                    ui.add(egui::Slider::new(&mut self.bg_color, 0.0..=1.0).text("Background"));
+                    ui.heading(t!("settings.global_heading").to_string());
+
+                    // Interface language picker (persists the choice).
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{}:", t!("settings.language")));
+                        let current = crate::i18n::current();
+                        egui::ComboBox::from_id_source("language_combo")
+                            .selected_text(crate::i18n::display_name(&current))
+                            .show_ui(ui, |ui| {
+                                for &(code, name) in crate::i18n::LANGUAGES {
+                                    if ui.selectable_label(current == code, name).clicked() {
+                                        crate::i18n::set_language(code);
+                                    }
+                                }
+                            });
+                    });
+
+                    ui.add(
+                        egui::Slider::new(&mut self.bg_color, 0.0..=1.0)
+                            .text(t!("common.background").to_string()),
+                    );
 
                     ui.separator();
-                    ui.heading("Camera & View");
-                    if ui.button("Focus Selected").clicked() {
+                    ui.heading(t!("settings.camera_view").to_string());
+                    if ui.button(t!("settings.focus_selected").to_string()).clicked() {
                         action_focus_selected = true;
                     }
-                    if ui.button("Reset View (0,0,0)").clicked() {
+                    if ui.button(t!("settings.reset_view").to_string()).clicked() {
                         action_reset_view = true;
                     }
 
                     ui.separator();
-                    ui.label("Zoom Limits:");
+                    ui.label(t!("settings.zoom_limits").to_string());
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::DragValue::new(&mut self.min_zoom)
                                 .speed(0.1)
-                                .prefix("Min: "),
+                                .prefix(t!("common.min_prefix").to_string()),
                         );
                         ui.add(
                             egui::DragValue::new(&mut self.max_zoom)
                                 .speed(1.0)
-                                .prefix("Max: "),
+                                .prefix(t!("common.max_prefix").to_string()),
                         );
                     });
 
                     ui.separator();
-                    ui.heading("Grid Options");
-                    ui.checkbox(&mut self.show_grid_xy, "XY Plane");
-                    ui.checkbox(&mut self.show_grid_xz, "XZ Plane");
-                    ui.checkbox(&mut self.show_grid_yz, "YZ Plane");
-                    ui.checkbox(&mut self.show_axes, "Show Axes");
+                    ui.heading(t!("settings.grid_options").to_string());
+                    ui.checkbox(&mut self.show_grid_xy, t!("settings.grid_xy").to_string());
+                    ui.checkbox(&mut self.show_grid_xz, t!("settings.grid_xz").to_string());
+                    ui.checkbox(&mut self.show_grid_yz, t!("settings.grid_yz").to_string());
+                    ui.checkbox(&mut self.show_axes, t!("settings.show_axes").to_string());
                 });
 
             // Gear Button
@@ -1179,18 +1204,27 @@ impl State {
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "Camera Eye: {:.2}, {:.2}, {:.2}",
-                            self.camera.eye.x, self.camera.eye.y, self.camera.eye.z
+                            "{}: {:.2}, {:.2}, {:.2}",
+                            t!("status.camera_eye"),
+                            self.camera.eye.x,
+                            self.camera.eye.y,
+                            self.camera.eye.z
                         ));
                         ui.separator();
                         ui.label(format!(
-                            "Target: {:.2}, {:.2}, {:.2}",
-                            self.camera_target.x, self.camera_target.y, self.camera_target.z
+                            "{}: {:.2}, {:.2}, {:.2}",
+                            t!("status.target"),
+                            self.camera_target.x,
+                            self.camera_target.y,
+                            self.camera_target.z
                         ));
                         ui.separator();
                         ui.label(format!(
-                            "Yaw: {:.1}° Pitch: {:.1}°",
-                            self.camera_yaw, self.camera_pitch
+                            "{}: {:.1}° {}: {:.1}°",
+                            t!("status.yaw"),
+                            self.camera_yaw,
+                            t!("status.pitch"),
+                            self.camera_pitch
                         ));
                     });
                 });
@@ -1309,7 +1343,7 @@ impl State {
                                                         } else {
                                                             ui.visuals().text_color()
                                                         };
-                                                        if list_icon_button(ui, "✏", edit_color, "Edit")
+                                                        if list_icon_button(ui, "✏", edit_color, &t!("list.edit"))
                                                         {
                                                             action_edit_obj_id = Some(obj.id);
                                                             self.editing_obj_draft =
@@ -1321,7 +1355,7 @@ impl State {
                                                             ui,
                                                             "🗑",
                                                             egui::Color32::from_rgb(255, 100, 100),
-                                                            "Delete",
+                                                            &t!("list.delete"),
                                                         ) {
                                                             action_delete_obj_id = Some(obj.id);
                                                         }
@@ -1335,7 +1369,7 @@ impl State {
                                                             ui,
                                                             "🏷",
                                                             label_color,
-                                                            "Toggle Label",
+                                                            &t!("list.toggle_label"),
                                                         ) {
                                                             obj.show_label = !obj.show_label;
                                                         }
@@ -1347,7 +1381,7 @@ impl State {
                                                             ("🕶", egui::Color32::from_rgb(255, 100, 100))
                                                         };
                                                         if list_icon_button(
-                                                            ui, vis_icon, vis_color, "Visibility",
+                                                            ui, vis_icon, vis_color, &t!("list.visibility"),
                                                         ) {
                                                             obj.visible = !obj.visible;
                                                         }
@@ -1385,8 +1419,9 @@ impl State {
                                                 );
                                                 ui.label(
                                                     egui::RichText::new(format!(
-                                                        "({} rows)",
-                                                        n_rows
+                                                        "({} {})",
+                                                        n_rows,
+                                                        t!("list.rows")
                                                     ))
                                                     .weak(),
                                                 );
@@ -1397,7 +1432,7 @@ impl State {
                                                             ui,
                                                             "🗑",
                                                             egui::Color32::from_rgb(255, 100, 100),
-                                                            "Remove dataset",
+                                                            &t!("list.remove_dataset"),
                                                         ) {
                                                             remove_dataset = true;
                                                         }
@@ -1405,7 +1440,7 @@ impl State {
                                                             ui,
                                                             "🎯",
                                                             ui.visuals().text_color(),
-                                                            "Focus camera on dataset",
+                                                            &t!("list.focus_dataset"),
                                                         ) {
                                                             dataset_focus = centroid;
                                                         }
@@ -1428,7 +1463,7 @@ impl State {
                                                             ui,
                                                             vis_icon,
                                                             vis_color,
-                                                            "Visibility",
+                                                            &t!("list.visibility"),
                                                         ) {
                                                             self.dataset_view.set_visible(!visible);
                                                         }
@@ -1447,12 +1482,12 @@ impl State {
                 let mut open = true;
                 let mut action_discard = false;
                 let mut action_confirm = false;
-                egui::Window::new("Add New Object")
+                egui::Window::new(t!("add.window_title").to_string())
                     .open(&mut open)
                     .resizable(true)
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label("Name:");
+                            ui.label(t!("common.name").to_string());
                             let res = ui.text_edit_singleline(&mut draft.label);
                             if self.should_focus_name {
                                 res.request_focus();
@@ -1461,37 +1496,43 @@ impl State {
                         });
                         ui.separator();
                         ui.horizontal(|ui| {
-                            ui.label("Type:");
+                            ui.label(t!("common.type").to_string());
+                            let type_label = match draft.geometry_type {
+                                GeometryType::Cube => t!("shape.cube").to_string(),
+                                GeometryType::Sphere => t!("shape.sphere").to_string(),
+                                GeometryType::Plane => t!("shape.plane").to_string(),
+                                _ => format!("{:?}", draft.geometry_type),
+                            };
                             egui::ComboBox::from_id_source("draft_type_combo")
-                                .selected_text(format!("{:?}", draft.geometry_type))
+                                .selected_text(type_label)
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut draft.geometry_type,
                                         GeometryType::Cube,
-                                        "Cube",
+                                        t!("shape.cube").to_string(),
                                     );
                                     ui.selectable_value(
                                         &mut draft.geometry_type,
                                         GeometryType::Sphere,
-                                        "Sphere",
+                                        t!("shape.sphere").to_string(),
                                     );
                                     ui.selectable_value(
                                         &mut draft.geometry_type,
                                         GeometryType::Plane,
-                                        "Plane",
+                                        t!("shape.plane").to_string(),
                                     );
                                 });
                         });
 
-                        ui.heading("Transform");
+                        ui.heading(t!("add.transform").to_string());
                         ui.horizontal(|ui| {
-                            ui.label("Pos:");
+                            ui.label(t!("common.position").to_string());
                             ui.add(egui::DragValue::new(&mut draft.instance.position.x).speed(0.1));
                             ui.add(egui::DragValue::new(&mut draft.instance.position.y).speed(0.1));
                             ui.add(egui::DragValue::new(&mut draft.instance.position.z).speed(0.1));
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Rot:");
+                            ui.label(t!("common.rotation").to_string());
                             let mut changed = false;
                             changed |= ui
                                 .add(
@@ -1519,7 +1560,7 @@ impl State {
                             }
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Scale:");
+                            ui.label(t!("common.scale").to_string());
                             ui.add(
                                 egui::DragValue::new(&mut draft.instance.scale.x)
                                     .speed(0.01)
@@ -1539,17 +1580,17 @@ impl State {
 
                         ui.separator();
                         ui.horizontal(|ui| {
-                            ui.label("Color:");
+                            ui.label(t!("common.color").to_string());
                             ui.color_edit_button_rgb(&mut draft.color);
                         });
-                        ui.checkbox(&mut draft.show_label, "Show Label in Viewport");
+                        ui.checkbox(&mut draft.show_label, t!("add.show_label").to_string());
 
                         ui.separator();
-                        ui.heading("Geometry Properties");
+                        ui.heading(t!("add.geometry_props").to_string());
                         match draft.geometry_type {
                             GeometryType::Cube => {
                                 ui.horizontal(|ui| {
-                                    ui.label("Side Length:");
+                                    ui.label(t!("add.side_length").to_string());
                                     if ui
                                         .add(egui::DragValue::new(&mut draft.cube_side).speed(0.1))
                                         .changed()
@@ -1561,7 +1602,7 @@ impl State {
                             }
                             GeometryType::Sphere => {
                                 ui.horizontal(|ui| {
-                                    ui.label("Radius:");
+                                    ui.label(t!("add.radius").to_string());
                                     if ui
                                         .add(
                                             egui::DragValue::new(&mut draft.sphere_radius)
@@ -1576,7 +1617,7 @@ impl State {
                             }
                             GeometryType::Plane => {
                                 ui.horizontal(|ui| {
-                                    ui.label("Surface Area:");
+                                    ui.label(t!("add.surface_area").to_string());
                                     if ui
                                         .add(
                                             egui::DragValue::new(&mut draft.plane_surface)
@@ -1589,7 +1630,7 @@ impl State {
                                         draft.instance.scale = cgmath::Vector3::new(s, 1.0, s);
                                     }
                                 });
-                                ui.checkbox(&mut draft.show_normal, "Show Normal Arrow");
+                                ui.checkbox(&mut draft.show_normal, t!("add.show_normal").to_string());
                             }
                             _ => {}
                         }
@@ -1598,7 +1639,10 @@ impl State {
                         ui.separator();
                         ui.horizontal(|ui| {
                             if ui
-                                .add_sized([80.0, 24.0], egui::Button::new("Cancel"))
+                                .add_sized(
+                                    [80.0, 24.0],
+                                    egui::Button::new(t!("common.cancel").to_string()),
+                                )
                                 .clicked()
                                 || ui.input(|i| i.key_pressed(egui::Key::Escape))
                             {
@@ -1608,7 +1652,10 @@ impl State {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     if ui
-                                        .add_sized([80.0, 24.0], egui::Button::new("Add"))
+                                        .add_sized(
+                                            [80.0, 24.0],
+                                            egui::Button::new(t!("common.add").to_string()),
+                                        )
                                         .clicked()
                                         || ui.input(|i| i.key_pressed(egui::Key::Enter))
                                     {
@@ -1636,12 +1683,12 @@ impl State {
             if self.editing_obj_id.is_some() {
                 let mut open = true;
                 if let Some(mut obj) = self.editing_obj_draft.take() {
-                    egui::Window::new("Object Properties")
+                    egui::Window::new(t!("props.window_title").to_string())
                         .open(&mut open)
                         .resizable(true)
                         .show(ctx, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label("Name:");
+                                ui.label(t!("common.name").to_string());
                                 let res = ui.text_edit_singleline(&mut obj.label);
                                 if self.should_focus_name {
                                     res.request_focus();
@@ -1650,31 +1697,37 @@ impl State {
                             });
                             ui.separator();
                             ui.horizontal(|ui| {
-                                ui.label("Type:");
+                                ui.label(t!("common.type").to_string());
+                                let type_label = match obj.geometry_type {
+                                    GeometryType::Cube => t!("shape.cube").to_string(),
+                                    GeometryType::Sphere => t!("shape.sphere").to_string(),
+                                    GeometryType::Plane => t!("shape.plane").to_string(),
+                                    _ => format!("{:?}", obj.geometry_type),
+                                };
                                 egui::ComboBox::from_id_source(format!("type_combo_{}", obj.id))
-                                    .selected_text(format!("{:?}", obj.geometry_type))
+                                    .selected_text(type_label)
                                     .show_ui(ui, |ui| {
                                         ui.selectable_value(
                                             &mut obj.geometry_type,
                                             GeometryType::Cube,
-                                            "Cube",
+                                            t!("shape.cube").to_string(),
                                         );
                                         ui.selectable_value(
                                             &mut obj.geometry_type,
                                             GeometryType::Sphere,
-                                            "Sphere",
+                                            t!("shape.sphere").to_string(),
                                         );
                                         ui.selectable_value(
                                             &mut obj.geometry_type,
                                             GeometryType::Plane,
-                                            "Plane",
+                                            t!("shape.plane").to_string(),
                                         );
                                     });
                             });
 
-                            ui.heading("Transform");
+                            ui.heading(t!("add.transform").to_string());
                             ui.horizontal(|ui| {
-                                ui.label("Pos:");
+                                ui.label(t!("common.position").to_string());
                                 ui.add(
                                     egui::DragValue::new(&mut obj.instance.position.x).speed(0.1),
                                 );
@@ -1686,7 +1739,7 @@ impl State {
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label("Rot:");
+                                ui.label(t!("common.rotation").to_string());
                                 let mut changed = false;
                                 changed |= ui
                                     .add(
@@ -1714,7 +1767,7 @@ impl State {
                                 }
                             });
                             ui.horizontal(|ui| {
-                                ui.label("Scale:");
+                                ui.label(t!("common.scale").to_string());
                                 ui.add(
                                     egui::DragValue::new(&mut obj.instance.scale.x)
                                         .speed(0.01)
@@ -1734,17 +1787,17 @@ impl State {
 
                             ui.separator();
                             ui.horizontal(|ui| {
-                                ui.label("Color:");
+                                ui.label(t!("common.color").to_string());
                                 ui.color_edit_button_rgb(&mut obj.color);
                             });
-                            ui.checkbox(&mut obj.show_label, "Show Label in Viewport");
+                            ui.checkbox(&mut obj.show_label, t!("add.show_label").to_string());
 
                             ui.separator();
-                            ui.heading("Geometry Properties");
+                            ui.heading(t!("add.geometry_props").to_string());
                             match obj.geometry_type {
                                 GeometryType::Cube => {
                                     ui.horizontal(|ui| {
-                                        ui.label("Side Length:");
+                                        ui.label(t!("add.side_length").to_string());
                                         if ui
                                             .add(
                                                 egui::DragValue::new(&mut obj.cube_side).speed(0.1),
@@ -1758,7 +1811,7 @@ impl State {
                                 }
                                 GeometryType::Sphere => {
                                     ui.horizontal(|ui| {
-                                        ui.label("Radius:");
+                                        ui.label(t!("add.radius").to_string());
                                         if ui
                                             .add(
                                                 egui::DragValue::new(&mut obj.sphere_radius)
@@ -1773,7 +1826,7 @@ impl State {
                                 }
                                 GeometryType::Plane => {
                                     ui.horizontal(|ui| {
-                                        ui.label("Surface Area:");
+                                        ui.label(t!("add.surface_area").to_string());
                                         if ui
                                             .add(
                                                 egui::DragValue::new(&mut obj.plane_surface)
@@ -1786,7 +1839,7 @@ impl State {
                                             obj.instance.scale = cgmath::Vector3::new(s, 1.0, s);
                                         }
                                     });
-                                    ui.checkbox(&mut obj.show_normal, "Show Normal Arrow");
+                                    ui.checkbox(&mut obj.show_normal, t!("add.show_normal").to_string());
                                 }
                                 _ => {}
                             }
@@ -1794,7 +1847,10 @@ impl State {
                             ui.separator();
                             ui.horizontal(|ui| {
                                 if ui
-                                    .add_sized([80.0, 24.0], egui::Button::new("Cancel"))
+                                    .add_sized(
+                                        [80.0, 24.0],
+                                        egui::Button::new(t!("common.cancel").to_string()),
+                                    )
                                     .clicked()
                                     || ui.input(|i| i.key_pressed(egui::Key::Escape))
                                 {
@@ -1804,7 +1860,10 @@ impl State {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         if ui
-                                            .add_sized([80.0, 24.0], egui::Button::new("Confirm"))
+                                            .add_sized(
+                                                [80.0, 24.0],
+                                                egui::Button::new(t!("common.confirm").to_string()),
+                                            )
                                             .clicked()
                                             || ui.input(|i| i.key_pressed(egui::Key::Enter))
                                         {

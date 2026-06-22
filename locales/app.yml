@@ -1,0 +1,384 @@
+# Application UI translations (rust-i18n combined format).
+# Add a language by appending its code under each key; register it in
+# src/i18n.rs (LANGUAGES). English (en) is the fallback for any missing key.
+_version: 2
+
+# ── Settings window ──────────────────────────────────────────────────────────
+"settings.window_title":
+  en: Settings
+  it: Impostazioni
+  es: Ajustes
+  fr: Paramètres
+  de: Einstellungen
+"settings.global_heading":
+  en: Global Settings
+  it: Impostazioni globali
+  es: Ajustes globales
+  fr: Paramètres globaux
+  de: Globale Einstellungen
+"settings.language":
+  en: Language
+  it: Lingua
+  es: Idioma
+  fr: Langue
+  de: Sprache
+"settings.camera_view":
+  en: Camera & View
+  it: Telecamera e vista
+  es: Cámara y vista
+  fr: Caméra et vue
+  de: Kamera & Ansicht
+"settings.focus_selected":
+  en: Focus Selected
+  it: Inquadra selezione
+  es: Enfocar selección
+  fr: Cadrer la sélection
+  de: Auswahl fokussieren
+"settings.reset_view":
+  en: Reset View (0,0,0)
+  it: Reimposta vista (0,0,0)
+  es: Restablecer vista (0,0,0)
+  fr: Réinitialiser la vue (0,0,0)
+  de: Ansicht zurücksetzen (0,0,0)
+"settings.zoom_limits":
+  en: "Zoom Limits:"
+  it: "Limiti di zoom:"
+  es: "Límites de zoom:"
+  fr: "Limites de zoom :"
+  de: "Zoom-Grenzen:"
+"settings.grid_options":
+  en: Grid Options
+  it: Opzioni griglia
+  es: Opciones de cuadrícula
+  fr: Options de grille
+  de: Rasteroptionen
+"settings.grid_xy":
+  en: XY Plane
+  it: Piano XY
+  es: Plano XY
+  fr: Plan XY
+  de: XY-Ebene
+"settings.grid_xz":
+  en: XZ Plane
+  it: Piano XZ
+  es: Plano XZ
+  fr: Plan XZ
+  de: XZ-Ebene
+"settings.grid_yz":
+  en: YZ Plane
+  it: Piano YZ
+  es: Plano YZ
+  fr: Plan YZ
+  de: YZ-Ebene
+"settings.show_axes":
+  en: Show Axes
+  it: Mostra assi
+  es: Mostrar ejes
+  fr: Afficher les axes
+  de: Achsen anzeigen
+
+# ── Status bar ───────────────────────────────────────────────────────────────
+"status.camera_eye":
+  en: Camera Eye
+  it: Posizione camera
+  es: Ojo de cámara
+  fr: Œil caméra
+  de: Kameraposition
+"status.target":
+  en: Target
+  it: Bersaglio
+  es: Objetivo
+  fr: Cible
+  de: Ziel
+"status.yaw":
+  en: Yaw
+  it: Imbardata
+  es: Guiñada
+  fr: Lacet
+  de: Gieren
+"status.pitch":
+  en: Pitch
+  it: Beccheggio
+  es: Cabeceo
+  fr: Tangage
+  de: Nicken
+
+# ── Add New Object window ────────────────────────────────────────────────────
+"add.window_title":
+  en: Add New Object
+  it: Aggiungi nuovo oggetto
+  es: Añadir nuevo objeto
+  fr: Ajouter un nouvel objet
+  de: Neues Objekt hinzufügen
+"add.transform":
+  en: Transform
+  it: Trasformazione
+  es: Transformación
+  fr: Transformation
+  de: Transformation
+"add.show_label":
+  en: Show Label in Viewport
+  it: Mostra etichetta nella vista
+  es: Mostrar etiqueta en la vista
+  fr: Afficher l'étiquette dans la vue
+  de: Beschriftung in der Ansicht anzeigen
+"add.geometry_props":
+  en: Geometry Properties
+  it: Proprietà geometria
+  es: Propiedades de geometría
+  fr: Propriétés de géométrie
+  de: Geometrie-Eigenschaften
+"add.side_length":
+  en: "Side Length:"
+  it: "Lunghezza lato:"
+  es: "Longitud del lado:"
+  fr: "Longueur du côté :"
+  de: "Seitenlänge:"
+"add.radius":
+  en: "Radius:"
+  it: "Raggio:"
+  es: "Radio:"
+  fr: "Rayon :"
+  de: "Radius:"
+"add.surface_area":
+  en: "Surface Area:"
+  it: "Area superficie:"
+  es: "Área de superficie:"
+  fr: "Aire de surface :"
+  de: "Oberfläche:"
+"add.show_normal":
+  en: Show Normal Arrow
+  it: Mostra freccia normale
+  es: Mostrar flecha normal
+  fr: Afficher la flèche normale
+  de: Normalenpfeil anzeigen
+
+# ── Shapes ─────────────────────────────────────────────────────────────────
+"shape.cube":
+  en: Cube
+  it: Cubo
+  es: Cubo
+  fr: Cube
+  de: Würfel
+"shape.sphere":
+  en: Sphere
+  it: Sfera
+  es: Esfera
+  fr: Sphère
+  de: Kugel
+"shape.plane":
+  en: Plane
+  it: Piano
+  es: Plano
+  fr: Plan
+  de: Ebene
+
+# ── Shared labels ────────────────────────────────────────────────────────────
+"common.background":
+  en: Background
+  it: Sfondo
+  es: Fondo
+  fr: Arrière-plan
+  de: Hintergrund
+"common.name":
+  en: "Name:"
+  it: "Nome:"
+  es: "Nombre:"
+  fr: "Nom :"
+  de: "Name:"
+"common.type":
+  en: "Type:"
+  it: "Tipo:"
+  es: "Tipo:"
+  fr: "Type :"
+  de: "Typ:"
+"common.position":
+  en: "Pos:"
+  it: "Pos:"
+  es: "Pos:"
+  fr: "Pos :"
+  de: "Pos:"
+"common.rotation":
+  en: "Rot:"
+  it: "Rot:"
+  es: "Rot:"
+  fr: "Rot :"
+  de: "Rot:"
+"common.scale":
+  en: "Scale:"
+  it: "Scala:"
+  es: "Escala:"
+  fr: "Échelle :"
+  de: "Skalierung:"
+"common.color":
+  en: "Color:"
+  it: "Colore:"
+  es: "Color:"
+  fr: "Couleur :"
+  de: "Farbe:"
+"common.min_prefix":
+  en: "Min: "
+  it: "Min: "
+  es: "Mín: "
+  fr: "Min : "
+  de: "Min: "
+"common.max_prefix":
+  en: "Max: "
+  it: "Max: "
+  es: "Máx: "
+  fr: "Max : "
+  de: "Max: "
+"common.cancel":
+  en: Cancel
+  it: Annulla
+  es: Cancelar
+  fr: Annuler
+  de: Abbrechen
+"common.add":
+  en: Add
+  it: Aggiungi
+  es: Añadir
+  fr: Ajouter
+  de: Hinzufügen
+"common.clear":
+  en: Clear
+  it: Pulisci
+  es: Limpiar
+  fr: Effacer
+  de: Leeren
+"common.confirm":
+  en: Confirm
+  it: Conferma
+  es: Confirmar
+  fr: Confirmer
+  de: Bestätigen
+
+# ── Toolbar ──────────────────────────────────────────────────────────────────
+"toolbar.object":
+  en: ➕ Object
+  it: ➕ Oggetto
+  es: ➕ Objeto
+  fr: ➕ Objet
+  de: ➕ Objekt
+"toolbar.dataset":
+  en: 📊 Dataset
+  it: 📊 Dataset
+  es: 📊 Conjunto
+  fr: 📊 Données
+  de: 📊 Datensatz
+"toolbar.solids":
+  en: 🧊 Solids
+  it: 🧊 Solidi
+  es: 🧊 Sólidos
+  fr: 🧊 Solides
+  de: 🧊 Volumenkörper
+"toolbar.measure":
+  en: 📏 Measure
+  it: 📏 Misura
+  es: 📏 Medir
+  fr: 📏 Mesurer
+  de: 📏 Messen
+"toolbar.measure_hint":
+  en: Click two surface points to measure the distance
+  it: Clicca due punti sulla superficie per misurare la distanza
+  es: Haz clic en dos puntos de la superficie para medir la distancia
+  fr: Cliquez sur deux points de la surface pour mesurer la distance
+  de: Klicke zwei Oberflächenpunkte an, um die Distanz zu messen
+
+# ── Measure HUD ──────────────────────────────────────────────────────────────
+"measure.first_point":
+  en: 📏 Click the first point
+  it: 📏 Clicca il primo punto
+  es: 📏 Haz clic en el primer punto
+  fr: 📏 Cliquez sur le premier point
+  de: 📏 Klicke den ersten Punkt an
+"measure.second_point":
+  en: 📏 Click the second point
+  it: 📏 Clicca il secondo punto
+  es: 📏 Haz clic en el segundo punto
+  fr: 📏 Cliquez sur le second point
+  de: 📏 Klicke den zweiten Punkt an
+"measure.distance":
+  en: "📏 Distance:"
+  it: "📏 Distanza:"
+  es: "📏 Distancia:"
+  fr: "📏 Distance :"
+  de: "📏 Distanz:"
+
+# ── Object Properties window ─────────────────────────────────────────────────
+"props.window_title":
+  en: Object Properties
+  it: Proprietà oggetto
+  es: Propiedades del objeto
+  fr: Propriétés de l'objet
+  de: Objekteigenschaften
+
+# ── Object / dataset list controls ───────────────────────────────────────────
+"list.edit":
+  en: Edit
+  it: Modifica
+  es: Editar
+  fr: Modifier
+  de: Bearbeiten
+"list.delete":
+  en: Delete
+  it: Elimina
+  es: Eliminar
+  fr: Supprimer
+  de: Löschen
+"list.toggle_label":
+  en: Toggle Label
+  it: Mostra/nascondi etichetta
+  es: Mostrar/ocultar etiqueta
+  fr: Afficher/masquer l'étiquette
+  de: Beschriftung umschalten
+"list.visibility":
+  en: Visibility
+  it: Visibilità
+  es: Visibilidad
+  fr: Visibilité
+  de: Sichtbarkeit
+"list.remove_dataset":
+  en: Remove dataset
+  it: Rimuovi dataset
+  es: Eliminar conjunto de datos
+  fr: Supprimer le jeu de données
+  de: Datensatz entfernen
+"list.focus_dataset":
+  en: Focus camera on dataset
+  it: Inquadra il dataset
+  es: Enfocar la cámara en el conjunto
+  fr: Cadrer la caméra sur le jeu de données
+  de: Kamera auf Datensatz fokussieren
+"list.rows":
+  en: rows
+  it: righe
+  es: filas
+  fr: lignes
+  de: Zeilen
+
+# ── Status messages ──────────────────────────────────────────────────────────
+"status.loading":
+  en: "Loading %{path} ..."
+  it: "Caricamento di %{path} ..."
+  es: "Cargando %{path} ..."
+  fr: "Chargement de %{path} ..."
+  de: "Lade %{path} ..."
+"status.import_failed":
+  en: "Import failed: %{msg}"
+  it: "Importazione fallita: %{msg}"
+  es: "Error de importación: %{msg}"
+  fr: "Échec de l'import : %{msg}"
+  de: "Import fehlgeschlagen: %{msg}"
+"status.worker_died":
+  en: Import worker died unexpectedly
+  it: Il processo di importazione è terminato inaspettatamente
+  es: El proceso de importación finalizó inesperadamente
+  fr: Le processus d'import s'est arrêté de façon inattendue
+  de: Der Importvorgang wurde unerwartet beendet
+"status.imported_model":
+  en: "Imported model with %{count} triangles"
+  it: "Modello importato con %{count} triangoli"
+  es: "Modelo importado con %{count} triángulos"
+  fr: "Modèle importé avec %{count} triangles"
+  de: "Modell mit %{count} Dreiecken importiert"

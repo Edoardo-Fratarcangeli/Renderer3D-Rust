@@ -1,0 +1,129 @@
+# Geometry import window translations (rust-i18n combined format).
+# Covers src/ui/geometry_panel.rs and src/ui/import_dialog.rs (geometry side).
+_version: 2
+
+# ── Window ───────────────────────────────────────────────────────────────────
+"geometry.window_title":
+  en: 🧊 Solids Import
+  it: 🧊 Importa solidi
+  es: 🧊 Importar sólidos
+  fr: 🧊 Import de solides
+  de: 🧊 Volumenkörper-Import
+
+# ── 3D model import ──────────────────────────────────────────────────────────
+"geometry.import_model_heading":
+  en: Import a 3D model
+  it: Importa un modello 3D
+  es: Importar un modelo 3D
+  fr: Importer un modèle 3D
+  de: 3D-Modell importieren
+"geometry.field_model":
+  en: Model
+  it: Modello
+  es: Modelo
+  fr: Modèle
+  de: Modell
+"geometry.import_model_button":
+  en: 📥 Import 3D model
+  it: 📥 Importa modello 3D
+  es: 📥 Importar modelo 3D
+  fr: 📥 Importer le modèle 3D
+  de: 📥 3D-Modell importieren
+
+# ── Paste area ───────────────────────────────────────────────────────────────
+"geometry.paste_heading":
+  en: Paste geometry data
+  it: Incolla dati geometria
+  es: Pegar datos de geometría
+  fr: Coller des données de géométrie
+  de: Geometriedaten einfügen
+"geometry.paste_hint":
+  en: "DSL (`cube 0 0 0 2 #ff8800`), XYZ points or JSON — auto-detected"
+  it: "DSL (`cube 0 0 0 2 #ff8800`), punti XYZ o JSON — rilevamento automatico"
+  es: "DSL (`cube 0 0 0 2 #ff8800`), puntos XYZ o JSON — detección automática"
+  fr: "DSL (`cube 0 0 0 2 #ff8800`), points XYZ ou JSON — détection automatique"
+  de: "DSL (`cube 0 0 0 2 #ff8800`), XYZ-Punkte oder JSON — automatisch erkannt"
+"geometry.add_from_text":
+  en: ➕ Add layer from text
+  it: ➕ Aggiungi livello da testo
+  es: ➕ Añadir capa desde texto
+  fr: ➕ Ajouter une couche depuis le texte
+  de: ➕ Ebene aus Text hinzufügen
+
+# ── File import ──────────────────────────────────────────────────────────────
+"geometry.import_file_heading":
+  en: Import a file
+  it: Importa un file
+  es: Importar un archivo
+  fr: Importer un fichier
+  de: Datei importieren
+"geometry.file_formats":
+  en: JSON · XYZ · TXT (DSL)
+  it: JSON · XYZ · TXT (DSL)
+  es: JSON · XYZ · TXT (DSL)
+  fr: JSON · XYZ · TXT (DSL)
+  de: JSON · XYZ · TXT (DSL)
+"geometry.field_file":
+  en: File
+  it: File
+  es: Archivo
+  fr: Fichier
+  de: Datei
+"geometry.import_file_button":
+  en: 📂 Import file
+  it: 📂 Importa file
+  es: 📂 Importar archivo
+  fr: 📂 Importer un fichier
+  de: 📂 Datei importieren
+
+# ── Layer list ───────────────────────────────────────────────────────────────
+"geometry.layers_heading":
+  en: Layers
+  it: Livelli
+  es: Capas
+  fr: Couches
+  de: Ebenen
+"geometry.geometries_total":
+  en: "%{count} geometries total"
+  it: "%{count} geometrie in totale"
+  es: "%{count} geometrías en total"
+  fr: "%{count} géométries au total"
+  de: "%{count} Geometrien insgesamt"
+"geometry.toggle_visibility":
+  en: Toggle layer visibility
+  it: Mostra/nascondi livello
+  es: Mostrar/ocultar capa
+  fr: Afficher/masquer la couche
+  de: Ebenensichtbarkeit umschalten
+"geometry.remove_layer":
+  en: Remove layer
+  it: Rimuovi livello
+  es: Eliminar capa
+  fr: Supprimer la couche
+  de: Ebene entfernen
+"geometry.focus_layer":
+  en: Focus camera on layer
+  it: Inquadra il livello
+  es: Enfocar la cámara en la capa
+  fr: Cadrer la caméra sur la couche
+  de: Kamera auf Ebene fokussieren
+"geometry.no_layers":
+  en: No layers yet — paste data or import a file.
+  it: Nessun livello — incolla dati o importa un file.
+  es: Aún no hay capas — pega datos o importa un archivo.
+  fr: Aucune couche — collez des données ou importez un fichier.
+  de: Noch keine Ebenen — Daten einfügen oder Datei importieren.
+
+# ── Status messages ──────────────────────────────────────────────────────────
+"geometry.added_layer":
+  en: "Added layer '%{name}' with %{count} geometries"
+  it: "Aggiunto livello '%{name}' con %{count} geometrie"
+  es: "Capa '%{name}' añadida con %{count} geometrías"
+  fr: "Couche '%{name}' ajoutée avec %{count} géométries"
+  de: "Ebene '%{name}' mit %{count} Geometrien hinzugefügt"
+"geometry.parse_failed":
+  en: "Parse failed: %{msg}"
+  it: "Analisi fallita: %{msg}"
+  es: "Error de análisis: %{msg}"
+  fr: "Échec de l'analyse : %{msg}"
+  de: "Analyse fehlgeschlagen: %{msg}"

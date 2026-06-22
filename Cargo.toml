@@ -1,6 +1,6 @@
 [package]
 name = "rendering_3d"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
 
 [dependencies]
@@ -25,6 +25,10 @@ stl_io = "0.3"                                         # STL solid model import
 tobj = "4.0"                                           # Wavefront OBJ import
 gltf = "1.4"                                           # glTF / GLB import
 chrono = "0.4.43"
+rust-i18n = "3"                                       # Compile-time embedded UI translations
+sys-locale = "0.3"                                    # Detect the OS UI language at startup
+dirs = "5"                                            # Per-user config dir for the language choice
+cargo-packager-updater = "0.2"                        # Signed in-place auto-update (rustls)
 resvg = "0.47.0"
 usvg = "0.47.0"
 tiny-skia = "0.12.0"

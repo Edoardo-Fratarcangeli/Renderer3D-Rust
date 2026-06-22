@@ -93,11 +93,14 @@ impl GeometryView {
 
     /// Add a layer and report success.
     pub fn add_layer(&mut self, layer: GeometryLayer) {
-        self.status = Some(StatusMessage::success(format!(
-            "Added layer '{}' with {} geometries",
-            layer.name,
-            layer.len()
-        )));
+        self.status = Some(StatusMessage::success(
+            t!(
+                "geometry.added_layer",
+                name = layer.name,
+                count = layer.len().to_string()
+            )
+            .to_string(),
+        ));
         self.layers.push(layer);
         self.next_layer_id += 1;
         self.render_dirty = true;
@@ -111,7 +114,11 @@ impl GeometryView {
                 self.add_layer(layer);
                 self.paste_text.clear();
             }
-            Err(e) => self.status = Some(StatusMessage::error(format!("Parse failed: {}", e))),
+            Err(e) => {
+                self.status = Some(StatusMessage::error(
+                    t!("geometry.parse_failed", msg = e.to_string()).to_string(),
+                ))
+            }
         }
     }
 
@@ -119,7 +126,9 @@ impl GeometryView {
     pub fn import_file(&mut self) {
         let path = PathBuf::from(self.path_text.trim());
         self.loading = true;
-        self.status = Some(StatusMessage::info(format!("Loading {} ...", path.display())));
+        self.status = Some(StatusMessage::info(
+            t!("status.loading", path = path.display().to_string()).to_string(),
+        ));
         let default_color = self.next_default_color();
         let (tx, rx) = std::sync::mpsc::channel();
         self.worker = Some(rx);
@@ -152,13 +161,16 @@ impl GeometryView {
             Ok(Err(msg)) => {
                 self.worker = None;
                 self.loading = false;
-                self.status = Some(StatusMessage::error(format!("Import failed: {}", msg)));
+                self.status = Some(StatusMessage::error(
+                    t!("status.import_failed", msg = msg).to_string(),
+                ));
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.worker = None;
                 self.loading = false;
-                self.status = Some(StatusMessage::error("Import worker died unexpectedly"));
+                self.status =
+                    Some(StatusMessage::error(t!("status.worker_died").to_string()));
             }
         }
     }
@@ -174,7 +186,7 @@ impl GeometryView {
         let mut focus = None;
         let mut open = true;
         let screen_center = ctx.screen_rect().center();
-        egui::Window::new("🧊 Solids Import")
+        egui::Window::new(t!("geometry.window_title").to_string())
             .open(&mut open)
             .default_size([460.0, 480.0])
             .pivot(egui::Align2::CENTER_CENTER)
@@ -194,11 +206,11 @@ impl GeometryView {
 
         // --- 3D solid model import (STL / OBJ / glTF) ---
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("Import a 3D model").heading());
+            ui.label(egui::RichText::new(t!("geometry.import_model_heading").to_string()).heading());
             ui.label(egui::RichText::new("STL · OBJ · glTF / GLB · STEP").weak());
         });
         ui.horizontal(|ui| {
-            ui.label("Model");
+            ui.label(t!("geometry.field_model").to_string());
             ui.add(
                 egui::TextEdit::singleline(&mut self.mesh_path_text)
                     .desired_width(f32::INFINITY)
@@ -209,7 +221,7 @@ impl GeometryView {
             ui.horizontal(|ui| {
                 let can_load = !self.mesh_loading && !self.mesh_path_text.trim().is_empty();
                 if ui
-                    .add_enabled(can_load, egui::Button::new("📥 Import 3D model"))
+                    .add_enabled(can_load, egui::Button::new(t!("geometry.import_model_button").to_string()))
                     .clicked()
                 {
                     self.mesh_request =
@@ -227,11 +239,9 @@ impl GeometryView {
 
         // --- Paste area ---
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("Paste geometry data").heading());
+            ui.label(egui::RichText::new(t!("geometry.paste_heading").to_string()).heading());
             ui.label(
-                egui::RichText::new(
-                    "DSL (`cube 0 0 0 2 #ff8800`), XYZ points or JSON — auto-detected",
-                )
+                egui::RichText::new(t!("geometry.paste_hint").to_string())
                 .weak(),
             );
         });
@@ -245,7 +255,7 @@ impl GeometryView {
         ui.vertical_centered(|ui| {
             let can_parse = !self.paste_text.trim().is_empty();
             if ui
-                .add_enabled(can_parse, egui::Button::new("➕ Add layer from text"))
+                .add_enabled(can_parse, egui::Button::new(t!("geometry.add_from_text").to_string()))
                 .clicked()
             {
                 self.import_pasted();
@@ -257,13 +267,13 @@ impl GeometryView {
 
         // --- File import ---
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("Import a file").heading());
+            ui.label(egui::RichText::new(t!("geometry.import_file_heading").to_string()).heading());
             // Tabular data (CSV/Excel) lives in the Dataset window now; Solids
             // covers geometry descriptions and (soon) 3D mesh formats.
-            ui.label(egui::RichText::new("JSON · XYZ · TXT (DSL)").weak());
+            ui.label(egui::RichText::new(t!("geometry.file_formats").to_string()).weak());
         });
         ui.horizontal(|ui| {
-            ui.label("File");
+            ui.label(t!("geometry.field_file").to_string());
             ui.add(
                 egui::TextEdit::singleline(&mut self.path_text)
                     .desired_width(f32::INFINITY)
@@ -274,7 +284,7 @@ impl GeometryView {
             ui.horizontal(|ui| {
                 let can_load = !self.loading && !self.path_text.trim().is_empty();
                 if ui
-                    .add_enabled(can_load, egui::Button::new("📂 Import file"))
+                    .add_enabled(can_load, egui::Button::new(t!("geometry.import_file_button").to_string()))
                     .clicked()
                 {
                     self.import_file();
@@ -295,11 +305,17 @@ impl GeometryView {
             ui.add_space(8.0);
             ui.separator();
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Layers").heading());
+                ui.label(egui::RichText::new(t!("geometry.layers_heading").to_string()).heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        egui::RichText::new(format!("{} geometries total", self.total_records()))
-                            .weak(),
+                        egui::RichText::new(
+                            t!(
+                                "geometry.geometries_total",
+                                count = self.total_records().to_string()
+                            )
+                            .to_string(),
+                        )
+                        .weak(),
                     );
                 });
             });
@@ -315,7 +331,7 @@ impl GeometryView {
                             let eye = if layer.visible { "👁" } else { "🕶" };
                             if ui
                                 .button(eye)
-                                .on_hover_text("Toggle layer visibility")
+                                .on_hover_text(t!("geometry.toggle_visibility").to_string())
                                 .clicked()
                             {
                                 layer.visible = !layer.visible;
@@ -328,14 +344,14 @@ impl GeometryView {
                                 |ui| {
                                     if ui
                                         .button("🗑")
-                                        .on_hover_text("Remove layer")
+                                        .on_hover_text(t!("geometry.remove_layer").to_string())
                                         .clicked()
                                     {
                                         remove_idx = Some(i);
                                     }
                                     if ui
                                         .button("🎯")
-                                        .on_hover_text("Focus camera on layer")
+                                        .on_hover_text(t!("geometry.focus_layer").to_string())
                                         .clicked()
                                     {
                                         focus = layer.centroid();
@@ -355,7 +371,7 @@ impl GeometryView {
         } else {
             ui.add_space(12.0);
             ui.vertical_centered(|ui| {
-                ui.label(egui::RichText::new("No layers yet — paste data or import a file.").weak());
+                ui.label(egui::RichText::new(t!("geometry.no_layers").to_string()).weak());
             });
         }
         focus

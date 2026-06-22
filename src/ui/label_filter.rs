@@ -23,13 +23,13 @@ pub fn show(ui: &mut egui::Ui, labels: &[LabelStat], enabled: &mut HashSet<u32>)
     let mut changed = false;
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Visible labels").strong());
+        ui.label(egui::RichText::new(t!("dataset.visible_labels").to_string()).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("None").clicked() {
+            if ui.small_button(t!("dataset.select_none").to_string()).clicked() {
                 enabled.clear();
                 changed = true;
             }
-            if ui.small_button("All").clicked() {
+            if ui.small_button(t!("dataset.select_all").to_string()).clicked() {
                 *enabled = (0..labels.len() as u32).collect();
                 changed = true;
             }

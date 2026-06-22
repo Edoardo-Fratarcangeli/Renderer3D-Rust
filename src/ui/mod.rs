@@ -166,12 +166,12 @@ impl DatasetTab {
     ];
 
     /// Icon + title shown on the tab button.
-    pub fn title(&self) -> &'static str {
+    pub fn title(&self) -> String {
         match self {
-            DatasetTab::Import => "📂 Import",
-            DatasetTab::Labels => "🏷 Labels",
-            DatasetTab::View => "🎨 View",
-            DatasetTab::Export => "💾 Export",
+            DatasetTab::Import => t!("dataset.tab_import").to_string(),
+            DatasetTab::Labels => t!("dataset.tab_labels").to_string(),
+            DatasetTab::View => t!("dataset.tab_view").to_string(),
+            DatasetTab::Export => t!("dataset.tab_export").to_string(),
         }
     }
 
@@ -328,23 +328,28 @@ impl DatasetView {
         self.loaded = Some(loaded);
         self.recompute_visible();
         let l = self.loaded.as_ref().unwrap();
-        self.import.status = Some(StatusMessage::success(format!(
-            "Loaded '{}': {} rows × {} cols, {} labels{}{}",
-            l.dataset.metadata.name,
-            l.dataset.n_rows(),
-            l.dataset.n_cols(),
-            l.dataset.label_names.len(),
-            if l.dataset.source.is_memory_mapped() {
-                " (memory mapped)"
-            } else {
-                ""
-            },
-            if l.projection.from_cache {
-                " (projection from cache)"
-            } else {
-                ""
-            },
-        )));
+        let mmap = if l.dataset.source.is_memory_mapped() {
+            t!("dataset.memory_mapped_suffix").to_string()
+        } else {
+            String::new()
+        };
+        let cache = if l.projection.from_cache {
+            t!("dataset.cache_suffix").to_string()
+        } else {
+            String::new()
+        };
+        self.import.status = Some(StatusMessage::success(
+            t!(
+                "dataset.loaded_summary",
+                name = l.dataset.metadata.name,
+                rows = l.dataset.n_rows().to_string(),
+                cols = l.dataset.n_cols().to_string(),
+                labels = l.dataset.label_names.len().to_string(),
+                mmap = mmap,
+                cache = cache
+            )
+            .to_string(),
+        ));
         self.tab = DatasetTab::Labels;
     }
 
@@ -434,8 +439,9 @@ impl DatasetView {
                 self.recompute_visible();
             }
             Err(e) => {
-                self.import.status =
-                    Some(StatusMessage::error(format!("Reprojection failed: {}", e)));
+                self.import.status = Some(StatusMessage::error(
+                    t!("dataset.reprojection_failed", msg = e.to_string()).to_string(),
+                ));
             }
         }
     }
@@ -460,16 +466,18 @@ impl DatasetView {
             &self.visible_rows,
             &self.settings,
         );
-        self.last_build_info = format!(
-            "{} / {} points rendered{}",
-            result.rendered_points,
-            self.visible_rows.len(),
-            if result.downsampled {
-                " (downsampled)"
-            } else {
-                ""
-            }
-        );
+        let extra = if result.downsampled {
+            t!("dataset.downsampled_suffix").to_string()
+        } else {
+            String::new()
+        };
+        self.last_build_info = t!(
+            "dataset.points_rendered",
+            rendered = result.rendered_points.to_string(),
+            total = self.visible_rows.len().to_string(),
+            extra = extra
+        )
+        .to_string();
         result
     }
 
@@ -483,7 +491,7 @@ impl DatasetView {
         let mut action = DatasetAction::None;
         let mut open = true;
         let screen_center = ctx.screen_rect().center();
-        egui::Window::new("📊 Dataset Visualizer")
+        egui::Window::new(t!("dataset.window_title").to_string())
             .open(&mut open)
             // Fixed footprint: the window must not grow when a dataset is
             // loaded. Long content scrolls inside instead of widening.
@@ -526,13 +534,16 @@ impl DatasetView {
         if let Some(loaded) = &self.loaded {
             ui.vertical_centered(|ui| {
                 ui.label(
-                    egui::RichText::new(format!(
-                        "{} — {} rows × {} cols ({})",
-                        loaded.dataset.metadata.name,
-                        loaded.dataset.n_rows(),
-                        loaded.dataset.n_cols(),
-                        loaded.dataset.metadata.format
-                    ))
+                    egui::RichText::new(
+                        t!(
+                            "dataset.summary",
+                            name = loaded.dataset.metadata.name,
+                            rows = loaded.dataset.n_rows().to_string(),
+                            cols = loaded.dataset.n_cols().to_string(),
+                            format = loaded.dataset.metadata.format.to_string()
+                        )
+                        .to_string(),
+                    )
                     .strong(),
                 );
                 if !self.last_build_info.is_empty() {
@@ -563,7 +574,7 @@ impl DatasetView {
                 }
                 ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("Distribution").heading());
+                    ui.label(egui::RichText::new(t!("dataset.distribution").to_string()).heading());
                 });
                 distribution_chart::show(ui, &stats, &self.enabled_labels);
             }
@@ -573,19 +584,19 @@ impl DatasetView {
                     .num_columns(2)
                     .spacing([12.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label("Point size");
+                        ui.label(t!("dataset.point_size").to_string());
                         changed |= ui
                             .add(egui::Slider::new(&mut self.settings.point_size, 0.01..=0.5))
                             .changed();
                         ui.end_row();
 
-                        ui.label("Shape per label");
+                        ui.label(t!("dataset.shape_per_label").to_string());
                         let mut per_label = matches!(
                             self.settings.geometry_policy,
                             crate::visualization::geometry_assigner::GeometryPolicy::PerLabel
                         );
                         if ui
-                            .checkbox(&mut per_label, "cycle sphere / cube / plane")
+                            .checkbox(&mut per_label, t!("dataset.cycle_shapes").to_string())
                             .changed()
                         {
                             self.settings.geometry_policy = if per_label {
@@ -605,7 +616,7 @@ impl DatasetView {
                 ui.add_space(8.0);
                 ui.separator();
                 ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("Projection").heading());
+                    ui.label(egui::RichText::new(t!("dataset.projection").to_string()).heading());
                 });
 
                 let col_names: Vec<String> = self
@@ -619,14 +630,14 @@ impl DatasetView {
                     .num_columns(2)
                     .spacing([12.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label("Method");
+                        ui.label(t!("dataset.method").to_string());
                         ui.horizontal(|ui| {
-                            ui.radio_value(&mut self.import.use_pca, true, "PCA");
-                            ui.radio_value(&mut self.import.use_pca, false, "Direct columns");
+                            ui.radio_value(&mut self.import.use_pca, true, t!("dataset.method_pca").to_string());
+                            ui.radio_value(&mut self.import.use_pca, false, t!("dataset.method_direct").to_string());
                         });
                         ui.end_row();
 
-                        ui.label("Dimensions");
+                        ui.label(t!("dataset.dimensions").to_string());
                         ui.horizontal(|ui| {
                             ui.radio_value(&mut self.import.dims, 1, "1D");
                             ui.radio_value(&mut self.import.dims, 2, "2D");
@@ -639,7 +650,7 @@ impl DatasetView {
                         if !self.import.use_pca && n_cols > 0 {
                             let dims = self.import.dims.clamp(1, 3) as usize;
                             for (a, axis) in ["X", "Y", "Z"].iter().enumerate().take(dims) {
-                                ui.label(format!("{} column", axis));
+                                ui.label(t!("dataset.axis_column", axis = axis.to_string()).to_string());
                                 let sel = self.import.axes[a].min(n_cols - 1);
                                 egui::ComboBox::from_id_source(format!("axis_combo_{}", a))
                                     .selected_text(col_names[sel].clone())
@@ -653,7 +664,7 @@ impl DatasetView {
                         }
                     });
                 ui.vertical_centered(|ui| {
-                    if ui.button("Apply projection").clicked() {
+                    if ui.button(t!("dataset.apply_projection").to_string()).clicked() {
                         apply = true;
                     }
                 });
@@ -671,12 +682,17 @@ impl DatasetView {
                         &self.visible_rows,
                         &path,
                     ) {
-                        Ok(n) => Some(StatusMessage::success(format!(
-                            "Exported {} rows to {}",
-                            n,
-                            path.display()
-                        ))),
-                        Err(e) => Some(StatusMessage::error(format!("Export failed: {}", e))),
+                        Ok(n) => Some(StatusMessage::success(
+                            t!(
+                                "dataset.export_ok",
+                                count = n.to_string(),
+                                path = path.display().to_string()
+                            )
+                            .to_string(),
+                        )),
+                        Err(e) => Some(StatusMessage::error(
+                            t!("dataset.export_failed", msg = e.to_string()).to_string(),
+                        )),
                     };
                 }
             }
@@ -696,14 +712,16 @@ impl DatasetView {
             Ok(Err(msg)) => {
                 self.worker = None;
                 self.import.loading = false;
-                self.import.status = Some(StatusMessage::error(format!("Import failed: {}", msg)));
+                self.import.status = Some(StatusMessage::error(
+                    t!("status.import_failed", msg = msg).to_string(),
+                ));
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.worker = None;
                 self.import.loading = false;
                 self.import.status =
-                    Some(StatusMessage::error("Import worker died unexpectedly"));
+                    Some(StatusMessage::error(t!("status.worker_died").to_string()));
             }
         }
     }
@@ -719,22 +737,23 @@ impl DatasetView {
                     match loaded {
                         Ok(l) => self.install(l),
                         Err(e) => {
-                            self.import.status =
-                                Some(StatusMessage::error(format!("Import failed: {}", e)))
+                            self.import.status = Some(StatusMessage::error(
+                                t!("status.import_failed", msg = e.to_string()).to_string(),
+                            ))
                         }
                     }
                 }
                 None => {
-                    self.import.status =
-                        Some(StatusMessage::error(format!("Unknown builtin '{}'", name)))
+                    self.import.status = Some(StatusMessage::error(
+                        t!("dataset.unknown_builtin", name = name.to_string()).to_string(),
+                    ))
                 }
             },
             ImportSource::Path(path) => {
                 self.import.loading = true;
-                self.import.status = Some(StatusMessage::info(format!(
-                    "Loading {} ...",
-                    path.display()
-                )));
+                self.import.status = Some(StatusMessage::info(
+                    t!("status.loading", path = path.display().to_string()).to_string(),
+                ));
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.worker = Some(rx);
                 let spec = req.projection;
@@ -757,8 +776,8 @@ fn empty_state(ui: &mut egui::Ui) {
     ui.vertical_centered(|ui| {
         ui.label(egui::RichText::new("🗄").size(48.0));
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("No dataset loaded").heading());
-        ui.label(egui::RichText::new("Import a file or a benchmark from the Import tab.").weak());
+        ui.label(egui::RichText::new(t!("dataset.no_dataset").to_string()).heading());
+        ui.label(egui::RichText::new(t!("dataset.no_dataset_hint").to_string()).weak());
     });
     ui.add_space(40.0);
 }

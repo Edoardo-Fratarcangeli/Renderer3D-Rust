@@ -44,6 +44,8 @@ fn load_icon() -> winit::window::Icon {
 
 pub async fn run() {
     logger::init(logger::LogLevel::Info);
+    rendering_3d::i18n::init();
+    rendering_3d::updater::check_in_background();
     log_info!("Application starting...");
 
     let event_loop = EventLoop::new().unwrap();

@@ -42,6 +42,8 @@ egui UI.
   - **Export**: writes the currently filtered subset to CSV.
   - See [docs/ML_VISUALIZER.md](docs/ML_VISUALIZER.md) for the architecture.
 
+- **Multilingual UI**: English, Italian, Spanish, French and German, auto-detected from the OS and switchable live from **Settings → Language** (see [docs/I18N.md](docs/I18N.md)).
+- **Native installers**: self-contained installers for Windows (NSIS wizard), macOS (`.dmg` + localized `.pkg`) and Linux (`.AppImage`/`.deb`), built per-platform in CI (see [docs/PACKAGING.md](docs/PACKAGING.md)).
 - **Instanced Rendering**: Efficiently renders multiple instances of objects with low overhead.
 - **WGPU Graphics**: Uses the modern `wgpu` crate for cross-platform, type-safe graphics programming.
 - **Advanced Selection System**:
@@ -105,16 +107,39 @@ src/
 ├── model.rs      # Vertex layout and Instancing Definitions
 ├── primitives.rs # Generates meshes like Cubes, Spheres, Planes, Grids, and Axes
 ├── scene.rs      # SceneObject struct for entity transform and metadata
+├── i18n.rs       # UI language detection, persistence and runtime switching
+├── updater.rs    # Signed in-place auto-update client (inert until configured)
+├── ui/           # egui panels: dataset visualizer, geometry import, filters…
 └── shader.wgsl   # WebGPU (WGSL) shader code for lighting and highlighting
+locales/          # Translations (app/dataset/geometry .yml) — see docs/I18N.md
+packaging/        # Installer assets (NSIS, macOS .pkg, Linux .desktop/AppStream)
+scripts/          # Icon generation, update-signing key, release helpers
+.github/workflows # CI matrix that builds the native installers
+docs/             # PACKAGING.md, I18N.md, GEOMETRY_IMPORT.md, ML_VISUALIZER.md
 tests/            # Integration tests and Python Test Manager
 ```
 
-## 🛠️ Usage
+## 📥 Installation (end users)
+
+Download the installer for your platform from the
+[Releases page](https://github.com/Edoardo-Fratarcangeli/Renderer3D-Rust/releases):
+
+- **Windows** — run the `*-setup.exe` wizard (pick your language on the first page).
+- **macOS** — open the `.dmg` and drag the app to Applications, or run the `.pkg`
+  wizard. Universal build (Apple Silicon & Intel).
+- **Linux** — make the `.AppImage` executable and run it, or install the `.deb`.
+
+The app is self-contained and its interface is available in English, Italian,
+Spanish, French and German (auto-detected, switchable in Settings). Installers
+are currently unsigned, so you may see a one-time security prompt on first launch.
+
+## 🛠️ Usage (developers)
 
 ### Prerequisites
 
 - [Rust Toolchain](https://www.rust-lang.org/tools/install) (latest stable)
-- [Python 3.x](https://www.python.org/downloads/) (for Test Manager)
+- A GPU with Vulkan (Linux/Windows), Metal (macOS) or DX12 (Windows) support
+- [Python 3.x](https://www.python.org/downloads/) (for the Test Manager)
 
 ### Running
 
@@ -130,10 +155,16 @@ To run the Test Manager:
 python tests/test_manager.py
 ```
 
+### Building the installers
+
+Native installers are built per-platform in CI on every `v*` tag; see
+[docs/PACKAGING.md](docs/PACKAGING.md) for the full flow and for building them
+locally with `cargo-packager` / `makensis`.
+
 ### Navigating the UI
 
 - **➕ Object**: Top left area, opens the draft window to prepare a new geometry.
-- **⚙ Settings**: Top right area, global settings for background, grids, and camera.
+- **⚙ Settings**: Top right area, global settings for background, grids, camera and **interface language**.
 - **Bottom Panel**: Collapsible list of everything in the scene — objects and any imported dataset.
 - **Object Controls**: Each item in the list has icons for:
   - `✏ Edit`: Open the property editor.
@@ -149,8 +180,12 @@ python tests/test_manager.py
 - `cgmath`: Comprehensive linear algebra
 - `bytemuck`: Safe casting of raw bytes for GPU buffers
 - `pollster`: Blocking async executor for the main thread
+- `rust-i18n`, `sys-locale`, `dirs`: Multilingual UI (translations, OS-language detection, persisted choice)
+- `cargo-packager-updater`: Signed in-place auto-update client
 
 ## 🛠️ Next steps
 
 - Real STEP (`.step`/`.stp`) import via a BREP tessellation backend (e.g. `truck`) — currently recognised but not yet tessellated.
+- **Code signing** of the installers (macOS notarization, Windows Authenticode) to remove first-launch security prompts — see [docs/PACKAGING.md](docs/PACKAGING.md).
+- **Enable auto-update**: generate the signing key and embed the public key — see [docs/PACKAGING.md](docs/PACKAGING.md) › Auto-update.
 

@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# cargo-packager configuration
+# https://docs.crabnebula.dev/packager/
+#
+# Produces native, self-contained installers for Windows, macOS and Linux from
+# the single `rendering_3d` binary (shaders/icon are embedded via include_bytes!,
+# so no external assets are required at runtime).
+#
+# Build locally:   cargo packager --release
+# In CI:           the formats are selected per-OS by .github/workflows/release.yml
+# ─────────────────────────────────────────────────────────────────────────────
+
+product-name = "Rust 3D Renderer"
+identifier = "tech.fratarcangeli.rendering3d"
+# `version` is intentionally omitted: cargo-packager reads it from Cargo.toml.
+
+description = "High-performance 3D renderer for very large geometry sets (WGPU + egui)."
+long-description = """
+Rust 3D Renderer visualizes very large numbers of geometries spatially and fast,
+using instanced GPU rendering (one draw call per primitive shape, automatic LOD
+for huge point clouds). It imports geometry from plain DSL strings, Excel/CSV/JSON
+tables, 3D models (STL/OBJ/glTF) and ML datasets (NPY/NPZ/CSV/Parquet/IDX), and
+provides a full interactive scene editor with picking, undo/redo, a CAD-like camera
+and a polished egui UI.
+"""
+
+authors = ["Edoardo Fratarcangeli <edoardo.fratarcangeli.tech@gmail.com>"]
+publisher = "Edoardo Fratarcangeli"
+homepage = "https://github.com/Edoardo-Fratarcangeli/Renderer3D-Rust"
+license-file = "LICENSE"
+
+# Where the installers are written.
+out-dir = "dist"
+
+# The binary produced by `cargo build --release`. The CI builds it explicitly
+# per platform (notably a universal arm64+x86_64 binary on macOS), so there is
+# no before-packaging-command here. For a local one-shot build run:
+#     cargo build --release && cargo packager --release
+binaries = [{ path = "rendering_3d", main = true }]
+
+# Multi-resolution icon set generated from assets/icon.svg by scripts/gen-icons.sh
+# (.ico for Windows, .icns for macOS, .png ladder for Linux).
+icons = [
+    "packaging/icons/32x32.png",
+    "packaging/icons/128x128.png",
+    "packaging/icons/128x128@2x.png",
+    "packaging/icons/icon.png",
+    "packaging/icons/icon.ico",
+    "packaging/icons/icon.icns",
+]
+
+# Freedesktop / app-store category.
+category = "Graphics"
+
+# Auto-update feed. Artifacts are signed in CI with the key referenced by the
+# CARGO_PACKAGER_SIGN_PRIVATE_KEY environment variable (a GitHub Actions secret);
+# the in-app updater (src/updater.rs) verifies them against the public key.
+#
+# UNCOMMENT and paste the real public key (from scripts/gen-update-key.sh) to make
+# auto-update live. It is left commented so the build is green before a key exists.
+# [updater]
+# pubkey = "PASTE_PUBLIC_KEY_HERE"
+# endpoints = [
+#     "https://github.com/Edoardo-Fratarcangeli/Renderer3D-Rust/releases/latest/download/latest.json",
+# ]
+
+# ── Windows ──────────────────────────────────────────────────────────────────
+# Windows is intentionally NOT packaged by cargo-packager. The Windows installer
+# is a fully custom, modern, multilingual NSIS wizard (MUI2) authored in
+# packaging/windows/installer.nsi and built with `makensis` in CI. It has a
+# first-page language selector, an explanatory welcome page, a "What is this
+# software?" feature page, a components page and a finish page that can launch
+# the app — all localized into English/Italian/Spanish/French/German.
+# WiX/MSI is avoided: its multilingual, explanatory story is far weaker than NSIS.
+
+# ── macOS ───────────────────────────────────────────────────────────────────
+# A drag-to-Applications .dmg is the macOS-native delivery. An *explanatory,
+# multilingual wizard* on macOS is the job of a signed .pkg (built separately by
+# packaging/macos/build-pkg.sh with localized welcome/readme/license panes).
+[macos]
+minimum-system-version = "10.13"
+
+[dmg]
+background = "packaging/macos/dmg-background.png"
+window-size = { width = 660, height = 400 }
+app-position = { x = 180, y = 200 }
+application-folder-position = { x = 480, y = 200 }
+
+# ── Linux ──────────────────────────────────────────────────────────────────
+# AppImage is the most "self-contained" Linux format (it bundles the Vulkan /
+# X11 / Wayland client libraries the GPU stack needs). .deb and .rpm are also
+# produced for users who prefer their package manager; for those, the runtime
+# libraries are declared as dependencies instead of bundled.
+[deb]
+depends = [
+    "libvulkan1",
+    "libxkbcommon0",
+    "libwayland-client0",
+    "libx11-6",
+    "libxcb1",
+]
+section = "graphics"
+priority = "optional"
+# Localized .desktop entry (rendered as-is) and AppStream metadata for software centers.
+desktop-template = "packaging/linux/rendering-3d.desktop"
+files = { "/usr/share/metainfo/tech.fratarcangeli.rendering3d.metainfo.xml" = "packaging/linux/tech.fratarcangeli.rendering3d.metainfo.xml" }
+
+[appimage]
+# Bundle the Vulkan loader so the AppImage runs on systems without it installed.
+libs = []
+files = { "/usr/share/metainfo/tech.fratarcangeli.rendering3d.metainfo.xml" = "packaging/linux/tech.fratarcangeli.rendering3d.metainfo.xml" }

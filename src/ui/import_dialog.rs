@@ -9,12 +9,12 @@ use super::{ImportRequest, ImportSource, ImportState};
 use crate::dataset::builtin::BuiltinDataset;
 
 /// Short, user-facing description for each builtin benchmark button.
-pub fn builtin_description(name: &str) -> &'static str {
+pub fn builtin_description(name: &str) -> String {
     match name {
-        "blobs" => "5 gaussian clusters, 8D",
-        "spirals" => "2 interleaved 3D spirals",
-        "swiss_roll" => "classic manifold, 3D",
-        _ => "synthetic dataset",
+        "blobs" => t!("dataset.builtin_blobs").to_string(),
+        "spirals" => t!("dataset.builtin_spirals").to_string(),
+        "swiss_roll" => t!("dataset.builtin_swiss_roll").to_string(),
+        _ => t!("dataset.builtin_generic").to_string(),
     }
 }
 
@@ -23,11 +23,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
     let mut request = None;
 
     ui.vertical_centered(|ui| {
-        ui.label(egui::RichText::new("Import a dataset").heading());
+        ui.label(egui::RichText::new(t!("dataset.import_heading").to_string()).heading());
         ui.label(
-            egui::RichText::new(
-                "NPY · NPZ · CSV · Excel · Parquet · IDX — large files are memory mapped",
-            )
+            egui::RichText::new(t!("dataset.import_formats").to_string())
             .weak(),
         );
     });
@@ -37,7 +35,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("File");
+            ui.label(t!("dataset.field_file").to_string());
             ui.add(
                 egui::TextEdit::singleline(&mut state.path_text)
                     .desired_width(f32::INFINITY)
@@ -45,9 +43,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
             );
             ui.end_row();
 
-            ui.label("Rows");
+            ui.label(t!("dataset.field_rows").to_string());
             ui.horizontal(|ui| {
-                ui.checkbox(&mut state.limit_rows, "limit to");
+                ui.checkbox(&mut state.limit_rows, t!("dataset.limit_to").to_string());
                 ui.add_enabled(
                     state.limit_rows,
                     egui::DragValue::new(&mut state.max_rows).range(100..=10_000_000),
@@ -55,14 +53,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
             });
             ui.end_row();
 
-            ui.label("Projection");
+            ui.label(t!("dataset.field_projection").to_string());
             ui.horizontal(|ui| {
-                ui.radio_value(&mut state.use_pca, true, "PCA");
-                ui.radio_value(&mut state.use_pca, false, "Direct columns");
+                ui.radio_value(&mut state.use_pca, true, t!("dataset.method_pca").to_string());
+                ui.radio_value(&mut state.use_pca, false, t!("dataset.method_direct").to_string());
             });
             ui.end_row();
 
-            ui.label("Dimensions");
+            ui.label(t!("dataset.dimensions").to_string());
             ui.horizontal(|ui| {
                 ui.radio_value(&mut state.dims, 3, "3D");
                 ui.radio_value(&mut state.dims, 2, "2D");
@@ -75,7 +73,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
             // refine them later from the View tab).
             if !state.use_pca {
                 let dims = state.dims.clamp(1, 3) as usize;
-                ui.label("Columns");
+                ui.label(t!("dataset.field_columns").to_string());
                 ui.horizontal(|ui| {
                     for (a, axis) in ["X", "Y", "Z"].iter().enumerate().take(dims) {
                         ui.add(
@@ -97,7 +95,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
         ui.horizontal(|ui| {
             // Center the action button within the row.
             let button = egui::Button::new(
-                egui::RichText::new("📂 Import file").size(14.0),
+                egui::RichText::new(t!("dataset.import_file").to_string()).size(14.0),
             )
             .min_size(egui::vec2(140.0, 28.0));
             if ui.add_enabled(can_load, button).clicked() {
@@ -116,7 +114,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
     ui.add_space(8.0);
     ui.separator();
     ui.vertical_centered(|ui| {
-        ui.label(egui::RichText::new("…or try a benchmark dataset").weak());
+        ui.label(egui::RichText::new(t!("dataset.try_benchmark").to_string()).weak());
     });
     ui.add_space(4.0);
     ui.columns(BuiltinDataset::ALL_NAMES.len(), |cols| {
@@ -151,9 +149,10 @@ mod tests {
 
     #[test]
     fn builtin_descriptions_exist_for_all_benchmarks() {
+        let generic = t!("dataset.builtin_generic").to_string();
         for name in BuiltinDataset::ALL_NAMES {
-            assert_ne!(builtin_description(name), "synthetic dataset");
+            assert_ne!(builtin_description(name), generic);
         }
-        assert_eq!(builtin_description("nope"), "synthetic dataset");
+        assert_eq!(builtin_description("nope"), generic);
     }
 }

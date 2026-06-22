@@ -1,0 +1,338 @@
+# Dataset visualizer UI translations (rust-i18n combined format).
+# Covers src/ui/mod.rs, dataset_table.rs, distribution_chart.rs,
+# export_panel.rs, label_filter.rs and search_panel.rs.
+_version: 2
+
+# ── Window & tabs ────────────────────────────────────────────────────────────
+"dataset.window_title":
+  en: 📊 Dataset Visualizer
+  it: 📊 Visualizzatore dataset
+  es: 📊 Visualizador de conjuntos
+  fr: 📊 Visualiseur de données
+  de: 📊 Datensatz-Visualisierer
+"dataset.tab_import":
+  en: 📂 Import
+  it: 📂 Importa
+  es: 📂 Importar
+  fr: 📂 Importer
+  de: 📂 Importieren
+"dataset.tab_labels":
+  en: 🏷 Labels
+  it: 🏷 Etichette
+  es: 🏷 Etiquetas
+  fr: 🏷 Étiquettes
+  de: 🏷 Beschriftungen
+"dataset.tab_view":
+  en: 🎨 View
+  it: 🎨 Vista
+  es: 🎨 Vista
+  fr: 🎨 Vue
+  de: 🎨 Ansicht
+"dataset.tab_export":
+  en: 💾 Export
+  it: 💾 Esporta
+  es: 💾 Exportar
+  fr: 💾 Exporter
+  de: 💾 Exportieren
+
+# ── Empty state ──────────────────────────────────────────────────────────────
+"dataset.no_dataset":
+  en: No dataset loaded
+  it: Nessun dataset caricato
+  es: Ningún conjunto cargado
+  fr: Aucun jeu de données chargé
+  de: Kein Datensatz geladen
+"dataset.no_dataset_hint":
+  en: Import a file or a benchmark from the Import tab.
+  it: Importa un file o un benchmark dalla scheda Importa.
+  es: Importa un archivo o un benchmark desde la pestaña Importar.
+  fr: Importez un fichier ou un benchmark depuis l'onglet Importer.
+  de: Importiere eine Datei oder ein Benchmark über den Tab Importieren.
+
+# ── Labels tab ───────────────────────────────────────────────────────────────
+"dataset.distribution":
+  en: Distribution
+  it: Distribuzione
+  es: Distribución
+  fr: Distribution
+  de: Verteilung
+"dataset.visible_labels":
+  en: Visible labels
+  it: Etichette visibili
+  es: Etiquetas visibles
+  fr: Étiquettes visibles
+  de: Sichtbare Beschriftungen
+"dataset.select_none":
+  en: None
+  it: Nessuna
+  es: Ninguna
+  fr: Aucune
+  de: Keine
+"dataset.select_all":
+  en: All
+  it: Tutte
+  es: Todas
+  fr: Toutes
+  de: Alle
+
+# ── View tab ─────────────────────────────────────────────────────────────────
+"dataset.point_size":
+  en: Point size
+  it: Dimensione punto
+  es: Tamaño de punto
+  fr: Taille des points
+  de: Punktgröße
+"dataset.shape_per_label":
+  en: Shape per label
+  it: Forma per etichetta
+  es: Forma por etiqueta
+  fr: Forme par étiquette
+  de: Form pro Beschriftung
+"dataset.cycle_shapes":
+  en: cycle sphere / cube / plane
+  it: alterna sfera / cubo / piano
+  es: alternar esfera / cubo / plano
+  fr: alterner sphère / cube / plan
+  de: Kugel / Würfel / Ebene abwechseln
+"dataset.projection":
+  en: Projection
+  it: Proiezione
+  es: Proyección
+  fr: Projection
+  de: Projektion
+"dataset.method":
+  en: Method
+  it: Metodo
+  es: Método
+  fr: Méthode
+  de: Methode
+"dataset.method_pca":
+  en: PCA
+  it: PCA
+  es: PCA
+  fr: PCA
+  de: PCA
+"dataset.method_direct":
+  en: Direct columns
+  it: Colonne dirette
+  es: Columnas directas
+  fr: Colonnes directes
+  de: Direkte Spalten
+"dataset.dimensions":
+  en: Dimensions
+  it: Dimensioni
+  es: Dimensiones
+  fr: Dimensions
+  de: Dimensionen
+"dataset.axis_column":
+  en: "%{axis} column"
+  it: "Colonna %{axis}"
+  es: "Columna %{axis}"
+  fr: "Colonne %{axis}"
+  de: "Spalte %{axis}"
+"dataset.apply_projection":
+  en: Apply projection
+  it: Applica proiezione
+  es: Aplicar proyección
+  fr: Appliquer la projection
+  de: Projektion anwenden
+
+# ── Summary / build info ─────────────────────────────────────────────────────
+"dataset.summary":
+  en: "%{name} — %{rows} rows × %{cols} cols (%{format})"
+  it: "%{name} — %{rows} righe × %{cols} colonne (%{format})"
+  es: "%{name} — %{rows} filas × %{cols} columnas (%{format})"
+  fr: "%{name} — %{rows} lignes × %{cols} colonnes (%{format})"
+  de: "%{name} — %{rows} Zeilen × %{cols} Spalten (%{format})"
+"dataset.points_rendered":
+  en: "%{rendered} / %{total} points rendered%{extra}"
+  it: "%{rendered} / %{total} punti renderizzati%{extra}"
+  es: "%{rendered} / %{total} puntos renderizados%{extra}"
+  fr: "%{rendered} / %{total} points rendus%{extra}"
+  de: "%{rendered} / %{total} Punkte gerendert%{extra}"
+"dataset.downsampled_suffix":
+  en: " (downsampled)"
+  it: " (sottocampionato)"
+  es: " (submuestreado)"
+  fr: " (sous-échantillonné)"
+  de: " (heruntergerechnet)"
+
+# ── Install / load status ────────────────────────────────────────────────────
+"dataset.loaded_summary":
+  en: "Loaded '%{name}': %{rows} rows × %{cols} cols, %{labels} labels%{mmap}%{cache}"
+  it: "Caricato '%{name}': %{rows} righe × %{cols} colonne, %{labels} etichette%{mmap}%{cache}"
+  es: "Cargado '%{name}': %{rows} filas × %{cols} columnas, %{labels} etiquetas%{mmap}%{cache}"
+  fr: "Chargé '%{name}' : %{rows} lignes × %{cols} colonnes, %{labels} étiquettes%{mmap}%{cache}"
+  de: "Geladen '%{name}': %{rows} Zeilen × %{cols} Spalten, %{labels} Beschriftungen%{mmap}%{cache}"
+"dataset.memory_mapped_suffix":
+  en: " (memory mapped)"
+  it: " (mappato in memoria)"
+  es: " (mapeado en memoria)"
+  fr: " (mappé en mémoire)"
+  de: " (speicherabgebildet)"
+"dataset.cache_suffix":
+  en: " (projection from cache)"
+  it: " (proiezione dalla cache)"
+  es: " (proyección desde caché)"
+  fr: " (projection depuis le cache)"
+  de: " (Projektion aus dem Cache)"
+"dataset.reprojection_failed":
+  en: "Reprojection failed: %{msg}"
+  it: "Riproiezione fallita: %{msg}"
+  es: "Error de reproyección: %{msg}"
+  fr: "Échec de la reprojection : %{msg}"
+  de: "Reprojektion fehlgeschlagen: %{msg}"
+"dataset.unknown_builtin":
+  en: "Unknown builtin '%{name}'"
+  it: "Benchmark sconosciuto '%{name}'"
+  es: "Benchmark desconocido '%{name}'"
+  fr: "Benchmark inconnu '%{name}'"
+  de: "Unbekanntes Benchmark '%{name}'"
+
+# ── Import panel ─────────────────────────────────────────────────────────────
+"dataset.import_heading":
+  en: Import a dataset
+  it: Importa un dataset
+  es: Importar un conjunto de datos
+  fr: Importer un jeu de données
+  de: Datensatz importieren
+"dataset.import_formats":
+  en: NPY · NPZ · CSV · Excel · Parquet · IDX — large files are memory mapped
+  it: NPY · NPZ · CSV · Excel · Parquet · IDX — i file grandi sono mappati in memoria
+  es: NPY · NPZ · CSV · Excel · Parquet · IDX — los archivos grandes se mapean en memoria
+  fr: NPY · NPZ · CSV · Excel · Parquet · IDX — les fichiers volumineux sont mappés en mémoire
+  de: NPY · NPZ · CSV · Excel · Parquet · IDX — große Dateien werden speicherabgebildet
+"dataset.field_file":
+  en: File
+  it: File
+  es: Archivo
+  fr: Fichier
+  de: Datei
+"dataset.field_rows":
+  en: Rows
+  it: Righe
+  es: Filas
+  fr: Lignes
+  de: Zeilen
+"dataset.limit_to":
+  en: limit to
+  it: limita a
+  es: limitar a
+  fr: limiter à
+  de: begrenzen auf
+"dataset.field_projection":
+  en: Projection
+  it: Proiezione
+  es: Proyección
+  fr: Projection
+  de: Projektion
+"dataset.field_columns":
+  en: Columns
+  it: Colonne
+  es: Columnas
+  fr: Colonnes
+  de: Spalten
+"dataset.import_file":
+  en: 📂 Import file
+  it: 📂 Importa file
+  es: 📂 Importar archivo
+  fr: 📂 Importer un fichier
+  de: 📂 Datei importieren
+"dataset.try_benchmark":
+  en: …or try a benchmark dataset
+  it: …oppure prova un dataset benchmark
+  es: …o prueba un conjunto de referencia
+  fr: …ou essayez un jeu de données de référence
+  de: …oder probiere einen Benchmark-Datensatz
+"dataset.builtin_blobs":
+  en: 5 gaussian clusters, 8D
+  it: 5 cluster gaussiani, 8D
+  es: 5 clústeres gaussianos, 8D
+  fr: 5 clusters gaussiens, 8D
+  de: 5 Gauß-Cluster, 8D
+"dataset.builtin_spirals":
+  en: 2 interleaved 3D spirals
+  it: 2 spirali 3D intrecciate
+  es: 2 espirales 3D entrelazadas
+  fr: 2 spirales 3D entrelacées
+  de: 2 verschränkte 3D-Spiralen
+"dataset.builtin_swiss_roll":
+  en: classic manifold, 3D
+  it: varietà classica, 3D
+  es: variedad clásica, 3D
+  fr: variété classique, 3D
+  de: klassische Mannigfaltigkeit, 3D
+"dataset.builtin_generic":
+  en: synthetic dataset
+  it: dataset sintetico
+  es: conjunto sintético
+  fr: jeu de données synthétique
+  de: synthetischer Datensatz
+
+# ── Export panel ─────────────────────────────────────────────────────────────
+"dataset.export_heading":
+  en: Export filtered subset
+  it: Esporta sottoinsieme filtrato
+  es: Exportar subconjunto filtrado
+  fr: Exporter le sous-ensemble filtré
+  de: Gefilterte Teilmenge exportieren
+"dataset.export_hint":
+  en: "%{count} rows currently match the filter and will be written as CSV"
+  it: "%{count} righe corrispondono al filtro e saranno salvate come CSV"
+  es: "%{count} filas coinciden con el filtro y se guardarán como CSV"
+  fr: "%{count} lignes correspondent au filtre et seront enregistrées en CSV"
+  de: "%{count} Zeilen entsprechen dem Filter und werden als CSV gespeichert"
+"dataset.field_path":
+  en: Path
+  it: Percorso
+  es: Ruta
+  fr: Chemin
+  de: Pfad
+"dataset.export_button":
+  en: 💾 Export
+  it: 💾 Esporta
+  es: 💾 Exportar
+  fr: 💾 Exporter
+  de: 💾 Exportieren
+"dataset.export_ok":
+  en: "Exported %{count} rows to %{path}"
+  it: "Esportate %{count} righe in %{path}"
+  es: "Exportadas %{count} filas a %{path}"
+  fr: "%{count} lignes exportées vers %{path}"
+  de: "%{count} Zeilen nach %{path} exportiert"
+"dataset.export_failed":
+  en: "Export failed: %{msg}"
+  it: "Esportazione fallita: %{msg}"
+  es: "Error de exportación: %{msg}"
+  fr: "Échec de l'export : %{msg}"
+  de: "Export fehlgeschlagen: %{msg}"
+
+# ── Dataset table ────────────────────────────────────────────────────────────
+"dataset.table_label":
+  en: label
+  it: etichetta
+  es: etiqueta
+  fr: étiquette
+  de: Beschriftung
+"dataset.table_match_hint":
+  en: "%{count} rows match the current filter — click a row to focus its point"
+  it: "%{count} righe corrispondono al filtro attuale — clicca una riga per inquadrare il punto"
+  es: "%{count} filas coinciden con el filtro actual — haz clic en una fila para enfocar su punto"
+  fr: "%{count} lignes correspondent au filtre actuel — cliquez sur une ligne pour cadrer son point"
+  de: "%{count} Zeilen entsprechen dem aktuellen Filter — klicke eine Zeile an, um ihren Punkt zu fokussieren"
+
+# ── Distribution chart ───────────────────────────────────────────────────────
+"dataset.bar_hover":
+  en: "%{name}: %{count} rows (%{pct}%)"
+  it: "%{name}: %{count} righe (%{pct}%)"
+  es: "%{name}: %{count} filas (%{pct}%)"
+  fr: "%{name} : %{count} lignes (%{pct}%)"
+  de: "%{name}: %{count} Zeilen (%{pct}%)"
+
+# ── Search panel ─────────────────────────────────────────────────────────────
+"dataset.search_clear":
+  en: Clear search
+  it: Cancella ricerca
+  es: Borrar búsqueda
+  fr: Effacer la recherche
+  de: Suche löschen
