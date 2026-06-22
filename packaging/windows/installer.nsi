@@ -38,7 +38,7 @@ SetCompressor /SOLID lzma
   !define SRC_DIR "target\release"
 !endif
 !ifndef ICON_DIR
-  !define ICON_DIR "packaging\icons"
+  !define ICON_DIR "${__FILEDIR__}\..\..\packaging\icons"
 !endif
 !ifndef OUT_FILE
   !define OUT_FILE "dist\Rust-3D-Renderer-${APP_VERSION}-x64-setup.exe"
@@ -64,12 +64,12 @@ VIAddVersionKey "ProductVersion"  "${APP_VERSION}"
   !define MUI_ICON   "${ICON_DIR}\icon.ico"
   !define MUI_UNICON "${ICON_DIR}\icon.ico"
 !endif
-!if /FileExists "packaging\windows\header.bmp"
+!if /FileExists "${__FILEDIR__}\header.bmp"
   !define MUI_HEADERIMAGE
-  !define MUI_HEADERIMAGE_BITMAP "packaging\windows\header.bmp"
+  !define MUI_HEADERIMAGE_BITMAP "${__FILEDIR__}\header.bmp"
 !endif
-!if /FileExists "packaging\windows\sidebar.bmp"
-  !define MUI_WELCOMEFINISHPAGE_BITMAP "packaging\windows\sidebar.bmp"
+!if /FileExists "${__FILEDIR__}\sidebar.bmp"
+  !define MUI_WELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}\sidebar.bmp"
 !endif
 !define MUI_ABORTWARNING
 
@@ -107,11 +107,11 @@ Page custom AboutPageCreate                       ; "What is this software?"
 
 ; Localized strings live in one .nsh per language (must be included AFTER the
 ; MUI_LANGUAGE lines so ${LANG_*} ids exist).
-!include "packaging\windows\strings\English.nsh"
-!include "packaging\windows\strings\Italian.nsh"
-!include "packaging\windows\strings\Spanish.nsh"
-!include "packaging\windows\strings\French.nsh"
-!include "packaging\windows\strings\German.nsh"
+!include "strings\English.nsh"
+!include "strings\Italian.nsh"
+!include "strings\Spanish.nsh"
+!include "strings\French.nsh"
+!include "strings\German.nsh"
 
 ; ── Custom "About / What is this software?" page ─────────────────────────────
 Var AboutLabel

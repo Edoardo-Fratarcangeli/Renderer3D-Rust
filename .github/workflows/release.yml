@@ -87,6 +87,8 @@ jobs:
           CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
           CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
         run: |
+          # ImageMagick is pre-installed on GitHub macOS runners; this is a safety net.
+          command -v magick >/dev/null || brew install imagemagick
           ./scripts/gen-icons.sh
           cargo build --release --target x86_64-apple-darwin
           cargo build --release --target aarch64-apple-darwin
@@ -113,7 +115,9 @@ jobs:
         if: matrix.platform == 'windows'
         shell: bash
         run: |
-          export PATH="/c/Program Files (x86)/NSIS:/c/Program Files/ImageMagick:$PATH"
+          # NSIS is at a fixed path; ImageMagick is found via the choco shim or versioned dir.
+          IM_DIR=$(ls -d "/c/Program Files/ImageMagick-"* 2>/dev/null | sort -V | tail -1)
+          export PATH="/c/Program Files (x86)/NSIS${IM_DIR:+:$IM_DIR}:/c/ProgramData/chocolatey/bin:$PATH"
           ./scripts/gen-icons.sh
           # Installer banner (150x57) and sidebar (164x314) generated from the icon.
           magick -size 150x57  xc:'#1b1f24' \

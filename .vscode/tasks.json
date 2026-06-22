@@ -24,6 +24,23 @@
       "problemMatcher": ["$rustc"],
       "group": "test",
       "label": "rust: cargo test"
+    },
+    {
+      "label": "📦 Build Windows Installer",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy", "Bypass",
+        "-File", "${workspaceFolder}\\scripts\\build-installer.ps1"
+      ],
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "showReuseMessage": false
+      },
+      "problemMatcher": ["$rustc"]
     }
   ]
 }
