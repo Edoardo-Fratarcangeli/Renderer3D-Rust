@@ -190,8 +190,12 @@ pub struct ImportState {
     pub limit_rows: bool,
     /// Row cap value (used when `limit_rows`).
     pub max_rows: usize,
-    /// PCA (true) vs direct column projection (false).
+    /// PCA (true) vs direct column projection (false). Ignored when
+    /// [`use_radial`](Self::use_radial) is set.
     pub use_pca: bool,
+    /// Multidimensional radial ("star coordinates") projection. Takes
+    /// precedence over [`use_pca`](Self::use_pca) when set.
+    pub use_radial: bool,
     /// Output spatial dimensions: 1, 2 or 3.
     pub dims: u8,
     /// For direct projection, the feature-column index mapped to X, Y, Z.
@@ -206,7 +210,9 @@ impl ImportState {
     /// Build a [`ProjectionSpec`] from the current form selections.
     pub fn projection(&self) -> ProjectionSpec {
         ProjectionSpec {
-            method: if self.use_pca {
+            method: if self.use_radial {
+                ProjectionMethod::Radial
+            } else if self.use_pca {
                 ProjectionMethod::Pca
             } else {
                 ProjectionMethod::Direct
@@ -590,22 +596,59 @@ impl DatasetView {
                             .changed();
                         ui.end_row();
 
-                        ui.label(t!("dataset.shape_per_label").to_string());
-                        let mut per_label = matches!(
-                            self.settings.geometry_policy,
-                            crate::visualization::geometry_assigner::GeometryPolicy::PerLabel
-                        );
-                        if ui
-                            .checkbox(&mut per_label, t!("dataset.cycle_shapes").to_string())
-                            .changed()
-                        {
-                            self.settings.geometry_policy = if per_label {
-                                crate::visualization::geometry_assigner::GeometryPolicy::PerLabel
-                            } else {
-                                crate::visualization::geometry_assigner::GeometryPolicy::default()
-                            };
-                            changed = true;
-                        }
+                        use crate::visualization::color_mapper::ColorMode;
+                        use crate::visualization::geometry_assigner::GeometryPolicy;
+
+                        // Shape channel: uniform, per label, or by distance.
+                        ui.label(t!("dataset.shape_channel").to_string());
+                        ui.horizontal(|ui| {
+                            let policy = self.settings.geometry_policy;
+                            let uniform = matches!(policy, GeometryPolicy::Uniform(_));
+                            let per_label = matches!(policy, GeometryPolicy::PerLabel);
+                            let by_dist = matches!(policy, GeometryPolicy::ByDistance);
+                            if ui
+                                .selectable_label(uniform, t!("dataset.shape_uniform").to_string())
+                                .clicked()
+                            {
+                                self.settings.geometry_policy = GeometryPolicy::default();
+                                changed = true;
+                            }
+                            if ui
+                                .selectable_label(per_label, t!("dataset.cycle_shapes").to_string())
+                                .clicked()
+                            {
+                                self.settings.geometry_policy = GeometryPolicy::PerLabel;
+                                changed = true;
+                            }
+                            if ui
+                                .selectable_label(by_dist, t!("dataset.by_distance").to_string())
+                                .clicked()
+                            {
+                                self.settings.geometry_policy = GeometryPolicy::ByDistance;
+                                changed = true;
+                            }
+                        });
+                        ui.end_row();
+
+                        // Color channel: per label, or by distance from center.
+                        ui.label(t!("dataset.color_channel").to_string());
+                        ui.horizontal(|ui| {
+                            let by_label = self.settings.color_mode == ColorMode::ByLabel;
+                            if ui
+                                .selectable_label(by_label, t!("dataset.color_by_label").to_string())
+                                .clicked()
+                            {
+                                self.settings.color_mode = ColorMode::ByLabel;
+                                changed = true;
+                            }
+                            if ui
+                                .selectable_label(!by_label, t!("dataset.by_distance").to_string())
+                                .clicked()
+                            {
+                                self.settings.color_mode = ColorMode::ByDistance;
+                                changed = true;
+                            }
+                        });
                         ui.end_row();
                     });
                 if changed {
@@ -632,8 +675,7 @@ impl DatasetView {
                     .show(ui, |ui| {
                         ui.label(t!("dataset.method").to_string());
                         ui.horizontal(|ui| {
-                            ui.radio_value(&mut self.import.use_pca, true, t!("dataset.method_pca").to_string());
-                            ui.radio_value(&mut self.import.use_pca, false, t!("dataset.method_direct").to_string());
+                            import_dialog::method_radio(ui, &mut self.import);
                         });
                         ui.end_row();
 
@@ -647,7 +689,7 @@ impl DatasetView {
 
                         // Direct projection: pick the column feeding each axis
                         // from the real column names.
-                        if !self.import.use_pca && n_cols > 0 {
+                        if !self.import.use_pca && !self.import.use_radial && n_cols > 0 {
                             let dims = self.import.dims.clamp(1, 3) as usize;
                             for (a, axis) in ["X", "Y", "Z"].iter().enumerate().take(dims) {
                                 ui.label(t!("dataset.axis_column", axis = axis.to_string()).to_string());

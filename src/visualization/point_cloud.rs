@@ -7,8 +7,8 @@
 
 use cgmath::SquareMatrix;
 
-use super::color_mapper::color_for_label;
-use super::geometry_assigner::{geometry_for_label, GeometryPolicy};
+use super::color_mapper::{color_for_distance, color_for_label, ColorMode};
+use super::geometry_assigner::{geometry_for_distance, geometry_for_label, GeometryPolicy};
 use crate::model::InstanceRaw;
 use crate::scene::GeometryType;
 
@@ -20,6 +20,8 @@ pub const MAX_RENDER_POINTS: usize = 200_000;
 pub struct PointCloudSettings {
     pub point_size: f32,
     pub geometry_policy: GeometryPolicy,
+    /// How point colors are chosen (per label, or by distance from center).
+    pub color_mode: ColorMode,
     /// Row highlighted from the table/search (drawn bigger + selected tint).
     pub highlighted_row: Option<u32>,
 }
@@ -29,6 +31,7 @@ impl Default for PointCloudSettings {
         Self {
             point_size: 0.06,
             geometry_policy: GeometryPolicy::default(),
+            color_mode: ColorMode::default(),
             highlighted_row: None,
         }
     }
@@ -64,6 +67,26 @@ pub fn build_instances(
         1
     };
 
+    // Distance-based channels (color and/or shape) need the radial distance
+    // normalized over the visible set, so precompute its range once.
+    let needs_distance = settings.color_mode == ColorMode::ByDistance
+        || settings.geometry_policy == GeometryPolicy::ByDistance;
+    let dist = |row: u32| {
+        let p = points[row as usize];
+        (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt()
+    };
+    let (min_dist, max_dist) = if needs_distance {
+        visible_rows
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), &row| {
+                let d = dist(row);
+                (mn.min(d), mx.max(d))
+            })
+    } else {
+        (0.0, 0.0)
+    };
+    let span = max_dist - min_dist;
+
     let mut batches: Vec<PointCloudBatch> = Vec::new();
     let mut rendered = 0usize;
     for (vi, &row) in visible_rows.iter().enumerate() {
@@ -72,8 +95,19 @@ pub fn build_instances(
         }
         let p = points[row as usize];
         let label = labels[row as usize];
-        let geometry = geometry_for_label(settings.geometry_policy, label);
-        let color = color_for_label(label);
+        let t = if needs_distance && span > 1e-12 {
+            (dist(row) - min_dist) / span
+        } else {
+            0.0
+        };
+        let geometry = match settings.geometry_policy {
+            GeometryPolicy::ByDistance => geometry_for_distance(t),
+            policy => geometry_for_label(policy, label),
+        };
+        let color = match settings.color_mode {
+            ColorMode::ByDistance => color_for_distance(t),
+            ColorMode::ByLabel => color_for_label(label),
+        };
 
         let highlighted = settings.highlighted_row == Some(row);
         let size = if highlighted {

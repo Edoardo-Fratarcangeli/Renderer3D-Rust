@@ -118,6 +118,42 @@ _version: 2
   es: Columnas directas
   fr: Colonnes directes
   de: Direkte Spalten
+"dataset.method_radial":
+  en: Radial (multidim)
+  it: Radiale (multidim)
+  es: Radial (multidim)
+  fr: Radial (multidim)
+  de: Radial (multidim)
+"dataset.shape_channel":
+  en: Shape
+  it: Forma
+  es: Forma
+  fr: Forme
+  de: Form
+"dataset.shape_uniform":
+  en: uniform
+  it: uniforme
+  es: uniforme
+  fr: uniforme
+  de: einheitlich
+"dataset.color_channel":
+  en: Color
+  it: Colore
+  es: Color
+  fr: Couleur
+  de: Farbe
+"dataset.color_by_label":
+  en: by label
+  it: per etichetta
+  es: por etiqueta
+  fr: par étiquette
+  de: nach Beschriftung
+"dataset.by_distance":
+  en: by distance
+  it: per distanza
+  es: por distancia
+  fr: par distance
+  de: nach Distanz
 "dataset.dimensions":
   en: Dimensions
   it: Dimensioni
