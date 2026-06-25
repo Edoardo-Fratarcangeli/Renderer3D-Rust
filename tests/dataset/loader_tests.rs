@@ -254,6 +254,19 @@ fn csv_without_label_column_is_unlabeled() {
 }
 
 #[test]
+fn csv_numeric_labels_are_ordered_by_value() {
+    // Integer-like labels must order numerically (2 before 10), matching the
+    // NPY/NPZ/IDX loaders, not lexicographically.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("numlabels.csv");
+    std::fs::write(&path, "a,label\n0.0,10\n1.0,2\n2.0,10\n").unwrap();
+    let ds = load(&path, &LoadOptions::default()).unwrap();
+    assert_eq!(ds.label_names, vec!["2", "10"]);
+    // Row 0 -> "10" (id 1), row 1 -> "2" (id 0).
+    assert_eq!(ds.labels, vec![1, 0, 1]);
+}
+
+#[test]
 fn csv_respects_max_rows() {
     let dir = tempfile::tempdir().unwrap();
     let path = helpers::write_sample_csv(dir.path());
@@ -330,6 +343,35 @@ fn npz_without_label_entry_is_unlabeled() {
     let ds = load(&path, &LoadOptions::default()).unwrap();
     assert_eq!(ds.n_rows(), 3);
     assert_eq!(ds.label_names, vec!["unlabeled"]);
+}
+
+#[test]
+fn npz_picks_rank2_feature_over_a_leading_rank1_array() {
+    // A rank-1 array is stored BEFORE the real (rank-2) feature matrix. The
+    // loader must skip it and pick the 2-D array as the features.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ordered.npz");
+    let file = std::fs::File::create(&path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    use std::io::Write as _;
+    // Non-label rank-1 array first (e.g. an index/weights vector).
+    zip.start_file("aux.npy", opts).unwrap();
+    zip.write_all(&helpers::npy_f32_bytes(&[3], &[7., 8., 9.]))
+        .unwrap();
+    // The actual feature matrix, rank 2.
+    zip.start_file("features.npy", opts).unwrap();
+    zip.write_all(&helpers::npy_f32_bytes(&[3, 2], &[1., 2., 3., 4., 5., 6.]))
+        .unwrap();
+    zip.finish().unwrap();
+
+    let ds = load(&path, &LoadOptions::default()).unwrap();
+    assert_eq!(ds.n_rows(), 3);
+    assert_eq!(ds.n_cols(), 2, "must pick the rank-2 feature matrix");
+    let mut row = Vec::new();
+    ds.row(1, &mut row);
+    assert_eq!(row, vec![3.0, 4.0]);
 }
 
 #[test]
