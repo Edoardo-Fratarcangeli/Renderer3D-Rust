@@ -9,14 +9,16 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 #[macro_use]
 pub mod logger;
+pub mod brep;
 pub mod camera;
-pub mod i18n;
 pub mod dataset;
 pub mod geometry;
+pub mod i18n;
 pub mod mesh;
 pub mod model;
-pub mod scene;
 pub mod primitives;
+pub mod scene;
+pub mod sketch;
 pub mod state;
 pub mod ui;
 pub mod updater;

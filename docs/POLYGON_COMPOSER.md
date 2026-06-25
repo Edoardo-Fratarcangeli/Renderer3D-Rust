@@ -4,9 +4,42 @@ Roadmap di design per la creazione di superfici da profili poligonali (segmenti
 retti o curvi, chiusi o aperti) e per il loro assemblaggio in solidi 3D tramite
 lati in comune.
 
-Questo documento è **design/architettura**, non implementazione: definisce i
-moduli, le strutture dati, le fasi e le regole anti-duplicazione. È coerente con
-lo stile di `docs/GEOMETRY_IMPORT.md`.
+Questo documento è **design/architettura**. È coerente con lo stile di
+`docs/GEOMETRY_IMPORT.md`.
+
+## Stato: implementato ✅
+
+Le Fasi A e B sono implementate e coperte da test:
+
+- **`src/sketch/`** — `segment` (Line/Arc/Bézier + flatten adattivo), `profile`
+  (validazione, `regular_polygon`, `circle`, `from_points`, area con segno),
+  `tessellate` (ear clipping), `Sketch`/`Plane` con `surface_mesh` (superficie
+  piena double-sided), `stroke_mesh` (polilinea aperta → nastro) e
+  `newell_normal`.
+- **`src/brep/`** — `weld` (merge per posizione), `solid` (facce, lati comuni,
+  `euler_characteristic`, `signed_volume`, `flip`), `validate` (manifold +
+  `orient_faces`), `to_mesh`, e `compose()` one-shot (orienta + raddrizza la
+  shell verso l'esterno + triangola).
+- **State**: refactor `insert_custom_mesh()` riusato da import file e
+  generazione; `add_sketch_surface()`, `add_solid()`.
+- **UI**: `src/ui/sketch_panel.rs` (pulsante toolbar ✏️) — piano + offset,
+  profilo (poligono N lati / cerchio / punti personalizzati, chiuso o aperto),
+  "Crea superficie", e compositore che unisce superfici selezionate in un solido.
+- **i18n**: `locales/sketch.yml` (en/it/es/fr/de).
+- **Test**: unit test per ogni modulo + `tests/sketch_compose_tests.rs`
+  (cubo da 6 superfici → solido stagno, normali verso l'esterno).
+
+Note di implementazione rispetto al design originale:
+
+- Le superfici chiuse sono **double-sided** (cull back attivo nella pipeline),
+  come `create_plane`.
+- La polilinea **aperta** è resa come nastro sottile (`stroke_mesh`) riusando la
+  pipeline a triangoli, senza un nuovo pipeline per le linee.
+- `compose()` raddrizza la shell di un solido chiuso usando il volume con segno,
+  garantendo normali verso l'esterno (illuminazione corretta).
+
+Resta come lavoro futuro la **Fase C** (holes, estrusione/loft, pick dedicato di
+vertici/lati, persistenza).
 
 ## Decisioni di progetto
 

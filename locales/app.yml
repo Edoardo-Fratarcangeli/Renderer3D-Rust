@@ -272,6 +272,12 @@ _version: 2
   es: 🧊 Sólidos
   fr: 🧊 Solides
   de: 🧊 Volumenkörper
+"toolbar.sketch":
+  en: ✏️ Sketch
+  it: ✏️ Schizzo
+  es: ✏️ Boceto
+  fr: ✏️ Esquisse
+  de: ✏️ Skizze
 "toolbar.measure":
   en: 📏 Measure
   it: 📏 Misura
