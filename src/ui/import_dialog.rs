@@ -18,6 +18,30 @@ pub fn builtin_description(name: &str) -> String {
     }
 }
 
+/// Mutually-exclusive PCA / Direct / Radial selector shared by the import form
+/// and the View tab's reprojection panel. Returns true if the choice changed.
+pub fn method_radio(ui: &mut egui::Ui, state: &mut ImportState) -> bool {
+    // Map the two-bool state onto a single radio group: 0 PCA, 1 Direct, 2 Radial.
+    let mut sel = if state.use_radial {
+        2
+    } else if state.use_pca {
+        0
+    } else {
+        1
+    };
+    let before = sel;
+    ui.radio_value(&mut sel, 0, t!("dataset.method_pca").to_string());
+    ui.radio_value(&mut sel, 1, t!("dataset.method_direct").to_string());
+    ui.radio_value(&mut sel, 2, t!("dataset.method_radial").to_string());
+    if sel != before {
+        state.use_radial = sel == 2;
+        state.use_pca = sel == 0;
+        true
+    } else {
+        false
+    }
+}
+
 /// Draw the import form; returns a request when the user confirms.
 pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest> {
     let mut request = None;
@@ -55,8 +79,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
 
             ui.label(t!("dataset.field_projection").to_string());
             ui.horizontal(|ui| {
-                ui.radio_value(&mut state.use_pca, true, t!("dataset.method_pca").to_string());
-                ui.radio_value(&mut state.use_pca, false, t!("dataset.method_direct").to_string());
+                method_radio(ui, state);
             });
             ui.end_row();
 
@@ -70,8 +93,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
 
             // For direct projection, choose which feature columns feed the
             // axes (by 0-based index; column names are not known until load —
-            // refine them later from the View tab).
-            if !state.use_pca {
+            // refine them later from the View tab). PCA and radial use every
+            // column, so the per-axis picker is hidden for them.
+            if !state.use_pca && !state.use_radial {
                 let dims = state.dims.clamp(1, 3) as usize;
                 ui.label(t!("dataset.field_columns").to_string());
                 ui.horizontal(|ui| {

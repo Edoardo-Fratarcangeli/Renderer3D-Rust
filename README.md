@@ -35,8 +35,8 @@ egui UI.
 - **ML Dataset 3D Visualizer** (📊 button in the toolbar):
   - **Polished tabbed window**: opens centered on screen, with a fixed footprint, and four tabs (Import / Labels / View / Export), a persistent dataset summary strip, colored status messages and friendly empty states. Imported datasets appear in the shared object list at the bottom of the main window (with visibility, focus and remove controls), alongside scene objects.
   - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), Excel (xlsx/xls/ods, first sheet), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
-  - **Configurable projection**: choose the method (PCA or direct columns), the number of spatial dimensions (1D / 2D / 3D), and — for direct projection — which feature column feeds each axis. Reconfigure it from the View tab (with column-name dropdowns) to re-project the loaded dataset in place. Computed on a background thread.
-  - **3D point cloud**: instanced rendering with deterministic per-label colors and optional per-label shapes.
+  - **Configurable projection**: choose the method (PCA, direct columns, or **radial multidimensional** "star coordinates" on a sphere), the number of spatial dimensions (1D / 2D / 3D), and — for direct projection — which feature column feeds each axis. Reconfigure it from the View tab (with column-name dropdowns) to re-project the loaded dataset in place. Computed on a background thread. See [docs/ML_VISUALIZER.md](docs/ML_VISUALIZER.md) for the format reference and pandas export recipes.
+  - **3D point cloud**: instanced rendering with deterministic per-label colors and optional per-label shapes; color **and** shape can instead encode each point's **distance from the cloud center**.
   - **Persistent caches**: metadata JSON, label index and projection cached under `.r3d_cache/`, keyed by file content fingerprint + projection config.
   - **Filters & search**: per-label visibility toggles, query search (`substring`, `row:N`, `c0 > 0.5`), label distribution chart.
   - **Export**: writes the currently filtered subset to CSV.

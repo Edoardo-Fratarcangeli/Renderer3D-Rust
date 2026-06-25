@@ -26,6 +26,13 @@ pub enum ProjectionMethod {
     Direct,
     /// Principal component analysis, top three components.
     Pca,
+    /// Multidimensional radial ("star coordinates") projection: every feature
+    /// column is assigned a fixed anchor direction radiating from the origin,
+    /// evenly distributed over the sphere, and each row lands at the weighted
+    /// vector sum of its feature values. This lets an N-dimensional dataset be
+    /// read as a cloud of points around a sphere (N=2 → +x / -x axes, N=6 →
+    /// roughly the ±x ±y ±z directions, larger N → a Fibonacci sphere).
+    Radial,
 }
 
 impl ProjectionMethod {
@@ -33,6 +40,7 @@ impl ProjectionMethod {
         match self {
             ProjectionMethod::Direct => "direct",
             ProjectionMethod::Pca => "pca",
+            ProjectionMethod::Radial => "radial",
         }
     }
 }
@@ -81,6 +89,7 @@ impl ProjectionSpec {
     pub fn tag(&self) -> String {
         match self.method {
             ProjectionMethod::Pca => format!("pca-{}", self.dims()),
+            ProjectionMethod::Radial => format!("radial-{}", self.dims()),
             ProjectionMethod::Direct => format!(
                 "direct-{}-{}_{}_{}",
                 self.dims(),
@@ -137,6 +146,7 @@ pub fn project_spec(
     let mut points = match spec.method {
         ProjectionMethod::Direct => project_direct_axes(dataset, dims, spec.axes),
         ProjectionMethod::Pca => project_pca_n(dataset, dims)?,
+        ProjectionMethod::Radial => project_radial(dataset, dims),
     };
     normalize_points(&mut points);
 
@@ -161,6 +171,71 @@ fn project_direct_axes(dataset: &Dataset, dims: usize, axes: [usize; 3]) -> Vec<
             let mut p = [0.0f32; 3];
             for (a, slot) in p.iter_mut().enumerate().take(dims) {
                 *slot = buf.get(axes[a]).copied().unwrap_or(0.0);
+            }
+            p
+        })
+        .collect()
+}
+
+/// Anchor directions for the radial projection: `n` unit vectors radiating
+/// from the origin, evenly distributed over the active subspace.
+///
+/// - `dims == 1`: anchors alternate along the x axis (+x, -x, +x, …), so two
+///   features sit on opposite ends of a line (the `100 / -100` case).
+/// - `dims == 2`: anchors are spread evenly around the unit circle in the xy
+///   plane (N=2 → +x / -x, N=4 → the four cardinal directions, …).
+/// - `dims == 3`: anchors follow a Fibonacci sphere, the standard way to
+///   distribute `n` points as evenly as possible over a sphere.
+pub fn radial_anchors(n: usize, dims: usize) -> Vec<[f32; 3]> {
+    let dims = dims.clamp(1, 3);
+    if n == 0 {
+        return Vec::new();
+    }
+    match dims {
+        1 => (0..n)
+            .map(|i| {
+                let s = if i % 2 == 0 { 1.0 } else { -1.0 };
+                [s, 0.0, 0.0]
+            })
+            .collect(),
+        2 => (0..n)
+            .map(|i| {
+                let a = std::f32::consts::TAU * (i as f32) / (n as f32);
+                [a.cos(), a.sin(), 0.0]
+            })
+            .collect(),
+        _ => {
+            if n == 1 {
+                return vec![[1.0, 0.0, 0.0]];
+            }
+            // Golden-angle spiral over the sphere (poles included).
+            let golden = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
+            (0..n)
+                .map(|i| {
+                    let y = 1.0 - (i as f32 / (n as f32 - 1.0)) * 2.0;
+                    let r = (1.0 - y * y).max(0.0).sqrt();
+                    let theta = golden * i as f32;
+                    [theta.cos() * r, y, theta.sin() * r]
+                })
+                .collect()
+        }
+    }
+}
+
+/// Place every row at the weighted vector sum of the feature anchors.
+fn project_radial(dataset: &Dataset, dims: usize) -> Vec<[f32; 3]> {
+    let d = dataset.n_cols();
+    let anchors = radial_anchors(d, dims);
+    let mut buf = Vec::new();
+    (0..dataset.n_rows())
+        .map(|i| {
+            dataset.row(i, &mut buf);
+            let mut p = [0.0f32; 3];
+            for (c, anchor) in anchors.iter().enumerate() {
+                let v = buf.get(c).copied().unwrap_or(0.0);
+                p[0] += v * anchor[0];
+                p[1] += v * anchor[1];
+                p[2] += v * anchor[2];
             }
             p
         })
@@ -419,6 +494,56 @@ mod tests {
     fn method_tags_are_distinct() {
         assert_eq!(ProjectionMethod::Pca.tag(), "pca");
         assert_eq!(ProjectionMethod::Direct.tag(), "direct");
+        assert_eq!(ProjectionMethod::Radial.tag(), "radial");
+    }
+
+    #[test]
+    fn radial_anchors_are_unit_vectors_and_match_examples() {
+        // 1D: alternate +x / -x.
+        let a1 = radial_anchors(2, 1);
+        assert_eq!(a1, vec![[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]);
+
+        // 2D: N=2 collapses to the +x / -x axes (the "100 / -100" example).
+        let a2 = radial_anchors(2, 2);
+        assert!((a2[0][0] - 1.0).abs() < 1e-5 && a2[0][1].abs() < 1e-5);
+        assert!((a2[1][0] + 1.0).abs() < 1e-5 && a2[1][1].abs() < 1e-5);
+
+        // 3D: every anchor is a unit vector on the sphere.
+        for a in radial_anchors(6, 3) {
+            let norm = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+            assert!((norm - 1.0).abs() < 1e-4, "anchor not unit: {:?}", a);
+        }
+    }
+
+    #[test]
+    fn radial_projection_fills_view_cube() {
+        let ds = grid_dataset();
+        let spec = ProjectionSpec {
+            method: ProjectionMethod::Radial,
+            dims: 3,
+            axes: [0, 1, 2],
+        };
+        let proj = project_spec(&ds, &spec, None).unwrap();
+        assert_eq!(proj.points.len(), ds.n_rows());
+        assert_eq!(proj.method, "radial-3");
+        let max = proj
+            .points
+            .iter()
+            .flat_map(|p| p.iter())
+            .fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((max - VIEW_HALF_EXTENT).abs() < 1e-3);
+    }
+
+    #[test]
+    fn radial_2d_projection_stays_on_z_plane() {
+        let ds = grid_dataset();
+        let spec = ProjectionSpec {
+            method: ProjectionMethod::Radial,
+            dims: 2,
+            axes: [0, 1, 2],
+        };
+        let proj = project_spec(&ds, &spec, None).unwrap();
+        assert!(proj.points.iter().all(|p| p[2].abs() < 1e-5));
     }
 
     fn grid_dataset() -> Dataset {

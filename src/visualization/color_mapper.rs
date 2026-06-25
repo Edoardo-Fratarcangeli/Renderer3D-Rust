@@ -37,3 +37,37 @@ pub fn color_for_label(label: u32) -> [f32; 3] {
 pub fn palette(n: usize) -> Vec<[f32; 3]> {
     (0..n as u32).map(color_for_label).collect()
 }
+
+/// How point colors are chosen.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    /// Qualitative color per label id (the default).
+    #[default]
+    ByLabel,
+    /// Sequential gradient driven by the distance from the cloud center,
+    /// turning the radial distance into an extra visual dimension.
+    ByDistance,
+}
+
+/// Sequential viridis-like gradient for a normalized scalar `t` in `[0, 1]`
+/// (used to encode the distance from the center). `t` is clamped.
+pub fn color_for_distance(t: f32) -> [f32; 3] {
+    const STOPS: [[f32; 3]; 5] = [
+        [0.267, 0.005, 0.329], // deep purple (near center)
+        [0.231, 0.320, 0.545], // blue
+        [0.128, 0.567, 0.551], // teal
+        [0.369, 0.788, 0.383], // green
+        [0.993, 0.906, 0.144], // yellow (far edge)
+    ];
+    let t = t.clamp(0.0, 1.0);
+    let scaled = t * (STOPS.len() - 1) as f32;
+    let i = (scaled.floor() as usize).min(STOPS.len() - 2);
+    let f = scaled - i as f32;
+    let a = STOPS[i];
+    let b = STOPS[i + 1];
+    [
+        a[0] + (b[0] - a[0]) * f,
+        a[1] + (b[1] - a[1]) * f,
+        a[2] + (b[2] - a[2]) * f,
+    ]
+}

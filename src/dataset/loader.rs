@@ -314,6 +314,35 @@ pub fn labels_from_numeric(values: &[f32]) -> (Vec<u32>, Vec<String>) {
     (labels, names)
 }
 
+/// Map raw string labels to dense ids with a stable, sorted vocabulary.
+///
+/// Shared by every tabular loader (CSV / Excel / Parquet) so the label
+/// vocabulary is ordered consistently regardless of source format. When every
+/// distinct label parses as a number the vocabulary is sorted numerically
+/// (so `"2"` precedes `"10"`, matching [`labels_from_numeric`]); otherwise it
+/// falls back to lexicographic order.
+pub fn labels_from_strings(label_strs: &[String]) -> (Vec<u32>, Vec<String>) {
+    let mut names: Vec<String> = label_strs.to_vec();
+    names.sort();
+    names.dedup();
+    if names.iter().all(|n| n.trim().parse::<f64>().is_ok()) {
+        names.sort_by(|a, b| {
+            let (x, y) = (
+                a.trim().parse::<f64>().unwrap(),
+                b.trim().parse::<f64>().unwrap(),
+            );
+            x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    let id_of: HashMap<&str, u32> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.as_str(), i as u32))
+        .collect();
+    let labels = label_strs.iter().map(|s| id_of[s.as_str()]).collect();
+    (labels, names)
+}
+
 fn unlabeled(n_rows: usize) -> (Vec<u32>, Vec<String>, Option<String>) {
     (vec![0; n_rows], vec!["unlabeled".to_string()], None)
 }
@@ -334,10 +363,10 @@ fn load_npz(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
     let mut archive = zip::ZipArchive::new(std::io::BufReader::new(file))
         .map_err(|e| DatasetError::Format(format!("bad NPZ archive: {}", e)))?;
 
-    // Find the feature entry (first array with rank >= 2, or the largest)
-    // and an optional label entry (rank-1 array named y/labels/target).
-    let mut feature_entry: Option<String> = None;
+    // Split entries into label candidates (rank-1 arrays named y/labels/...)
+    // and feature candidates (everything else).
     let mut label_entry: Option<String> = None;
+    let mut feature_candidates: Vec<String> = Vec::new();
     let names: Vec<String> = (0..archive.len())
         .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
         .collect();
@@ -346,11 +375,22 @@ fn load_npz(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         if matches!(stem.as_str(), "y" | "labels" | "label" | "target" | "y_train" | "y_test") {
             label_entry.get_or_insert_with(|| name.clone());
         } else {
-            feature_entry.get_or_insert_with(|| name.clone());
+            feature_candidates.push(name.clone());
         }
     }
-    let feature_entry = feature_entry
-        .ok_or_else(|| DatasetError::Format("NPZ contains no feature array".into()))?;
+    if feature_candidates.is_empty() {
+        return Err(DatasetError::Format("NPZ contains no feature array".into()));
+    }
+    // The feature matrix is a rank >= 2 array; prefer the first such entry so a
+    // stray rank-1 array stored ahead of it is not picked by mistake. Fall back
+    // to the first candidate when no rank can be determined.
+    let mut feature_entry = feature_candidates[0].clone();
+    for cand in &feature_candidates {
+        if peek_npz_rank(&mut archive, cand) >= 2 {
+            feature_entry = cand.clone();
+            break;
+        }
+    }
 
     let read_entry = |archive: &mut zip::ZipArchive<std::io::BufReader<std::fs::File>>,
                       name: &str|
@@ -400,6 +440,31 @@ fn load_npz(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         labels,
         label_names,
     })
+}
+
+/// Read just enough of an NPZ entry to recover its array rank (number of shape
+/// dimensions). Returns 0 when the header cannot be read or parsed, so callers
+/// can treat it as "unknown / not a feature matrix".
+fn peek_npz_rank(
+    archive: &mut zip::ZipArchive<std::io::BufReader<std::fs::File>>,
+    name: &str,
+) -> usize {
+    let Ok(mut entry) = archive.by_name(name) else {
+        return 0;
+    };
+    // The NPY header (magic + dict) is tiny; a few KiB is always enough.
+    let cap = (entry.size() as usize).min(8192);
+    let mut buf = vec![0u8; cap];
+    let mut filled = 0;
+    while filled < buf.len() {
+        match entry.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(_) => break,
+        }
+    }
+    buf.truncate(filled);
+    parse_npy_header(&buf).map(|h| h.shape.len()).unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -592,15 +657,7 @@ fn finish_table_dataset(
     let n_rows = if n_cols == 0 { 0 } else { data.len() / n_cols };
 
     let (labels, label_names, label_column) = if let Some(li) = label_idx {
-        let mut names: Vec<String> = label_strs.clone();
-        names.sort();
-        names.dedup();
-        let id_of: HashMap<&str, u32> = names
-            .iter()
-            .enumerate()
-            .map(|(i, n)| (n.as_str(), i as u32))
-            .collect();
-        let labels = label_strs.iter().map(|s| id_of[s.as_str()]).collect();
+        let (labels, names) = labels_from_strings(&label_strs);
         (labels, names, Some(headers[li].clone()))
     } else {
         unlabeled(n_rows)
@@ -801,19 +858,8 @@ fn load_parquet(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
     let n_rows = data.len() / n_cols;
 
     let (labels, label_names, label_column) = if let Some(li) = label_idx {
-        let mut names = label_strs.clone();
-        names.sort();
-        names.dedup();
-        let id_of: HashMap<&str, u32> = names
-            .iter()
-            .enumerate()
-            .map(|(i, n)| (n.as_str(), i as u32))
-            .collect();
-        (
-            label_strs.iter().map(|s| id_of[s.as_str()]).collect(),
-            names,
-            Some(headers[li].clone()),
-        )
+        let (labels, names) = labels_from_strings(&label_strs);
+        (labels, names, Some(headers[li].clone()))
     } else {
         unlabeled(n_rows)
     };
@@ -959,6 +1005,20 @@ mod tests {
         assert_eq!(detect_label_column(&h(&["y", "TARGET"])), Some(1));
         assert_eq!(detect_label_column(&h(&["Species", "y"])), Some(0));
         assert_eq!(detect_label_column(&h(&["a", "b"])), None);
+    }
+
+    #[test]
+    fn labels_from_strings_sorts_numerically_then_lexicographically() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        // All-numeric labels sort by value, not by string ("2" before "10").
+        let (ids, names) = labels_from_strings(&s(&["10", "2", "10", "1"]));
+        assert_eq!(names, vec!["1", "2", "10"]);
+        assert_eq!(ids, vec![2, 1, 2, 0]);
+
+        // Non-numeric labels fall back to lexicographic order.
+        let (ids, names) = labels_from_strings(&s(&["cat", "ant", "cat"]));
+        assert_eq!(names, vec!["ant", "cat"]);
+        assert_eq!(ids, vec![1, 0, 1]);
     }
 
     #[test]

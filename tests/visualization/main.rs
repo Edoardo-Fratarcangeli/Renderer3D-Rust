@@ -2,8 +2,12 @@
 // point-cloud instance building (all GPU-free).
 
 use rendering_3d::scene::GeometryType;
-use rendering_3d::visualization::color_mapper::{color_for_label, palette};
-use rendering_3d::visualization::geometry_assigner::{geometry_for_label, GeometryPolicy};
+use rendering_3d::visualization::color_mapper::{
+    color_for_distance, color_for_label, palette, ColorMode,
+};
+use rendering_3d::visualization::geometry_assigner::{
+    geometry_for_distance, geometry_for_label, GeometryPolicy,
+};
 use rendering_3d::visualization::point_cloud::{
     build_instances, PointCloudSettings, MAX_RENDER_POINTS,
 };
@@ -111,6 +115,55 @@ fn point_cloud_highlight_enlarges_and_tints() {
     let highlighted = all.iter().find(|i| i.color[3] == 2.0).expect("highlight");
     let normal = all.iter().find(|i| i.color[3] == 1.0).unwrap();
     assert!(highlighted.model[0][0] > normal.model[0][0]);
+}
+
+#[test]
+fn distance_gradient_runs_from_low_to_high() {
+    let near = color_for_distance(0.0);
+    let far = color_for_distance(1.0);
+    assert_ne!(near, far);
+    // Clamped outside [0, 1].
+    assert_eq!(color_for_distance(-1.0), near);
+    assert_eq!(color_for_distance(2.0), far);
+    for c in near.iter().chain(far.iter()) {
+        assert!((0.0..=1.0).contains(c));
+    }
+}
+
+#[test]
+fn distance_shape_buckets_cover_the_range() {
+    let inner = geometry_for_distance(0.0);
+    let middle = geometry_for_distance(0.5);
+    let outer = geometry_for_distance(1.0);
+    assert!(inner != middle && middle != outer && inner != outer);
+}
+
+#[test]
+fn point_cloud_colors_by_distance_from_center() {
+    // Points at increasing radius along x; single label so label color is constant.
+    let points: Vec<[f32; 3]> = (0..5).map(|i| [i as f32, 0.0, 0.0]).collect();
+    let labels = vec![0u32; 5];
+    let visible: Vec<u32> = (0..5).collect();
+    let settings = PointCloudSettings {
+        color_mode: ColorMode::ByDistance,
+        geometry_policy: GeometryPolicy::ByDistance,
+        ..Default::default()
+    };
+    let result = build_instances(&points, &labels, &visible, &settings);
+    // Distance maps onto the gradient, so the nearest and farthest points
+    // differ in color even though they share a label.
+    let colors: Vec<[f32; 3]> = result
+        .batches
+        .iter()
+        .flat_map(|b| b.instances.iter())
+        .map(|i| [i.color[0], i.color[1], i.color[2]])
+        .collect();
+    assert!(colors.iter().any(|c| *c != colors[0]));
+    // The closest point (row 0, distance 0) gets the gradient's low end.
+    let total: usize = result.batches.iter().map(|b| b.instances.len()).sum();
+    assert_eq!(total, 5);
+    // Distance-based shapes split the cloud across more than one batch.
+    assert!(result.batches.len() > 1);
 }
 
 #[test]
