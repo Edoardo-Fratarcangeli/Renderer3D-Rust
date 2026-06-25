@@ -43,6 +43,7 @@ tab bar:
 | Tab | Content |
 |-----|---------|
 | 📂 Import | grid form (file, row cap, projection method/dimensions/columns) + one-click benchmarks |
+| 📡 Stream | runtime stream config (format, listen address, rolling cap, projection) + Start/Stop with a live status dot (green active / blue receiving / red error) |
 | 🏷 Labels | per-label toggles (two columns) + distribution chart with hover % |
 | 🎨 View | point size slider, shape channel (uniform / per label / by distance), color channel (by label / by distance), **re-projection controls** (method incl. radial, 1D/2D/3D, axis columns) |
 | 💾 Export | destination + row count preview, colored result status |
@@ -141,11 +142,12 @@ the dataset content alone:
 ## 2. Files created / modified
 
 Created: `src/dataset/{mod,loader,metadata,index,preprocessor,export,builtin}.rs`,
+`src/dataset/stream/{mod,ndjson,arrow}.rs` (runtime streaming),
 `src/visualization/{mod,color_mapper,geometry_assigner,point_cloud}.rs`,
-`src/ui/{mod,import_dialog,dataset_table,label_filter,search_panel,distribution_chart,export_panel}.rs`,
-`tests/dataset/*`, `tests/visualization/*`, this document.
+`src/ui/{mod,import_dialog,stream_panel,dataset_table,label_filter,search_panel,distribution_chart,export_panel}.rs`,
+`tests/dataset/*`, `tests/visualization/*`, `tests/stream/*`, this document.
 
-Modified: `Cargo.toml` (memmap2, csv, serde_json, zip; optional `parquet`),
+Modified: `Cargo.toml` (memmap2, csv, serde_json, zip; optional `parquet`, `arrow`),
 `src/lib.rs` (module exports), `src/state.rs` (DatasetView field, toolbar
 button, focus action, instance-buffer rebuild + draw), `.gitignore`.
 
@@ -192,6 +194,13 @@ Integration suites:
   and projection dimensions (1D/2D/3D) controlling the active axes.
 - `tests/dataset/bench.rs` — `#[ignore]` timing benchmarks
   (`cargo test --release --test dataset -- --ignored --nocapture`).
+- `tests/stream/` — runtime streaming end to end: a pure-Rust TCP producer
+  (rows received, rolling cap, responsive stop, malformed-input error,
+  producer reconnect) plus the real **Python streamers** for both wire formats
+  — NDJSON always, Arrow IPC under `--features arrow-stream` — skipping cleanly
+  when python3 / pyarrow are absent. The decoders also have unit tests
+  (`src/dataset/stream/`): JSON row shapes, cross-read line reassembly, CRLF /
+  blank / trailing-line handling, buffer cap + alignment, Arrow column casting.
 
 In-module unit tests (`cargo test --lib`) cover the private helpers:
 NPY/IDX header parsing, dtype decoding for every `ElemType`, FNV hashing,
@@ -296,7 +305,78 @@ Tips: encode non-numeric feature columns before export
 NPY/NPZ for large datasets (memory mapped / streamed); the **Radial** projection
 benefits from many numeric columns, since each becomes a sphere anchor.
 
-## 6. Risks & mitigations
+## 6. Runtime streaming (Stream tab)
+
+Besides loading a file, the visualizer can ingest rows **live** from an external
+producer (a Python process, another language, …) and feed them through the same
+projection + render pipeline. The app acts as a **TCP server**: it listens, the
+producer connects and pushes rows, and the session keeps accepting connections
+so it survives producer restarts.
+
+### Layers & design patterns (`dataset::stream`, pure — no egui/wgpu)
+
+```text
+producer ──TCP──▶ StreamSession (background thread)
+                    │  accept + BatchDecoder::next_batch
+                    ▼
+                 StreamShared { Mutex<StreamBuffer>, status, last_rx, stop }
+                    ▲                         │ lifecycle
+  UI polls version ─┘                         ▼  StreamEvent (mpsc)
+```
+
+- **`BatchDecoder` (Strategy)** — turns a byte stream into `RowBatch`es. Two
+  implementations: `NdjsonDecoder` (newline-delimited JSON, zero extra deps,
+  any language can `socket.send` a line) and `ArrowIpcDecoder` (Apache Arrow IPC
+  stream, behind the optional `arrow-stream` feature, columnar/high-throughput).
+- **`StreamBuffer`** — a bounded rolling accumulator (oldest rows dropped past
+  the cap) with a `version` counter; `to_dataset()` snapshots it into an
+  in-memory `Dataset` for the standard pipeline (no code duplication).
+- **`StreamSession`** — owns the accept/decode thread; appends decoded rows into
+  the shared buffer, updates an atomic status + last-received timestamp, and
+  emits lifecycle `StreamEvent`s over an mpsc channel.
+- **`StreamHandle` (RAII)** — the UI front-end; `Drop` stops the thread and
+  shuts the socket down to unblock the blocking read immediately.
+
+The wire-format choice and the projection mapping reuse the same helpers as file
+import (`projection_spec_from`, `method_radio`, `labels_from_strings`), so there
+is a single source of truth for each concern.
+
+### UI & status feedback
+
+The **Stream** tab configures the format, listen address, rolling-row cap and
+projection (Radial is the default — it is stateless per row, so the cloud does
+not reorient as data arrives, unlike PCA which refits each refresh). Start/Stop
+drives the session; a status dot — rendered both on the button and on the tab
+label — is **green** when active, **blue** while receiving (data seen within
+500 ms) and **red** on error. Each frame `DatasetView::poll_stream` drains
+lifecycle events and, when the buffer `version` changed, rebuilds the dataset
+snapshot and re-projects — so the wire row rate is decoupled from the render
+rate (one rebuild per frame at most).
+
+PCA is allowed but refits on every refresh; Direct/Radial are stateless per row
+and recommended for live data. Streaming uses no disk cache (the data changes
+continuously).
+
+### Producer examples (Python)
+
+```python
+# NDJSON — works from any language, no dependencies
+import socket, json
+s = socket.create_connection(("127.0.0.1", 8765))
+for i in range(1000):
+    s.sendall((json.dumps({"x": [i*0.1, i*0.2, i*0.3], "label": f"c{i%3}"}) + "\n").encode())
+
+# Arrow IPC stream — high throughput (needs the app built with --features arrow-stream)
+import socket, pyarrow as pa
+s = socket.create_connection(("127.0.0.1", 8765)); f = s.makefile("wb")
+batch = pa.record_batch({"f0": pa.array([1.0, 2.0]), "label": pa.array(["a", "b"])})
+w = pa.ipc.new_stream(f, batch.schema); w.write_batch(batch); w.close(); f.flush()
+```
+
+The same two scripts (parametric) live under `tests/stream/` and drive the
+integration tests below.
+
+## 7. Risks & mitigations
 
 | Risk | Mitigation |
 |------|------------|
@@ -306,9 +386,13 @@ benefits from many numeric columns, since each becomes a sphere anchor.
 | Millions of points stall GPU | 200k instance cap with even striding (reported in UI) |
 | Stale caches after file edits / projection changes | cache key includes size + mtime + shape + projection tag |
 | Parquet dependency weight | optional `parquet-support` feature, off by default |
+| Arrow dependency weight | optional `arrow-stream` feature, off by default (NDJSON needs no extra deps) |
 | Big-endian / fortran NPY, >1-byte IDX | rejected with explicit errors instead of silent corruption |
+| Unbounded live stream exhausts RAM | bounded rolling `StreamBuffer` (oldest rows dropped past the cap) |
+| Stop hangs on a blocking socket read | `StreamHandle::stop` shuts the socket down to unblock the read, then joins |
+| Stream UI freeze under high row rate | render decoupled from wire rate: one snapshot rebuild per frame, keyed on a buffer version |
 
-## 7. Completion criteria (verified)
+## 8. Completion criteria (verified)
 
 - ✅ Small dataset imports without errors (loader tests, smoke test).
 - ✅ Large dataset path uses mmap + caches (mmap asserts, cache roundtrip test).
@@ -316,4 +400,7 @@ benefits from many numeric columns, since each becomes a sphere anchor.
 - ✅ Filters change the visible selection (`label_filter_changes_visible_rows`, UI recompute).
 - ✅ Projection is configurable to 1D/2D/3D over chosen columns/components, re-projectable in place (`projection_dims_control_the_active_axes`, preprocessor spec tests).
 - ✅ Export produces a subset consistent with filters (`export_writes_filtered_subset_consistent_with_filter`).
-- ✅ All automated tests green (`cargo test`).
+- ✅ Runtime streaming ingests rows over TCP (NDJSON + Arrow IPC) into the live
+  view, with a bounded rolling buffer and responsive stop (`tests/stream/`,
+  driven by real Python streamers for both formats).
+- ✅ All automated tests green (`cargo test`; `cargo test --features arrow-stream`).

@@ -1,0 +1,99 @@
+_version: 2
+
+# ── Stream tab ───────────────────────────────────────────────────────────────
+"stream.heading":
+  en: Runtime data stream
+  it: Stream dati a runtime
+  es: Flujo de datos en tiempo real
+  fr: Flux de données à l'exécution
+  de: Laufzeit-Datenstrom
+"stream.subheading":
+  en: The app listens; a producer (Python, …) connects and streams rows.
+  it: L'app è in ascolto; un produttore (Python, …) si connette e invia righe.
+  es: La app escucha; un productor (Python, …) se conecta y envía filas.
+  fr: L'app écoute ; un producteur (Python, …) se connecte et envoie des lignes.
+  de: Die App lauscht; ein Produzent (Python, …) verbindet sich und sendet Zeilen.
+"stream.format":
+  en: Format
+  it: Formato
+  es: Formato
+  fr: Format
+  de: Format
+"stream.format_ndjson":
+  en: NDJSON (compatible)
+  it: NDJSON (compatibile)
+  es: NDJSON (compatible)
+  fr: NDJSON (compatible)
+  de: NDJSON (kompatibel)
+"stream.format_arrow":
+  en: Arrow IPC (fast)
+  it: Arrow IPC (veloce)
+  es: Arrow IPC (rápido)
+  fr: Arrow IPC (rapide)
+  de: Arrow IPC (schnell)
+"stream.address":
+  en: Listen address
+  it: Indirizzo di ascolto
+  es: Dirección de escucha
+  fr: Adresse d'écoute
+  de: Lausch-Adresse
+"stream.max_rows":
+  en: Max rows (rolling)
+  it: Righe max (scorrevoli)
+  es: Filas máx. (deslizante)
+  fr: Lignes max (glissant)
+  de: Max. Zeilen (rollierend)
+"stream.start":
+  en: Start
+  it: Avvia
+  es: Iniciar
+  fr: Démarrer
+  de: Starten
+"stream.stop":
+  en: Stop
+  it: Ferma
+  es: Detener
+  fr: Arrêter
+  de: Stoppen
+"stream.stats":
+  en: "%{addr} — %{received} received, %{retained} retained"
+  it: "%{addr} — %{received} ricevute, %{retained} mantenute"
+  es: "%{addr} — %{received} recibidas, %{retained} retenidas"
+  fr: "%{addr} — %{received} reçues, %{retained} conservées"
+  de: "%{addr} — %{received} empfangen, %{retained} behalten"
+"stream.listening":
+  en: "Listening on %{addr}…"
+  it: "In ascolto su %{addr}…"
+  es: "Escuchando en %{addr}…"
+  fr: "À l'écoute sur %{addr}…"
+  de: "Lauscht auf %{addr}…"
+"stream.connected":
+  en: "Producer connected (%{peer})"
+  it: "Produttore connesso (%{peer})"
+  es: "Productor conectado (%{peer})"
+  fr: "Producteur connecté (%{peer})"
+  de: "Produzent verbunden (%{peer})"
+"stream.disconnected":
+  en: Producer disconnected; waiting for a new connection.
+  it: Produttore disconnesso; in attesa di una nuova connessione.
+  es: Productor desconectado; esperando una nueva conexión.
+  fr: Producteur déconnecté ; en attente d'une nouvelle connexion.
+  de: Produzent getrennt; warte auf eine neue Verbindung.
+"stream.stopped":
+  en: Stream stopped.
+  it: Stream fermato.
+  es: Flujo detenido.
+  fr: Flux arrêté.
+  de: Stream gestoppt.
+"stream.start_failed":
+  en: "Could not start stream: %{msg}"
+  it: "Impossibile avviare lo stream: %{msg}"
+  es: "No se pudo iniciar el flujo: %{msg}"
+  fr: "Impossible de démarrer le flux : %{msg}"
+  de: "Stream konnte nicht gestartet werden: %{msg}"
+"stream.error":
+  en: "Stream error: %{msg}"
+  it: "Errore stream: %{msg}"
+  es: "Error de flujo: %{msg}"
+  fr: "Erreur de flux : %{msg}"
+  de: "Stream-Fehler: %{msg}"

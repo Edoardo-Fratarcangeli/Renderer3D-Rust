@@ -17,6 +17,7 @@ pub mod index;
 pub mod loader;
 pub mod metadata;
 pub mod preprocessor;
+pub mod stream;
 
 use std::fmt;
 

@@ -16,6 +16,12 @@ _version: 2
   es: 📂 Importar
   fr: 📂 Importer
   de: 📂 Importieren
+"dataset.tab_stream":
+  en: 📡 Stream
+  it: 📡 Stream
+  es: 📡 Stream
+  fr: 📡 Flux
+  de: 📡 Stream
 "dataset.tab_labels":
   en: 🏷 Labels
   it: 🏷 Etichette

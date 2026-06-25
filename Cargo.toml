@@ -20,6 +20,7 @@ memmap2 = "0.9"                                        # Memory-mapped large dat
 csv = "1.3"                                            # Streaming CSV loader
 zip = { version = "2", default-features = false, features = ["deflate"] } # NPZ archives
 parquet = { version = "53", optional = true }          # Optional Parquet loader
+arrow = { version = "59", optional = true }            # Optional Arrow IPC stream decoder
 calamine = "0.26"                                      # Excel (xlsx/xls/ods) geometry tables
 stl_io = "0.3"                                         # STL solid model import
 tobj = "4.0"                                           # Wavefront OBJ import
@@ -38,6 +39,7 @@ image = { version = "0.25.10", features = ["ico"] }
 [features]
 default = []
 parquet-support = ["dep:parquet"]
+arrow-stream = ["dep:arrow"]
 
 [dev-dependencies]
 tempfile = "3"
