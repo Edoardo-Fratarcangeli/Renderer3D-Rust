@@ -18,13 +18,15 @@ pub fn builtin_description(name: &str) -> String {
     }
 }
 
-/// Mutually-exclusive PCA / Direct / Radial selector shared by the import form
-/// and the View tab's reprojection panel. Returns true if the choice changed.
-pub fn method_radio(ui: &mut egui::Ui, state: &mut ImportState) -> bool {
+/// Mutually-exclusive PCA / Direct / Radial selector shared by the import form,
+/// the View tab's reprojection panel and the Stream panel. Operates on the two
+/// flags directly so any state that carries them can reuse it. Returns true if
+/// the choice changed.
+pub fn method_radio(ui: &mut egui::Ui, use_pca: &mut bool, use_radial: &mut bool) -> bool {
     // Map the two-bool state onto a single radio group: 0 PCA, 1 Direct, 2 Radial.
-    let mut sel = if state.use_radial {
+    let mut sel = if *use_radial {
         2
-    } else if state.use_pca {
+    } else if *use_pca {
         0
     } else {
         1
@@ -34,8 +36,8 @@ pub fn method_radio(ui: &mut egui::Ui, state: &mut ImportState) -> bool {
     ui.radio_value(&mut sel, 1, t!("dataset.method_direct").to_string());
     ui.radio_value(&mut sel, 2, t!("dataset.method_radial").to_string());
     if sel != before {
-        state.use_radial = sel == 2;
-        state.use_pca = sel == 0;
+        *use_radial = sel == 2;
+        *use_pca = sel == 0;
         true
     } else {
         false
@@ -79,7 +81,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
 
             ui.label(t!("dataset.field_projection").to_string());
             ui.horizontal(|ui| {
-                method_radio(ui, state);
+                method_radio(ui, &mut state.use_pca, &mut state.use_radial);
             });
             ui.end_row();
 

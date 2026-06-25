@@ -26,6 +26,7 @@ pub mod geometry_panel;
 pub mod import_dialog;
 pub mod label_filter;
 pub mod search_panel;
+pub mod stream_panel;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -33,6 +34,7 @@ use std::sync::mpsc::Receiver;
 
 use crate::dataset::index::{apply_filter, FilterSpec, SearchQuery};
 use crate::dataset::preprocessor::{self, Projection, ProjectionMethod, ProjectionSpec};
+use crate::dataset::stream::{StreamConfig, StreamEvent, StreamSession};
 use crate::dataset::{builtin, loader, Dataset, DatasetIndex};
 use crate::visualization::point_cloud::{self, PointCloudSettings};
 
@@ -148,6 +150,8 @@ impl StatusMessage {
 pub enum DatasetTab {
     /// File / benchmark import.
     Import,
+    /// Runtime data streaming (TCP NDJSON / Arrow IPC).
+    Stream,
     /// Per-label visibility filters + distribution chart.
     Labels,
     /// Point size and shape policy.
@@ -158,8 +162,9 @@ pub enum DatasetTab {
 
 impl DatasetTab {
     /// All tabs in display order.
-    pub const ALL: [DatasetTab; 4] = [
+    pub const ALL: [DatasetTab; 5] = [
         DatasetTab::Import,
+        DatasetTab::Stream,
         DatasetTab::Labels,
         DatasetTab::View,
         DatasetTab::Export,
@@ -169,6 +174,7 @@ impl DatasetTab {
     pub fn title(&self) -> String {
         match self {
             DatasetTab::Import => t!("dataset.tab_import").to_string(),
+            DatasetTab::Stream => t!("dataset.tab_stream").to_string(),
             DatasetTab::Labels => t!("dataset.tab_labels").to_string(),
             DatasetTab::View => t!("dataset.tab_view").to_string(),
             DatasetTab::Export => t!("dataset.tab_export").to_string(),
@@ -177,7 +183,7 @@ impl DatasetTab {
 
     /// Whether the tab is usable before any dataset is loaded.
     pub fn needs_dataset(&self) -> bool {
-        !matches!(self, DatasetTab::Import)
+        !matches!(self, DatasetTab::Import | DatasetTab::Stream)
     }
 }
 
@@ -206,20 +212,32 @@ pub struct ImportState {
     pub loading: bool,
 }
 
+/// Build a [`ProjectionSpec`] from the PCA/Radial flags + dims + axes. Shared
+/// by the import form, the View tab and the Stream panel so the method mapping
+/// lives in exactly one place.
+pub fn projection_spec_from(
+    use_pca: bool,
+    use_radial: bool,
+    dims: u8,
+    axes: [usize; 3],
+) -> ProjectionSpec {
+    ProjectionSpec {
+        method: if use_radial {
+            ProjectionMethod::Radial
+        } else if use_pca {
+            ProjectionMethod::Pca
+        } else {
+            ProjectionMethod::Direct
+        },
+        dims: dims.clamp(1, 3),
+        axes,
+    }
+}
+
 impl ImportState {
     /// Build a [`ProjectionSpec`] from the current form selections.
     pub fn projection(&self) -> ProjectionSpec {
-        ProjectionSpec {
-            method: if self.use_radial {
-                ProjectionMethod::Radial
-            } else if self.use_pca {
-                ProjectionMethod::Pca
-            } else {
-                ProjectionMethod::Direct
-            },
-            dims: self.dims.clamp(1, 3),
-            axes: self.axes,
-        }
+        projection_spec_from(self.use_pca, self.use_radial, self.dims, self.axes)
     }
 }
 
@@ -266,6 +284,8 @@ pub struct DatasetView {
     pub settings: PointCloudSettings,
     /// Human readable summary of the last instance build.
     pub last_build_info: String,
+    /// Runtime streaming tab state (config + live session).
+    pub stream: stream_panel::StreamState,
 
     render_dirty: bool,
     worker: Option<Receiver<Result<LoadedDataset, String>>>,
@@ -302,6 +322,7 @@ impl DatasetView {
             visible_rows: Vec::new(),
             settings: PointCloudSettings::default(),
             last_build_info: String::new(),
+            stream: stream_panel::StreamState::default(),
             render_dirty: false,
             worker: None,
         }
@@ -386,6 +407,109 @@ impl DatasetView {
         self.visible_rows.clear();
         self.settings.highlighted_row = None;
         self.render_dirty = true;
+    }
+
+    // --- Runtime streaming ------------------------------------------------
+
+    /// Start a streaming session from the current Stream-tab configuration.
+    pub fn start_stream(&mut self) {
+        if self.stream.is_active() {
+            return;
+        }
+        let config = StreamConfig {
+            format: self.stream.format,
+            addr: self.stream.addr.trim().to_string(),
+            max_rows: self.stream.max_rows,
+            projection: self.stream.projection(),
+        };
+        match StreamSession::start(config) {
+            Ok(handle) => {
+                self.stream.seen_version = 0;
+                self.stream.known_labels = 0;
+                self.stream.status = Some(StatusMessage::info(
+                    t!("stream.listening", addr = handle.addr().to_string()).to_string(),
+                ));
+                self.stream.handle = Some(handle);
+            }
+            Err(e) => {
+                self.stream.status = Some(StatusMessage::error(
+                    t!("stream.start_failed", msg = e.to_string()).to_string(),
+                ));
+            }
+        }
+    }
+
+    /// Stop the running streaming session (keeps the last snapshot on screen).
+    pub fn stop_stream(&mut self) {
+        if let Some(mut handle) = self.stream.handle.take() {
+            handle.stop();
+        }
+        self.stream.status = Some(StatusMessage::info(t!("stream.stopped").to_string()));
+    }
+
+    /// Per-frame stream poll: drain lifecycle events for the status line and
+    /// rebuild the dataset snapshot whenever the rolling buffer changed.
+    pub fn poll_stream(&mut self) {
+        let Some(handle) = &self.stream.handle else {
+            return;
+        };
+        // Lifecycle events → status text.
+        for ev in handle.drain_events() {
+            self.stream.status = Some(match ev {
+                StreamEvent::Listening(addr) => {
+                    StatusMessage::info(t!("stream.listening", addr = addr).to_string())
+                }
+                StreamEvent::Connected(peer) => {
+                    StatusMessage::success(t!("stream.connected", peer = peer).to_string())
+                }
+                StreamEvent::Disconnected => {
+                    StatusMessage::info(t!("stream.disconnected").to_string())
+                }
+                StreamEvent::Error(msg) => {
+                    StatusMessage::error(t!("stream.error", msg = msg).to_string())
+                }
+            });
+        }
+        // Rebuild the snapshot only when new rows arrived.
+        let version = self.stream.handle.as_ref().unwrap().buffer_version();
+        if version != self.stream.seen_version {
+            self.stream.seen_version = version;
+            self.refresh_stream_snapshot();
+        }
+    }
+
+    /// Project the current stream buffer and install it as the live dataset,
+    /// reusing the standard projection pipeline (no disk cache).
+    fn refresh_stream_snapshot(&mut self) {
+        let spec = self.stream.projection();
+        let dataset = self
+            .stream
+            .handle
+            .as_ref()
+            .and_then(|h| h.with_buffer(|b| b.to_dataset()));
+        let Some(dataset) = dataset else {
+            return;
+        };
+        match prepare_dataset_spec(dataset, &spec, None) {
+            Ok(loaded) => {
+                let n_labels = loaded.dataset.label_names.len();
+                // Reveal any newly-appeared label classes without resetting the
+                // user's existing visibility choices.
+                for id in self.stream.known_labels..n_labels {
+                    self.enabled_labels.insert(id as u32);
+                }
+                self.stream.known_labels = n_labels;
+                self.settings.highlighted_row = None;
+                self.visible = true;
+                self.loaded = Some(loaded);
+                self.recompute_visible();
+            }
+            Err(e) => {
+                self.stream.status = Some(StatusMessage::error(
+                    t!("stream.error", msg = e.to_string()).to_string(),
+                ));
+            }
+        }
     }
 
     /// Toggle whether the dataset's point cloud is drawn.
@@ -490,8 +614,14 @@ impl DatasetView {
     /// Poll the loader thread, draw the window, return the host action.
     pub fn show(&mut self, ctx: &egui::Context) -> DatasetAction {
         self.poll_worker();
+        self.poll_stream();
         if !self.show_window {
             return DatasetAction::None;
+        }
+        // Keep the live status dot (and counters) repainting while streaming,
+        // even when the pointer is idle.
+        if self.stream.is_active() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         let mut action = DatasetAction::None;
@@ -524,7 +654,17 @@ impl DatasetView {
                 for tab in DatasetTab::ALL {
                     let enabled = !tab.needs_dataset() || self.loaded.is_some();
                     let selected = self.tab == tab;
-                    let label = egui::RichText::new(tab.title()).size(14.0);
+                    // The Stream tab shows a live status dot (green active /
+                    // blue receiving / red error) right on its label.
+                    let title = if tab == DatasetTab::Stream && self.stream.is_active() {
+                        format!("⏺ {}", tab.title())
+                    } else {
+                        tab.title()
+                    };
+                    let mut label = egui::RichText::new(title).size(14.0);
+                    if tab == DatasetTab::Stream && self.stream.is_active() {
+                        label = label.color(self.stream.dot_color());
+                    }
                     if ui
                         .add_enabled(enabled, egui::SelectableLabel::new(selected, label))
                         .clicked()
@@ -572,6 +712,11 @@ impl DatasetView {
                     self.start_import(req);
                 }
             }
+            DatasetTab::Stream => match stream_panel::show(ui, &mut self.stream) {
+                stream_panel::StreamUiAction::Start => self.start_stream(),
+                stream_panel::StreamUiAction::Stop => self.stop_stream(),
+                stream_panel::StreamUiAction::None => {}
+            },
             DatasetTab::Labels => {
                 let loaded = self.loaded.as_ref().unwrap();
                 let stats = loaded.dataset.metadata.labels.clone();
@@ -675,7 +820,11 @@ impl DatasetView {
                     .show(ui, |ui| {
                         ui.label(t!("dataset.method").to_string());
                         ui.horizontal(|ui| {
-                            import_dialog::method_radio(ui, &mut self.import);
+                            import_dialog::method_radio(
+                                ui,
+                                &mut self.import.use_pca,
+                                &mut self.import.use_radial,
+                            );
                         });
                         ui.end_row();
 
@@ -927,7 +1076,7 @@ mod tests {
 
     #[test]
     fn tab_metadata_is_consistent() {
-        assert_eq!(DatasetTab::ALL.len(), 4);
+        assert_eq!(DatasetTab::ALL.len(), 5);
         // Titles unique and non-empty.
         for (i, a) in DatasetTab::ALL.iter().enumerate() {
             assert!(!a.title().is_empty());
@@ -935,9 +1084,10 @@ mod tests {
                 assert_ne!(a.title(), b.title());
             }
         }
-        // Only Import works without data.
+        // Import and Stream work without data; the rest need a dataset.
         assert!(!DatasetTab::Import.needs_dataset());
-        for tab in &DatasetTab::ALL[1..] {
+        assert!(!DatasetTab::Stream.needs_dataset());
+        for tab in [DatasetTab::Labels, DatasetTab::View, DatasetTab::Export] {
             assert!(tab.needs_dataset());
         }
     }
