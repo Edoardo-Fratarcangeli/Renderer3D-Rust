@@ -5,7 +5,9 @@ use winit::{event::*, window::Window};
 use crate::camera::{Camera, Uniforms};
 use crate::model::{InstanceRaw, Vertex};
 use crate::primitives;
-use crate::scene::{apply_undo_command, intersect_primitive, GeometryType, SceneObject, UndoCommand};
+use crate::scene::{
+    apply_undo_command, intersect_primitive, GeometryType, SceneObject, UndoCommand,
+};
 
 // Camera Default Values (used for initialization and reset)
 pub const DEFAULT_CAMERA_YAW: f32 = 16.0;
@@ -145,6 +147,7 @@ pub struct State {
 
     // Universal geometry import (layers of instanced shapes)
     pub geometry_view: crate::ui::geometry_panel::GeometryView,
+    pub sketch_view: crate::ui::sketch_panel::SketchView,
     geometry_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
 
     // Imported 3D solid models (STL/OBJ/glTF), keyed by scene-object id.
@@ -163,8 +166,7 @@ pub const LOD_SPHERE_THRESHOLD: u32 = 2000;
 /// implementation instead of repeating the `Button`/`RichText` boilerplate.
 fn list_icon_button(ui: &mut egui::Ui, icon: &str, color: egui::Color32, hover: &str) -> bool {
     ui.add(
-        egui::Button::new(egui::RichText::new(icon).color(color))
-            .fill(egui::Color32::TRANSPARENT),
+        egui::Button::new(egui::RichText::new(icon).color(color)).fill(egui::Color32::TRANSPARENT),
     )
     .on_hover_text(hover)
     .clicked()
@@ -490,6 +492,7 @@ impl State {
             dataset_view: crate::ui::DatasetView::new(),
             dataset_point_batches: Vec::new(),
             geometry_view: crate::ui::geometry_panel::GeometryView::new(),
+            sketch_view: crate::ui::sketch_panel::SketchView::new(),
             geometry_batches: Vec::new(),
             custom_meshes: std::collections::HashMap::new(),
             mesh_worker: None,
@@ -548,7 +551,21 @@ impl State {
 
     /// Upload a loaded mesh to the GPU and add it as a selected scene object,
     /// auto-scaled and centered at the origin so it is immediately visible.
-    pub fn add_mesh_object(&mut self, mesh: crate::mesh::MeshData, label: String) {
+    /// Upload a CPU mesh to the GPU and add it to the scene as a new selected
+    /// [`GeometryType::Mesh`] object (with undo). Shared by imported models and
+    /// generated geometry (sketch surfaces / composed solids), so the buffer
+    /// upload and scene/undo bookkeeping live in exactly one place.
+    ///
+    /// When `normalize` is set, the model is recentered and scaled to fit a
+    /// ~6-unit box (right for arbitrary imported files); otherwise it keeps its
+    /// authored world coordinates (right for sketches/solids drawn to scale).
+    /// Returns the new object id.
+    fn insert_custom_mesh(
+        &mut self,
+        mesh: crate::mesh::MeshData,
+        label: String,
+        normalize: bool,
+    ) -> usize {
         let vertex_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -564,12 +581,16 @@ impl State {
                 usage: wgpu::BufferUsages::INDEX,
             });
         let num_indices = mesh.indices.len() as u32;
-        let tri_count = mesh.triangle_count();
 
-        // Fit the model into roughly a 6-unit box centered at the origin.
-        let extent = mesh.max_extent();
-        let scale = if extent > 1e-6 { 6.0 / extent } else { 1.0 };
-        let center = mesh.center();
+        let (scale, position) = if normalize {
+            // Fit the model into roughly a 6-unit box centered at the origin.
+            let extent = mesh.max_extent();
+            let s = if extent > 1e-6 { 6.0 / extent } else { 1.0 };
+            let c = mesh.center();
+            (s, [-c[0] * s, -c[1] * s, -c[2] * s])
+        } else {
+            (1.0, [0.0, 0.0, 0.0])
+        };
 
         let id = self.next_id;
         self.next_id += 1;
@@ -579,8 +600,7 @@ impl State {
         }
         let mut obj = SceneObject::new(id, label, [0.0, 0.0, 0.0], GeometryType::Mesh);
         obj.instance.scale = cgmath::Vector3::new(scale, scale, scale);
-        obj.instance.position =
-            cgmath::Vector3::new(-center[0] * scale, -center[1] * scale, -center[2] * scale);
+        obj.instance.position = cgmath::Vector3::new(position[0], position[1], position[2]);
         obj.selected = true;
 
         self.custom_meshes.insert(
@@ -594,6 +614,12 @@ impl State {
         );
         self.push_undo(UndoCommand::Add(obj.clone()));
         self.objects.push(obj);
+        id
+    }
+
+    pub fn add_mesh_object(&mut self, mesh: crate::mesh::MeshData, label: String) {
+        let tri_count = mesh.triangle_count();
+        self.insert_custom_mesh(mesh, label, true);
 
         // Center the camera on the freshly imported model.
         self.camera_target = cgmath::Point3::new(0.0, 0.0, 0.0);
@@ -601,6 +627,44 @@ impl State {
             "status.imported_model",
             count = tri_count
         )));
+    }
+
+    /// Build a renderable surface from a 2D sketch (closed → filled face, open
+    /// → ribbon) and add it to the scene at its authored coordinates.
+    pub fn add_sketch_surface(&mut self, sketch: &crate::sketch::Sketch, label: String) {
+        match sketch.to_mesh(crate::sketch::DEFAULT_TOLERANCE) {
+            Ok(mesh) => {
+                let tri = mesh.triangle_count();
+                self.insert_custom_mesh(mesh, label, false);
+                self.sketch_view.status = Some(crate::ui::StatusMessage::success(
+                    t!("sketch.surface_created", count = tri).to_string(),
+                ));
+            }
+            Err(e) => {
+                self.sketch_view.status = Some(crate::ui::StatusMessage::error(
+                    t!("sketch.surface_failed", msg = e.to_string()).to_string(),
+                ));
+            }
+        }
+    }
+
+    /// Compose a 3D solid from surface boundary loops (welding shared edges) and
+    /// add it to the scene. Reports whether the result is watertight.
+    pub fn add_solid(&mut self, loops: &[Vec<[f32; 3]>], label: String) {
+        let (mesh, closed) = crate::brep::compose(loops);
+        if mesh.indices.is_empty() {
+            self.sketch_view.status = Some(crate::ui::StatusMessage::error(
+                t!("sketch.solid_failed").to_string(),
+            ));
+            return;
+        }
+        let tri = mesh.triangle_count();
+        self.insert_custom_mesh(mesh, label, false);
+        self.sketch_view.status = Some(if closed {
+            crate::ui::StatusMessage::success(t!("sketch.solid_created", count = tri).to_string())
+        } else {
+            crate::ui::StatusMessage::info(t!("sketch.solid_open", count = tri).to_string())
+        });
     }
 
     pub fn push_undo(&mut self, cmd: UndoCommand) {
@@ -795,10 +859,8 @@ impl State {
                                     self.show_settings = false;
 
                                     let now = std::time::Instant::now();
-                                    let is_double_click = now
-                                        .duration_since(self.last_click_time)
-                                        .as_millis()
-                                        < 300;
+                                    let is_double_click =
+                                        now.duration_since(self.last_click_time).as_millis() < 300;
                                     self.last_click_time = now;
 
                                     if let Some(hit_id) = self.select_object_at_ndc(x, y) {
@@ -1073,6 +1135,9 @@ impl State {
                         if ui.button(t!("toolbar.solids").to_string()).clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
                         }
+                        if ui.button(t!("toolbar.sketch").to_string()).clicked() {
+                            self.sketch_view.show_window = !self.sketch_view.show_window;
+                        }
                         // Measurement tool toggle. While active, clicking two
                         // surface points reports the distance between them.
                         if ui
@@ -1125,6 +1190,8 @@ impl State {
             dataset_action = self.dataset_view.show(ctx);
             // Geometry import window (paste / files / layers)
             geometry_focus = self.geometry_view.show(ctx);
+            // Sketch & solid composer window
+            self.sketch_view.show(ctx);
 
             // Top Right Panel: Settings
             egui::Window::new(t!("settings.window_title").to_string())
@@ -1156,7 +1223,10 @@ impl State {
 
                     ui.separator();
                     ui.heading(t!("settings.camera_view").to_string());
-                    if ui.button(t!("settings.focus_selected").to_string()).clicked() {
+                    if ui
+                        .button(t!("settings.focus_selected").to_string())
+                        .clicked()
+                    {
                         action_focus_selected = true;
                     }
                     if ui.button(t!("settings.reset_view").to_string()).clicked() {
@@ -1343,8 +1413,12 @@ impl State {
                                                         } else {
                                                             ui.visuals().text_color()
                                                         };
-                                                        if list_icon_button(ui, "✏", edit_color, &t!("list.edit"))
-                                                        {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "✏",
+                                                            edit_color,
+                                                            &t!("list.edit"),
+                                                        ) {
                                                             action_edit_obj_id = Some(obj.id);
                                                             self.editing_obj_draft =
                                                                 Some(obj.clone());
@@ -1376,12 +1450,25 @@ impl State {
 
                                                         // Visibility (opposite colors when hidden).
                                                         let (vis_icon, vis_color) = if obj.visible {
-                                                            ("👁", egui::Color32::from_rgb(100, 255, 100))
+                                                            (
+                                                                "👁",
+                                                                egui::Color32::from_rgb(
+                                                                    100, 255, 100,
+                                                                ),
+                                                            )
                                                         } else {
-                                                            ("🕶", egui::Color32::from_rgb(255, 100, 100))
+                                                            (
+                                                                "🕶",
+                                                                egui::Color32::from_rgb(
+                                                                    255, 100, 100,
+                                                                ),
+                                                            )
                                                         };
                                                         if list_icon_button(
-                                                            ui, vis_icon, vis_color, &t!("list.visibility"),
+                                                            ui,
+                                                            vis_icon,
+                                                            vis_color,
+                                                            &t!("list.visibility"),
                                                         ) {
                                                             obj.visible = !obj.visible;
                                                         }
@@ -1426,7 +1513,9 @@ impl State {
                                                     .weak(),
                                                 );
                                                 ui.with_layout(
-                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
                                                     |ui| {
                                                         if list_icon_button(
                                                             ui,
@@ -1630,7 +1719,10 @@ impl State {
                                         draft.instance.scale = cgmath::Vector3::new(s, 1.0, s);
                                     }
                                 });
-                                ui.checkbox(&mut draft.show_normal, t!("add.show_normal").to_string());
+                                ui.checkbox(
+                                    &mut draft.show_normal,
+                                    t!("add.show_normal").to_string(),
+                                );
                             }
                             _ => {}
                         }
@@ -1839,7 +1931,10 @@ impl State {
                                             obj.instance.scale = cgmath::Vector3::new(s, 1.0, s);
                                         }
                                     });
-                                    ui.checkbox(&mut obj.show_normal, t!("add.show_normal").to_string());
+                                    ui.checkbox(
+                                        &mut obj.show_normal,
+                                        t!("add.show_normal").to_string(),
+                                    );
                                 }
                                 _ => {}
                             }
@@ -1942,8 +2037,11 @@ impl State {
                     egui::Order::Foreground,
                     egui::Id::new("measure_overlay"),
                 ));
-                let pts: Vec<egui::Pos2> =
-                    self.measure_points.iter().filter_map(|p| project(*p)).collect();
+                let pts: Vec<egui::Pos2> = self
+                    .measure_points
+                    .iter()
+                    .filter_map(|p| project(*p))
+                    .collect();
                 for p in &pts {
                     painter.circle_filled(*p, 4.0, egui::Color32::YELLOW);
                 }
@@ -1954,10 +2052,8 @@ impl State {
                     );
                     let a = self.measure_points[0];
                     let b = self.measure_points[1];
-                    let d = ((a[0] - b[0]).powi(2)
-                        + (a[1] - b[1]).powi(2)
-                        + (a[2] - b[2]).powi(2))
-                    .sqrt();
+                    let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2))
+                        .sqrt();
                     let mid = egui::pos2((pts[0].x + pts[1].x) * 0.5, (pts[0].y + pts[1].y) * 0.5);
                     painter.text(
                         mid,
@@ -2009,6 +2105,18 @@ impl State {
         // Kick off a 3D-model import requested from the Solids window.
         if let Some(path) = self.geometry_view.take_mesh_request() {
             self.spawn_mesh_load(path);
+        }
+
+        // Build any surfaces / solids requested from the Sketch window.
+        for request in self.sketch_view.take_requests() {
+            match request {
+                crate::ui::sketch_panel::SketchRequest::Surface { sketch, label } => {
+                    self.add_sketch_surface(&sketch, label);
+                }
+                crate::ui::sketch_panel::SketchRequest::Solid { loops, label } => {
+                    self.add_solid(&loops, label);
+                }
+            }
         }
 
         // Rebuild geometry-layer instance buffers only when layers changed.
@@ -2307,10 +2415,8 @@ impl State {
                 if let Some(custom) = self.custom_meshes.get(id) {
                     render_pass.set_vertex_buffer(0, custom.vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, instance_buf.slice(..));
-                    render_pass.set_index_buffer(
-                        custom.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
+                    render_pass
+                        .set_index_buffer(custom.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.draw_indexed(0..custom.num_indices, 0, 0..1);
                 }
             }
@@ -2325,9 +2431,7 @@ impl State {
             {
                 let mesh = match geo_type {
                     GeometryType::Cube => &self.cube_mesh,
-                    GeometryType::Sphere if *count > LOD_SPHERE_THRESHOLD => {
-                        &self.sphere_lod_mesh
-                    }
+                    GeometryType::Sphere if *count > LOD_SPHERE_THRESHOLD => &self.sphere_lod_mesh,
                     GeometryType::Sphere => &self.sphere_mesh,
                     GeometryType::Plane => &self.plane_mesh,
                     _ => &self.sphere_lod_mesh,

@@ -26,6 +26,7 @@ pub mod geometry_panel;
 pub mod import_dialog;
 pub mod label_filter;
 pub mod search_panel;
+pub mod sketch_panel;
 pub mod stream_panel;
 
 use std::collections::HashSet;
@@ -780,7 +781,10 @@ impl DatasetView {
                         ui.horizontal(|ui| {
                             let by_label = self.settings.color_mode == ColorMode::ByLabel;
                             if ui
-                                .selectable_label(by_label, t!("dataset.color_by_label").to_string())
+                                .selectable_label(
+                                    by_label,
+                                    t!("dataset.color_by_label").to_string(),
+                                )
                                 .clicked()
                             {
                                 self.settings.color_mode = ColorMode::ByLabel;
@@ -841,7 +845,9 @@ impl DatasetView {
                         if !self.import.use_pca && !self.import.use_radial && n_cols > 0 {
                             let dims = self.import.dims.clamp(1, 3) as usize;
                             for (a, axis) in ["X", "Y", "Z"].iter().enumerate().take(dims) {
-                                ui.label(t!("dataset.axis_column", axis = axis.to_string()).to_string());
+                                ui.label(
+                                    t!("dataset.axis_column", axis = axis.to_string()).to_string(),
+                                );
                                 let sel = self.import.axes[a].min(n_cols - 1);
                                 egui::ComboBox::from_id_source(format!("axis_combo_{}", a))
                                     .selected_text(col_names[sel].clone())
@@ -855,7 +861,10 @@ impl DatasetView {
                         }
                     });
                 ui.vertical_centered(|ui| {
-                    if ui.button(t!("dataset.apply_projection").to_string()).clicked() {
+                    if ui
+                        .button(t!("dataset.apply_projection").to_string())
+                        .clicked()
+                    {
                         apply = true;
                     }
                 });

@@ -1,0 +1,196 @@
+# Sketch & solid composer window translations (rust-i18n combined format).
+# Covers src/ui/sketch_panel.rs and the sketch/solid status messages emitted
+# by src/state.rs. English (en) is the fallback for any missing key.
+_version: 2
+
+# ── Window ───────────────────────────────────────────────────────────────────
+"sketch.window_title":
+  en: ✏️ Sketch & Compose
+  it: ✏️ Schizzo e composizione
+  es: ✏️ Boceto y composición
+  fr: ✏️ Esquisse et composition
+  de: ✏️ Skizze & Komposition
+
+# ── Plane ────────────────────────────────────────────────────────────────────
+"sketch.plane_heading":
+  en: Sketch plane
+  it: Piano di schizzo
+  es: Plano de boceto
+  fr: Plan d'esquisse
+  de: Skizzenebene
+"sketch.plane":
+  en: "Plane:"
+  it: "Piano:"
+  es: "Plano:"
+  fr: "Plan :"
+  de: "Ebene:"
+"sketch.offset":
+  en: "Offset:"
+  it: "Offset:"
+  es: "Desplazamiento:"
+  fr: "Décalage :"
+  de: "Versatz:"
+
+# ── Shape ────────────────────────────────────────────────────────────────────
+"sketch.shape_heading":
+  en: Profile
+  it: Profilo
+  es: Perfil
+  fr: Profil
+  de: Profil
+"sketch.shape_polygon":
+  en: Polygon
+  it: Poligono
+  es: Polígono
+  fr: Polygone
+  de: Polygon
+"sketch.shape_circle":
+  en: Circle
+  it: Cerchio
+  es: Círculo
+  fr: Cercle
+  de: Kreis
+"sketch.shape_custom":
+  en: Custom
+  it: Personalizzato
+  es: Personalizado
+  fr: Personnalisé
+  de: Benutzerdefiniert
+"sketch.sides":
+  en: "Sides:"
+  it: "Lati:"
+  es: "Lados:"
+  fr: "Côtés :"
+  de: "Seiten:"
+"sketch.radius":
+  en: "Radius:"
+  it: "Raggio:"
+  es: "Radio:"
+  fr: "Rayon :"
+  de: "Radius:"
+"sketch.closed":
+  en: Closed (filled surface)
+  it: Chiuso (superficie piena)
+  es: Cerrado (superficie rellena)
+  fr: Fermé (surface pleine)
+  de: Geschlossen (gefüllte Fläche)
+"sketch.custom_hint":
+  en: One point per line, as "x,y"
+  it: Un punto per riga, come "x,y"
+  es: Un punto por línea, como "x,y"
+  fr: Un point par ligne, comme « x,y »
+  de: Ein Punkt pro Zeile, als „x,y“
+"sketch.create_surface":
+  en: ➕ Create surface
+  it: ➕ Crea superficie
+  es: ➕ Crear superficie
+  fr: ➕ Créer la surface
+  de: ➕ Fläche erstellen
+
+# ── Composer ─────────────────────────────────────────────────────────────────
+"sketch.composer_heading":
+  en: Solid composer
+  it: Compositore di solidi
+  es: Compositor de sólidos
+  fr: Compositeur de solides
+  de: Volumenkörper-Komposition
+"sketch.composer_hint":
+  en: Select closed surfaces sharing edges, then compose them into a solid
+  it: Seleziona superfici chiuse con lati in comune, poi componile in un solido
+  es: Selecciona superficies cerradas con aristas comunes y compón un sólido
+  fr: Sélectionnez des surfaces fermées à arêtes communes, puis composez un solide
+  de: Geschlossene Flächen mit gemeinsamen Kanten wählen und zu einem Körper fügen
+"sketch.no_surfaces":
+  en: No surfaces yet — create one above
+  it: Nessuna superficie — creane una sopra
+  es: Aún no hay superficies — crea una arriba
+  fr: Aucune surface — créez-en une ci-dessus
+  de: Noch keine Flächen — oben eine erstellen
+"sketch.compose_solid":
+  en: 🧊 Compose solid
+  it: 🧊 Componi solido
+  es: 🧊 Componer sólido
+  fr: 🧊 Composer le solide
+  de: 🧊 Körper zusammensetzen
+
+# ── Names ────────────────────────────────────────────────────────────────────
+"sketch.surface_name":
+  en: Surface %{id}
+  it: Superficie %{id}
+  es: Superficie %{id}
+  fr: Surface %{id}
+  de: Fläche %{id}
+"sketch.solid_name":
+  en: Solid %{id}
+  it: Solido %{id}
+  es: Sólido %{id}
+  fr: Solide %{id}
+  de: Körper %{id}
+
+# ── Status messages ──────────────────────────────────────────────────────────
+"sketch.surface_queued":
+  en: Surface queued for building…
+  it: Superficie in coda per la creazione…
+  es: Superficie en cola para construir…
+  fr: Surface en file d'attente…
+  de: Fläche zur Erstellung eingereiht…
+"sketch.solid_queued":
+  en: Solid queued for building…
+  it: Solido in coda per la creazione…
+  es: Sólido en cola para construir…
+  fr: Solide en file d'attente…
+  de: Körper zur Erstellung eingereiht…
+"sketch.surface_created":
+  en: Surface created (%{count} triangles)
+  it: Superficie creata (%{count} triangoli)
+  es: Superficie creada (%{count} triángulos)
+  fr: Surface créée (%{count} triangles)
+  de: Fläche erstellt (%{count} Dreiecke)
+"sketch.surface_failed":
+  en: "Surface failed: %{msg}"
+  it: "Superficie non riuscita: %{msg}"
+  es: "Error de superficie: %{msg}"
+  fr: "Échec de la surface : %{msg}"
+  de: "Fläche fehlgeschlagen: %{msg}"
+"sketch.solid_created":
+  en: Watertight solid created (%{count} triangles)
+  it: Solido stagno creato (%{count} triangoli)
+  es: Sólido estanco creado (%{count} triángulos)
+  fr: Solide étanche créé (%{count} triangles)
+  de: Wasserdichter Körper erstellt (%{count} Dreiecke)
+"sketch.solid_open":
+  en: Solid created but not watertight (%{count} triangles)
+  it: Solido creato ma non stagno (%{count} triangoli)
+  es: Sólido creado pero no estanco (%{count} triángulos)
+  fr: Solide créé mais non étanche (%{count} triangles)
+  de: Körper erstellt, aber nicht wasserdicht (%{count} Dreiecke)
+"sketch.solid_failed":
+  en: Could not compose a solid from the selected surfaces
+  it: Impossibile comporre un solido dalle superfici selezionate
+  es: No se pudo componer un sólido con las superficies seleccionadas
+  fr: Impossible de composer un solide à partir des surfaces sélectionnées
+  de: Aus den gewählten Flächen ließ sich kein Körper bilden
+"sketch.profile_invalid":
+  en: "Invalid profile: %{msg}"
+  it: "Profilo non valido: %{msg}"
+  es: "Perfil no válido: %{msg}"
+  fr: "Profil non valide : %{msg}"
+  de: "Ungültiges Profil: %{msg}"
+"sketch.need_two_faces":
+  en: Select at least two surfaces to compose a solid
+  it: Seleziona almeno due superfici per comporre un solido
+  es: Selecciona al menos dos superficies para componer un sólido
+  fr: Sélectionnez au moins deux surfaces pour composer un solide
+  de: Mindestens zwei Flächen für einen Körper auswählen
+"sketch.bad_point_line":
+  en: "Line %{line}: expected x,y"
+  it: "Riga %{line}: atteso x,y"
+  es: "Línea %{line}: se esperaba x,y"
+  fr: "Ligne %{line} : x,y attendu"
+  de: "Zeile %{line}: x,y erwartet"
+"sketch.too_few_points":
+  en: Need at least two points
+  it: Servono almeno due punti
+  es: Se necesitan al menos dos puntos
+  fr: Au moins deux points sont nécessaires
+  de: Mindestens zwei Punkte erforderlich
