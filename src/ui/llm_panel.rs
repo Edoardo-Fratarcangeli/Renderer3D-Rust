@@ -597,13 +597,15 @@ impl LlmView {
                 .map(|a| a.back_glow_at(edge.to_layer, edge.to_node, now))
                 .unwrap_or(0.0);
 
-            let dim  = [0.10f32, 0.14, 0.26];
             let fwd_glow  = (gf + gt) * 0.5;
             let back_glow = (bf + bt) * 0.5;
+            // Passive dim base is darker for low-importance edges, brighter for high.
+            let base_dim = lerp3([0.03, 0.04, 0.09], [0.10, 0.14, 0.26], edge.importance);
+            let base_lit = lerp3(CYAN, WHITE, edge.importance * 0.5);
             let col = if back_glow > fwd_glow {
-                lerp3(dim, ORANGE, back_glow)
+                lerp3(lerp3(base_dim, ORANGE, edge.importance), ORANGE, back_glow)
             } else {
-                lerp3(dim, CYAN, fwd_glow)
+                lerp3(base_dim, base_lit, fwd_glow.max(edge.importance * 0.25))
             };
 
             let normal = [0.0f32, 0.0, 1.0];

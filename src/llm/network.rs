@@ -53,9 +53,11 @@ pub struct Layer {
 /// Sparse directed edge between two nodes across adjacent layers.
 pub struct Edge {
     pub from_layer: usize,
-    pub from_node: usize,
-    pub to_layer: usize,
-    pub to_node: usize,
+    pub from_node:  usize,
+    pub to_layer:   usize,
+    pub to_node:    usize,
+    /// Normalized connection importance ∈ [0, 1]; drives passive edge brightness.
+    pub importance: f32,
 }
 
 pub struct NetworkGraph {
@@ -100,13 +102,23 @@ impl NetworkGraph {
             let stride = (n_from / 40).max(1);
             for fi in (0..n_from).step_by(stride) {
                 let ti = (fi * n_to / n_from.max(1)).min(n_to.saturating_sub(1));
+                let w_from = self.layers[li].nodes[fi].weight_magnitude;
+                let w_to   = self.layers[li + 1].nodes[ti].weight_magnitude;
+                // Geometric mean of endpoint weights.
+                let importance = (w_from * w_to).sqrt();
                 self.edges.push(Edge {
                     from_layer: li,
-                    from_node: fi,
-                    to_layer: li + 1,
-                    to_node: ti,
+                    from_node:  fi,
+                    to_layer:   li + 1,
+                    to_node:    ti,
+                    importance,
                 });
             }
+        }
+        // Normalize importance to [0, 1].
+        let max_imp = self.edges.iter().map(|e| e.importance).fold(0.0f32, f32::max).max(1e-8);
+        for edge in &mut self.edges {
+            edge.importance /= max_imp;
         }
     }
 
