@@ -658,13 +658,20 @@ impl LlmView {
                 .weak(),
             );
 
+            // Collect layer data to avoid borrow conflicts with self.activation inside egui closure.
+            let layer_summaries: Vec<(String, LayerKind, usize, (f32, f32, f32))> = graph
+                .layers
+                .iter()
+                .map(|l| (l.name.clone(), l.kind, l.nodes.len(), layer_stats(l)))
+                .collect();
+
             egui::ScrollArea::vertical()
                 .id_source("llm_layer_scroll")
                 .max_height(120.0)
                 .show(ui, |ui| {
-                    for layer in &graph.layers {
-                        ui.horizontal(|ui| {
-                            let icon = match layer.kind {
+                    for (li, (name, kind, node_count, (wmin, wmax, wmean))) in layer_summaries.iter().enumerate() {
+                        let row_resp = ui.horizontal(|ui| {
+                            let icon = match kind {
                                 LayerKind::Embedding   => "📥",
                                 LayerKind::Attention   => "👁",
                                 LayerKind::FeedForward => "⚡",
@@ -672,15 +679,27 @@ impl LlmView {
                                 LayerKind::Output      => "📤",
                             };
                             ui.label(icon);
-                            ui.label(&layer.name);
+                            ui.label(name.as_str());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(
                                     egui::RichText::new(format!(
-                                        "{} {}", layer.nodes.len(), t!("llm.nodes")
+                                        "{node_count} {}", t!("llm.nodes")
                                     ))
                                     .weak(),
                                 );
                             });
+                        }).response;
+                        row_resp.on_hover_ui(|ui| {
+                            ui.label(format!("Nodes: {node_count}"));
+                            ui.label(format!("Weight  min {wmin:.3} · mean {wmean:.3} · max {wmax:.3}"));
+                            if let Some(anim) = &self.activation {
+                                let now = Instant::now();
+                                let mean_glow: f32 = (0..*node_count)
+                                    .map(|ni| anim.glow_at(li, ni, now))
+                                    .sum::<f32>()
+                                    / (*node_count).max(1) as f32;
+                                ui.label(format!("Activation: {:.1} %", mean_glow * 100.0));
+                            }
                         });
                     }
                 });
@@ -888,4 +907,21 @@ fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
         a[1] + (b[1] - a[1]) * t,
         a[2] + (b[2] - a[2]) * t,
     ]
+}
+
+/// Returns (min, max, mean) of weight_magnitude across all nodes in a layer.
+fn layer_stats(layer: &crate::llm::network::Layer) -> (f32, f32, f32) {
+    if layer.nodes.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let mut min = f32::MAX;
+    let mut max = 0.0f32;
+    let mut sum = 0.0f32;
+    for node in &layer.nodes {
+        let w = node.weight_magnitude;
+        if w < min { min = w; }
+        if w > max { max = w; }
+        sum += w;
+    }
+    (min, max, sum / layer.nodes.len() as f32)
 }
