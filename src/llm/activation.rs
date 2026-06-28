@@ -85,7 +85,7 @@ impl ActivationState {
 
     fn build(graph: &NetworkGraph, tokens: &[u32], mode: ActivationMode) -> Self {
         let n_tokens = tokens.len().max(1);
-        let values = graph
+        let mut values: Vec<Vec<f32>> = graph
             .layers
             .iter()
             .enumerate()
@@ -96,6 +96,7 @@ impl ActivationState {
                     LayerKind::FeedForward => 1.00,
                     LayerKind::LayerNorm   => 0.75,
                     LayerKind::Output      => 1.10,
+                    LayerKind::Expert      => 1.00,
                 };
                 layer
                     .nodes
@@ -119,6 +120,42 @@ impl ActivationState {
                     .collect()
             })
             .collect();
+
+        // MoE gating: silence inactive experts, keeping only top-k per block.
+        if let Some(moe) = graph.moe_config {
+            let k = moe.experts_per_token.min(moe.n_experts);
+            let token_sum: u32 = tokens.iter().copied().fold(0, u32::wrapping_add);
+            let mut expert_block = 0usize;
+            let mut i = 0usize;
+            while i < graph.layers.len() {
+                if graph.layers[i].kind == LayerKind::Expert {
+                    let block_start = i;
+                    while i < graph.layers.len() && graph.layers[i].kind == LayerKind::Expert {
+                        i += 1;
+                    }
+                    let block_end = i;
+                    let n_in_block = block_end - block_start;
+                    let seed = token_sum.wrapping_add(expert_block as u32 * 2_654_435_761);
+                    // Deterministic selection: pick k indices from 0..n_in_block.
+                    let selected: std::collections::HashSet<usize> = (0..k)
+                        .map(|j| (seed.wrapping_add(j as u32) as usize) % n_in_block)
+                        .collect();
+                    for e in 0..n_in_block {
+                        if !selected.contains(&e) {
+                            let li = block_start + e;
+                            if let Some(layer_vals) = values.get_mut(li) {
+                                for v in layer_vals.iter_mut() {
+                                    *v = 0.0;
+                                }
+                            }
+                        }
+                    }
+                    expert_block += 1;
+                } else {
+                    i += 1;
+                }
+            }
+        }
 
         let duration = WAVE_DURATION_SECS * (1.0 + graph.layers.len() as f32 * 0.04);
 
@@ -223,6 +260,7 @@ mod tests {
             ],
             edges: vec![],
             estimated_vram_gb: None,
+            moe_config: None,
         };
         g.layout();
         g

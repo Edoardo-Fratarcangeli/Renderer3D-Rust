@@ -41,6 +41,8 @@ const CYAN:   [f32; 3] = [0.00, 0.65, 1.00];
 const WHITE:  [f32; 3] = [1.00, 0.95, 0.85];
 const ORANGE: [f32; 3] = [1.00, 0.55, 0.05];
 const YELLOW: [f32; 3] = [1.00, 0.90, 0.30];
+#[allow(dead_code)]
+const PURPLE: [f32; 3] = [0.55, 0.20, 0.70];
 
 // ─── Public action type ───────────────────────────────────────────────────────
 
@@ -185,7 +187,7 @@ impl LlmView {
             return true;
         }
         // Show one "set" of layers per stride window.
-        // Each transformer block = 3 layers (Attn, LN, FFN). Show block 0, stride, 2*stride, …
+        // Each transformer block = 3+ layers (Attn, LN, FFN/Experts). Show block 0, stride, 2*stride, …
         layer_idx % (self.compact_stride * 3) < 3
     }
 
@@ -759,6 +761,7 @@ impl LlmView {
                                 LayerKind::FeedForward => "⚡",
                                 LayerKind::LayerNorm   => "📐",
                                 LayerKind::Output      => "📤",
+                                LayerKind::Expert      => "🔷",
                             };
                             ui.label(icon);
                             ui.label(name.as_str());

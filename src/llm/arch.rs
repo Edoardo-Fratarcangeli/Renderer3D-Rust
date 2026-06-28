@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use crate::llm::network::{Layer, LayerKind, Node, MAX_NODES_PER_LAYER};
+use crate::llm::network::{Layer, LayerKind, MoeConfig, Node, MAX_NODES_PER_LAYER};
 
 // ─── Family detection ─────────────────────────────────────────────────────────
 
@@ -52,6 +52,10 @@ pub struct ArchSpec {
     /// Equals `n_heads` for standard Multi-Head Attention.
     pub n_kv_heads: usize,
     pub ffn_size: usize,
+    /// Number of MoE experts; 0 = no MoE (standard dense FFN).
+    pub n_experts: usize,
+    /// How many experts activate per forward step (0 if no MoE).
+    pub experts_per_token: usize,
 }
 
 impl ArchSpec {
@@ -87,7 +91,15 @@ impl ArchSpec {
         } else {
             ffn_raw
         };
-        Self { family, n_layers, hidden_size, n_heads, n_kv_heads, ffn_size }
+        let n_experts = get("expert_count");
+        let experts_per_token = if get("expert_used_count") > 0 {
+            get("expert_used_count")
+        } else if n_experts > 0 {
+            2
+        } else {
+            0
+        };
+        Self { family, n_layers, hidden_size, n_heads, n_kv_heads, ffn_size, n_experts, experts_per_token }
     }
 
     /// Canonical default sizes for each well-known family (7 B-class models).
@@ -112,6 +124,8 @@ impl ArchSpec {
             n_heads: heads,
             n_kv_heads: kv,
             ffn_size: hidden * ffn_r,
+            n_experts: 0,
+            experts_per_token: 0,
         }
     }
 }
@@ -150,12 +164,12 @@ pub fn estimate_vram_gb(spec: &ArchSpec) -> f64 {
 /// Each transformer block produces three layers:
 ///  1. Attention (GQA-aware node sizing)
 ///  2. Layer-norm (thin representation)
-///  3. Feed-forward
+///  3. Feed-forward (or N expert layers for MoE models)
 ///
 /// All layers are capped at [`MAX_NODES_PER_LAYER`] nodes.
 ///
-/// Returns `(layers, estimated_fp16_vram_gb)`.
-pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64) {
+/// Returns `(layers, estimated_fp16_vram_gb, moe_config)`.
+pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64, Option<MoeConfig>) {
     let mut layers = Vec::with_capacity(2 + spec.n_layers * 3);
 
     layers.push(Layer {
@@ -176,11 +190,21 @@ pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64) {
             kind: LayerKind::LayerNorm,
             nodes: uniform_nodes(ln_n, 0.40),
         });
-        layers.push(Layer {
-            name: format!("Block {i} · FFN"),
-            kind: LayerKind::FeedForward,
-            nodes: uniform_nodes(spec.ffn_size.min(MAX_NODES_PER_LAYER), 0.50),
-        });
+        if spec.n_experts > 1 {
+            for e in 0..spec.n_experts {
+                layers.push(Layer {
+                    name: format!("Block {i} · Expert {e}"),
+                    kind: LayerKind::Expert,
+                    nodes: uniform_nodes(spec.ffn_size.min(MAX_NODES_PER_LAYER), 0.50),
+                });
+            }
+        } else {
+            layers.push(Layer {
+                name: format!("Block {i} · FFN"),
+                kind: LayerKind::FeedForward,
+                nodes: uniform_nodes(spec.ffn_size.min(MAX_NODES_PER_LAYER), 0.50),
+            });
+        }
     }
 
     layers.push(Layer {
@@ -189,7 +213,16 @@ pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64) {
         nodes: uniform_nodes(spec.hidden_size.min(MAX_NODES_PER_LAYER), 0.55),
     });
 
-    (layers, estimate_vram_gb(spec))
+    let moe_config = if spec.n_experts > 1 {
+        Some(MoeConfig {
+            n_experts: spec.n_experts,
+            experts_per_token: spec.experts_per_token,
+        })
+    } else {
+        None
+    };
+
+    (layers, estimate_vram_gb(spec), moe_config)
 }
 
 /// GQA-aware attention node list.
@@ -245,6 +278,8 @@ mod tests {
             n_heads: 32,
             n_kv_heads: 8,
             ffn_size: 14336,
+            n_experts: 0,
+            experts_per_token: 0,
         };
         let nodes = attn_nodes(&spec);
         assert_eq!(nodes.len(), 32);
@@ -265,7 +300,7 @@ mod tests {
     fn build_layers_produces_correct_count() {
         let spec = ArchSpec::default_for(ArchFamily::Gpt2);
         // 1 embedding + n_layers * 3 (attn+ln+ffn) + 1 output
-        let (layers, _vram) = build_layers(&spec);
+        let (layers, _vram, _moe) = build_layers(&spec);
         assert_eq!(layers.len(), 2 + spec.n_layers * 3);
     }
 }

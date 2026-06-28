@@ -22,6 +22,8 @@ pub enum LayerKind {
     FeedForward,
     LayerNorm,
     Output,
+    /// MoE expert FFN — only a subset activate per token.
+    Expert,
 }
 
 impl LayerKind {
@@ -33,8 +35,16 @@ impl LayerKind {
             LayerKind::FeedForward => [0.45, 0.25, 0.65],
             LayerKind::LayerNorm   => [0.55, 0.55, 0.35],
             LayerKind::Output      => [0.75, 0.35, 0.25],
+            LayerKind::Expert      => [0.55, 0.20, 0.70],
         }
     }
+}
+
+/// Configuration for Mixture-of-Experts models.
+#[derive(Debug, Clone, Copy)]
+pub struct MoeConfig {
+    pub n_experts: usize,
+    pub experts_per_token: usize,
 }
 
 #[derive(Clone)]
@@ -66,6 +76,8 @@ pub struct NetworkGraph {
     pub edges: Vec<Edge>,
     /// Estimated FP16 VRAM in GB from architecture metadata; None if not known.
     pub estimated_vram_gb: Option<f64>,
+    /// MoE configuration if the model uses Mixture of Experts.
+    pub moe_config: Option<MoeConfig>,
 }
 
 impl NetworkGraph {
