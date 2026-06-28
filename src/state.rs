@@ -150,6 +150,11 @@ pub struct State {
     pub sketch_view: crate::ui::sketch_panel::SketchView,
     geometry_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
 
+    // LLM / SLM parameter visualizer
+    pub llm_view: crate::ui::llm_panel::LlmView,
+    llm_node_batch: Option<(wgpu::Buffer, u32)>,
+    llm_edge_buf: Option<(wgpu::Buffer, u32)>,
+
     // Imported 3D solid models (STL/OBJ/glTF), keyed by scene-object id.
     pub custom_meshes: std::collections::HashMap<usize, CustomMesh>,
     mesh_worker: Option<std::sync::mpsc::Receiver<Result<(crate::mesh::MeshData, String), String>>>,
@@ -497,6 +502,9 @@ impl State {
             custom_meshes: std::collections::HashMap::new(),
             mesh_worker: None,
             sphere_lod_mesh,
+            llm_view: crate::ui::llm_panel::LlmView::new(),
+            llm_node_batch: None,
+            llm_edge_buf: None,
         }
     }
 
@@ -1105,9 +1113,12 @@ impl State {
         let mut action_confirm_edit = false;
         let mut dataset_action = crate::ui::DatasetAction::None;
         let mut geometry_focus: Option<[f32; 3]> = None;
+        let mut llm_action = crate::ui::llm_panel::LlmAction::None;
         // Bottom-list actions for the imported dataset entry.
         let mut dataset_focus: Option<[f32; 3]> = None;
         let mut remove_dataset = false;
+        let mut llm_focus: Option<[f32; 3]> = None;
+        let mut remove_llm = false;
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             // Because we can't easily borrow fields disjointly multiple times in complex closure,
@@ -1137,6 +1148,9 @@ impl State {
                         }
                         if ui.button(t!("toolbar.sketch").to_string()).clicked() {
                             self.sketch_view.show_window = !self.sketch_view.show_window;
+                        }
+                        if ui.button(t!("toolbar.llm").to_string()).clicked() {
+                            self.llm_view.show_window = !self.llm_view.show_window;
                         }
                         // Measurement tool toggle. While active, clicking two
                         // surface points reports the distance between them.
@@ -1192,6 +1206,8 @@ impl State {
             geometry_focus = self.geometry_view.show(ctx);
             // Sketch & solid composer window
             self.sketch_view.show(ctx);
+            // LLM / SLM parameter visualizer window
+            llm_action = self.llm_view.show(ctx);
 
             // Top Right Panel: Settings
             egui::Window::new(t!("settings.window_title").to_string())
@@ -1555,6 +1571,66 @@ impl State {
                                                             &t!("list.visibility"),
                                                         ) {
                                                             self.dataset_view.set_visible(!visible);
+                                                        }
+                                                    },
+                                                );
+                                            });
+                                        }
+
+                                        // --- LLM / SLM graph ---
+                                        if let Some(graph) = &self.llm_view.graph {
+                                            let llm_name = graph.name.clone();
+                                            let n_layers = graph.layers.len();
+                                            let n_nodes  = graph.node_count();
+                                            let llm_vis  = self.llm_view.visible;
+                                            let llm_cen  = self.llm_view.centroid();
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!("🧠 {llm_name}"))
+                                                        .strong()
+                                                        .size(14.0),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "({n_layers} {} · {n_nodes} {})",
+                                                        t!("llm.layers"),
+                                                        t!("llm.nodes"),
+                                                    ))
+                                                    .weak(),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        if list_icon_button(
+                                                            ui,
+                                                            "🗑",
+                                                            egui::Color32::from_rgb(255, 100, 100),
+                                                            &t!("list.remove_llm"),
+                                                        ) {
+                                                            remove_llm = true;
+                                                        }
+                                                        if let Some(c) = llm_cen {
+                                                            if list_icon_button(
+                                                                ui,
+                                                                "🎯",
+                                                                ui.visuals().text_color(),
+                                                                &t!("list.focus_llm"),
+                                                            ) {
+                                                                llm_focus = Some(c);
+                                                            }
+                                                        }
+                                                        let (vis_icon, vis_color) = if llm_vis {
+                                                            ("👁", egui::Color32::from_rgb(100, 255, 100))
+                                                        } else {
+                                                            ("🕶", egui::Color32::from_rgb(255, 100, 100))
+                                                        };
+                                                        if list_icon_button(
+                                                            ui,
+                                                            vis_icon,
+                                                            vis_color,
+                                                            &t!("list.visibility"),
+                                                        ) {
+                                                            self.llm_view.set_visible(!llm_vis);
                                                         }
                                                     },
                                                 );
@@ -2095,11 +2171,22 @@ impl State {
         if let Some(p) = geometry_focus {
             self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
         }
+        if let crate::ui::llm_panel::LlmAction::FocusGraph(p) = llm_action {
+            self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
         if let Some(p) = dataset_focus {
+            self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
+        }
+        if let Some(p) = llm_focus {
             self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
         }
         if remove_dataset {
             self.dataset_view.clear_dataset();
+        }
+        if remove_llm {
+            self.llm_view.clear();
+            self.llm_node_batch = None;
+            self.llm_edge_buf   = None;
         }
 
         // Kick off a 3D-model import requested from the Solids window.
@@ -2153,6 +2240,32 @@ impl State {
                     buffer,
                     batch.instances.len() as u32,
                 ));
+            }
+        }
+
+        // Rebuild LLM node / edge buffers every frame during animation, or once
+        // on any structural change (load, clear, visibility toggle).
+        if self.llm_view.take_render_dirty() {
+            let data = self.llm_view.build_render_data();
+            if data.node_instances.is_empty() {
+                self.llm_node_batch = None;
+            } else {
+                let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("LLM Node Instance Buffer"),
+                    contents: bytemuck::cast_slice(&data.node_instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                self.llm_node_batch = Some((buf, data.node_instances.len() as u32));
+            }
+            if data.edge_vertices.is_empty() {
+                self.llm_edge_buf = None;
+            } else {
+                let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("LLM Edge Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&data.edge_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                self.llm_edge_buf = Some((buf, data.edge_vertices.len() as u32));
             }
         }
 
@@ -2456,6 +2569,26 @@ impl State {
                     0,
                     0..normal_arrows.len() as u32,
                 );
+            }
+
+            // Draw LLM edges (line-list; vertices are already in world space)
+            if let Some((edge_buf, edge_count)) = &self.llm_edge_buf {
+                render_pass.set_pipeline(&self.line_pipeline);
+                render_pass.set_vertex_buffer(0, edge_buf.slice(..));
+                render_pass.set_vertex_buffer(1, single_instance_buffer.slice(..));
+                render_pass.draw(0..*edge_count, 0..1);
+            }
+
+            // Draw LLM node spheres (triangle pipeline, instanced, low-poly LOD)
+            if let Some((node_buf, node_count)) = &self.llm_node_batch {
+                render_pass.set_pipeline(&self.render_pipeline);
+                render_pass.set_vertex_buffer(0, self.sphere_lod_mesh.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, node_buf.slice(..));
+                render_pass.set_index_buffer(
+                    self.sphere_lod_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                render_pass.draw_indexed(0..self.sphere_lod_mesh.num_indices, 0, 0..*node_count);
             }
 
             // Render UI

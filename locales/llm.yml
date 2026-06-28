@@ -1,0 +1,150 @@
+# LLM / SLM parameter visualizer translations (rust-i18n combined format).
+# _version: 2 format – one entry per key, languages nested below.
+_version: 2
+
+"toolbar.llm":
+  en: "🧠 LLM"
+  it: "🧠 LLM"
+  es: "🧠 LLM"
+  fr: "🧠 LLM"
+  de: "🧠 LLM"
+
+"list.remove_llm":
+  en: Remove LLM graph
+  it: Rimuovi grafo LLM
+  es: Eliminar grafo LLM
+  fr: Supprimer le graphe LLM
+  de: LLM-Graph entfernen
+
+"list.focus_llm":
+  en: Focus LLM graph
+  it: Centra sul grafo LLM
+  es: Enfocar grafo LLM
+  fr: Centrer sur le graphe LLM
+  de: LLM-Graph fokussieren
+
+"llm.window_title":
+  en: LLM / SLM Visualizer
+  it: Visualizzatore LLM / SLM
+  es: Visualizador LLM / SLM
+  fr: Visualiseur LLM / SLM
+  de: LLM / SLM Visualizer
+
+"llm.heading_import":
+  en: Import Model
+  it: Importa modello
+  es: Importar modelo
+  fr: Importer le modèle
+  de: Modell importieren
+
+"llm.import_hint":
+  en: "Load a .gguf or .json model file to visualize its parameter network."
+  it: "Carica un file .gguf o .json per visualizzare la rete dei parametri."
+  es: "Carga un archivo .gguf o .json para visualizar la red de parámetros."
+  fr: "Chargez un fichier .gguf ou .json pour visualiser le réseau de paramètres."
+  de: "Lade eine .gguf- oder .json-Datei, um das Parameternetzwerk zu visualisieren."
+
+"llm.btn_load":
+  en: Load
+  it: Carica
+  es: Cargar
+  fr: Charger
+  de: Laden
+
+"llm.err_not_found":
+  en: File not found
+  it: File non trovato
+  es: Archivo no encontrado
+  fr: Fichier introuvable
+  de: Datei nicht gefunden
+
+"llm.btn_clear":
+  en: Clear
+  it: Cancella
+  es: Limpiar
+  fr: Effacer
+  de: Löschen
+
+"llm.btn_focus":
+  en: Focus
+  it: Centra
+  es: Enfocar
+  fr: Centrer
+  de: Fokussieren
+
+"llm.layers":
+  en: layers
+  it: livelli
+  es: capas
+  fr: couches
+  de: Schichten
+
+"llm.nodes":
+  en: nodes
+  it: nodi
+  es: nodos
+  fr: nœuds
+  de: Knoten
+
+"llm.edges":
+  en: edges
+  it: connessioni
+  es: conexiones
+  fr: connexions
+  de: Kanten
+
+"llm.heading_prompt":
+  en: Inject Prompt
+  it: Inietta prompt
+  es: Inyectar prompt
+  fr: Injecter un prompt
+  de: Prompt einschleusen
+
+"llm.prompt_hint":
+  en: Type a prompt to inject into the network and watch the activation wave…
+  it: Digita un prompt da iniettare nella rete e osserva l'onda di attivazione…
+  es: Escribe un prompt para inyectarlo en la red y observa la onda de activación…
+  fr: Saisissez un prompt à injecter dans le réseau et observez l'onde d'activation…
+  de: Gib einen Prompt ein, um ihn ins Netzwerk einzuschleusen und die Aktivierungswelle zu beobachten…
+
+"llm.btn_inject":
+  en: Inject
+  it: Inietta
+  es: Inyectar
+  fr: Injecter
+  de: Einschleusen
+
+"llm.btn_clear_anim":
+  en: Clear animation
+  it: Cancella animazione
+  es: Limpiar animación
+  fr: Effacer l'animation
+  de: Animation löschen
+
+"llm.propagating":
+  en: Propagating…
+  it: Propagazione…
+  es: Propagando…
+  fr: Propagation…
+  de: Propagiert…
+
+"llm.activated":
+  en: Activated
+  it: Attivato
+  es: Activado
+  fr: Activé
+  de: Aktiviert
+
+"llm.node_scale":
+  en: Node scale
+  it: Scala nodi
+  es: Escala de nodos
+  fr: Échelle des nœuds
+  de: Knotengröße
+
+"llm.no_model_hint":
+  en: Load a model above to enable prompt injection.
+  it: Carica un modello per abilitare l'iniezione del prompt.
+  es: Carga un modelo para habilitar la inyección del prompt.
+  fr: Chargez un modèle pour activer l'injection de prompt.
+  de: Lade ein Modell, um die Prompt-Einschleusung zu aktivieren.

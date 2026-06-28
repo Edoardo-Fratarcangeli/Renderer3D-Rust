@@ -63,9 +63,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     var result = mixed_color * diffuse_strength;
 
-    // Selection Highlight (Emission-like)
-    if (in.instance_alpha > 1.5) {
+    // Selection Highlight (Emission-like) – only for selected scene objects
+    if (in.instance_alpha > 1.5 && in.instance_alpha < 2.5) {
         result = result + vec3<f32>(0.2, 0.2, 0.05); // Subtle Golden Glow
+    }
+
+    // LLM / SLM activation glow: alpha ∈ [3.0, 4.0]; intensity = alpha - 3.0
+    if (in.instance_alpha >= 3.0) {
+        let intensity = clamp(in.instance_alpha - 3.0, 0.0, 1.0);
+        let cyan  = vec3<f32>(0.0, 0.65, 1.0);
+        let white = vec3<f32>(1.0, 0.95, 0.85);
+        let glow_color = mix(cyan, white, intensity * intensity);
+        result = result + glow_color * intensity * 1.8;
     }
 
     return vec4<f32>(result, 1.0);

@@ -14,6 +14,7 @@ pub mod camera;
 pub mod dataset;
 pub mod geometry;
 pub mod i18n;
+pub mod llm;
 pub mod mesh;
 pub mod model;
 pub mod primitives;
