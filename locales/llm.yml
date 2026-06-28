@@ -274,3 +274,17 @@ _version: 2
   es: paso
   fr: pas
   de: Schritt
+
+"llm.export_heading":
+  en: Export Animation
+  it: Esporta animazione
+  es: Exportar animación
+  fr: Exporter l'animation
+  de: Animation exportieren
+
+"llm.btn_record":
+  en: "⏺ Record"
+  it: "⏺ Registra"
+  es: "⏺ Grabar"
+  fr: "⏺ Enregistrer"
+  de: "⏺ Aufnehmen"

@@ -14,6 +14,7 @@
 
 pub mod activation;
 pub mod arch;
+pub mod exporter;
 pub mod loader;
 pub mod network;
 pub mod ollama;

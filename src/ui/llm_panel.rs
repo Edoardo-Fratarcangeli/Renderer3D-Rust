@@ -27,6 +27,7 @@ use std::time::Instant;
 use cgmath::Matrix4;
 
 use crate::llm::activation::{ActivationMode, ActivationState};
+use crate::llm::exporter::AnimExporter;
 use crate::llm::loader;
 use crate::llm::network::{LayerKind, NetworkGraph, NODE_BASE_SCALE, NODE_MAX_SCALE};
 use crate::llm::ollama::{self, OllamaEvent, OllamaModel};
@@ -118,6 +119,12 @@ pub struct LlmView {
     compact_view: bool,
     /// How many blocks to skip per stride window in compact mode.
     compact_stride: usize,
+    /// Animation frame exporter.
+    pub exporter: AnimExporter,
+    /// File path for the exported animation JSON.
+    export_path: String,
+    /// Status message from the last export operation.
+    export_status: Option<StatusMessage>,
 }
 
 impl Default for LlmView {
@@ -156,6 +163,9 @@ impl LlmView {
             training_step: 0,
             compact_view: false,
             compact_stride: 4,
+            exporter: AnimExporter::new(),
+            export_path: String::new(),
+            export_status: None,
         }
     }
 
@@ -167,6 +177,10 @@ impl LlmView {
                 if anim.is_finished(Instant::now()) {
                     self.animation_active = false;
                     self.render_dirty = true;
+                    // Auto-stop exporter when animation ends.
+                    if self.exporter.active {
+                        self.exporter.stop();
+                    }
                 }
             } else {
                 self.animation_active = false;
@@ -512,6 +526,8 @@ impl LlmView {
         self.tokens_since_wave = 0;
         self.loss_history.clear();
         self.training_step = 0;
+        self.exporter.stop();
+        self.export_status = None;
         self.visible = false;
         self.render_dirty = true;
         self.status = None;
@@ -530,7 +546,7 @@ impl LlmView {
 
     // ── GPU render data ─────────────────────────────────────────────────────
 
-    pub fn build_render_data(&self) -> LlmRenderData {
+    pub fn build_render_data(&mut self) -> LlmRenderData {
         if !self.visible {
             return LlmRenderData { node_instances: vec![], edge_vertices: vec![] };
         }
@@ -575,6 +591,25 @@ impl LlmView {
                     color: [r, g, b, alpha],
                 });
             }
+        }
+
+        // Capture animation frame for export if recording.
+        if self.exporter.active {
+            let layer_fwd: Vec<Vec<f32>> = graph.layers.iter().enumerate()
+                .map(|(li, layer)| {
+                    layer.nodes.iter().enumerate()
+                        .map(|(ni, _)| self.activation.as_ref().map_or(0.0, |a| a.glow_at(li, ni, now)))
+                        .collect()
+                })
+                .collect();
+            let layer_bwd: Vec<Vec<f32>> = graph.layers.iter().enumerate()
+                .map(|(li, layer)| {
+                    layer.nodes.iter().enumerate()
+                        .map(|(ni, _)| self.activation.as_ref().map_or(0.0, |a| a.back_glow_at(li, ni, now)))
+                        .collect()
+                })
+                .collect();
+            self.exporter.capture(&layer_fwd, &layer_bwd);
         }
 
         let mut edge_vertices = Vec::new();
@@ -895,6 +930,45 @@ impl LlmView {
                     egui::FontId::proportional(10.0),
                     egui::Color32::from_rgb(255, 210, 100),
                 );
+            }
+        }
+
+        // Export animation UI
+        if has_model {
+            ui.separator();
+            ui.heading(t!("llm.export_heading").to_string());
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.export_path)
+                        .hint_text("animation.json")
+                        .desired_width(240.0),
+                );
+                let recording = self.exporter.active;
+                let btn_label = if recording {
+                    format!("⏹ Stop ({} frames)", self.exporter.frame_count())
+                } else {
+                    t!("llm.btn_record").to_string()
+                };
+                if ui.button(&btn_label).clicked() {
+                    if recording {
+                        self.exporter.stop();
+                        // Auto-export on stop.
+                        if !self.export_path.is_empty() {
+                            match self.exporter.export_json(&self.export_path) {
+                                Ok(n) => self.export_status = Some(StatusMessage::success(
+                                    format!("Exported {n} frames → {}", self.export_path)
+                                )),
+                                Err(e) => self.export_status = Some(StatusMessage::error(e.to_string())),
+                            }
+                        }
+                    } else {
+                        self.exporter.start();
+                        self.export_status = Some(StatusMessage::info("Recording…".to_owned()));
+                    }
+                }
+            });
+            if let Some(s) = &self.export_status.clone() {
+                s.show(ui);
             }
         }
 
