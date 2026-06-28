@@ -670,6 +670,17 @@ impl LlmView {
                 .max_height(120.0)
                 .show(ui, |ui| {
                     for (li, (name, kind, node_count, (wmin, wmax, wmean))) in layer_summaries.iter().enumerate() {
+                        // Compute mean_glow for this layer once per row (reused for bar and label).
+                        let mean_glow: f32 = if self.animation_active {
+                            let now = Instant::now();
+                            (0..*node_count)
+                                .map(|ni| self.activation.as_ref().map_or(0.0, |a| a.glow_at(li, ni, now)))
+                                .sum::<f32>()
+                                / (*node_count).max(1) as f32
+                        } else {
+                            0.0
+                        };
+
                         let row_resp = ui.horizontal(|ui| {
                             let icon = match kind {
                                 LayerKind::Embedding   => "📥",
@@ -680,6 +691,16 @@ impl LlmView {
                             };
                             ui.label(icon);
                             ui.label(name.as_str());
+                            ui.add(
+                                egui::ProgressBar::new(*wmean)
+                                    .desired_width(50.0),
+                            );
+                            if self.animation_active && mean_glow > 0.005 {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(0, 180, 230),
+                                    format!("{:.0}%", mean_glow * 100.0),
+                                );
+                            }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(
                                     egui::RichText::new(format!(
