@@ -100,11 +100,12 @@ pub fn load_model_graph(model_name: &str) -> Result<(NetworkGraph, Option<Tokeni
         ArchSpec::default_for(family)
     };
 
-    let layers = crate::llm::arch::build_layers(&spec);
+    let (layers, vram_gb) = crate::llm::arch::build_layers(&spec);
     let mut graph = NetworkGraph {
         name:   format!("{model_name} (Ollama)"),
         layers,
         edges:  vec![],
+        estimated_vram_gb: Some(vram_gb),
     };
     graph.layout();
     Ok((graph, None))

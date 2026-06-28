@@ -62,6 +62,8 @@ pub struct NetworkGraph {
     pub name: String,
     pub layers: Vec<Layer>,
     pub edges: Vec<Edge>,
+    /// Estimated FP16 VRAM in GB from architecture metadata; None if not known.
+    pub estimated_vram_gb: Option<f64>,
 }
 
 impl NetworkGraph {

@@ -91,7 +91,7 @@ pub fn from_json(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
         })
         .collect();
 
-    let mut graph = NetworkGraph { name: model.name, layers, edges: vec![] };
+    let mut graph = NetworkGraph { name: model.name, layers, edges: vec![], estimated_vram_gb: None };
     graph.layout();
     Ok((graph, tokenizer))
 }
@@ -174,9 +174,9 @@ pub fn from_gguf(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
 
     let family = ArchFamily::detect(&arch, &name);
     let spec   = ArchSpec::from_metadata(family, &arch, &numeric_meta);
-    let layers = crate::llm::arch::build_layers(&spec);
+    let (layers, vram_gb) = crate::llm::arch::build_layers(&spec);
 
-    let mut graph = NetworkGraph { name, layers, edges: vec![] };
+    let mut graph = NetworkGraph { name, layers, edges: vec![], estimated_vram_gb: Some(vram_gb) };
     graph.layout();
     Ok((graph, tokenizer))
 }

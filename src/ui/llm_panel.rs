@@ -635,6 +635,9 @@ impl LlmView {
         if let Some(graph) = &self.graph {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(&graph.name).strong().size(15.0));
+                if let Some(gb) = graph.estimated_vram_gb {
+                    ui.label(egui::RichText::new(format!("~{gb:.1} GB FP16")).weak().small());
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(t!("llm.btn_clear").to_string()).clicked() {
                         do_clear = true;

@@ -123,6 +123,26 @@ fn default_ffn_ratio(family: ArchFamily) -> usize {
     }
 }
 
+// ─── VRAM estimate ────────────────────────────────────────────────────────────
+
+/// Rough FP16 VRAM estimate in GB.
+///
+/// Formula: embedding + n_layers × (attn QKV+O + FFN gate/up/down + norms) × 2 bytes.
+/// Vocabulary approximated to 32 000 tokens if unknown.
+pub fn estimate_vram_gb(spec: &ArchSpec) -> f64 {
+    let h   = spec.hidden_size as u64;
+    let n   = spec.n_layers    as u64;
+    let ff  = spec.ffn_size    as u64;
+    let kv_dim = (h / spec.n_heads.max(1) as u64) * spec.n_kv_heads as u64;
+    let vocab: u64 = 32_000;
+    let embedding  = vocab * h * 2;                          // token embed + lm head
+    let attn       = (h * h + 2 * h * kv_dim + h * h) * 2; // Q,K,V,O proj
+    let ffn_block  = (h * ff + ff * h + h * ff) * 2;        // gate, up, down
+    let ln         = h * 4;                                  // 2 norms × 2 bytes
+    let per_block  = attn + ffn_block + ln;
+    (embedding + n * per_block) as f64 / 1_073_741_824.0    // bytes → GB
+}
+
 // ─── Layer builder ────────────────────────────────────────────────────────────
 
 /// Build a visualization [`Vec<Layer>`] from an [`ArchSpec`].
@@ -133,7 +153,9 @@ fn default_ffn_ratio(family: ArchFamily) -> usize {
 ///  3. Feed-forward
 ///
 /// All layers are capped at [`MAX_NODES_PER_LAYER`] nodes.
-pub fn build_layers(spec: &ArchSpec) -> Vec<Layer> {
+///
+/// Returns `(layers, estimated_fp16_vram_gb)`.
+pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64) {
     let mut layers = Vec::with_capacity(2 + spec.n_layers * 3);
 
     layers.push(Layer {
@@ -167,7 +189,7 @@ pub fn build_layers(spec: &ArchSpec) -> Vec<Layer> {
         nodes: uniform_nodes(spec.hidden_size.min(MAX_NODES_PER_LAYER), 0.55),
     });
 
-    layers
+    (layers, estimate_vram_gb(spec))
 }
 
 /// GQA-aware attention node list.
@@ -243,7 +265,7 @@ mod tests {
     fn build_layers_produces_correct_count() {
         let spec = ArchSpec::default_for(ArchFamily::Gpt2);
         // 1 embedding + n_layers * 3 (attn+ln+ffn) + 1 output
-        let layers = build_layers(&spec);
+        let (layers, _vram) = build_layers(&spec);
         assert_eq!(layers.len(), 2 + spec.n_layers * 3);
     }
 }

@@ -213,6 +213,7 @@ mod tests {
                 make(LayerKind::Output, 4),
             ],
             edges: vec![],
+            estimated_vram_gb: None,
         };
         g.layout();
         g
