@@ -260,3 +260,17 @@ _version: 2
   es: Pérdida de entrenamiento
   fr: Perte d'entraînement
   de: Trainings-Loss
+
+"llm.compact_view":
+  en: Compact view
+  it: Vista compatta
+  es: Vista compacta
+  fr: Vue compacte
+  de: Kompaktansicht
+
+"llm.compact_stride":
+  en: stride
+  it: passo
+  es: paso
+  fr: pas
+  de: Schritt

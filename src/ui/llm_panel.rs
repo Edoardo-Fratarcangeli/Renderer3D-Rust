@@ -112,6 +112,10 @@ pub struct LlmView {
     loss_history: Vec<f32>,
     /// Count of training steps taken since model loaded.
     training_step: u32,
+    /// When true, skip every N-1 transformer blocks in 3D render.
+    compact_view: bool,
+    /// How many blocks to skip per stride window in compact mode.
+    compact_stride: usize,
 }
 
 impl Default for LlmView {
@@ -148,6 +152,8 @@ impl LlmView {
             tokens_since_wave: 0,
             loss_history: Vec::new(),
             training_step: 0,
+            compact_view: false,
+            compact_stride: 4,
         }
     }
 
@@ -169,6 +175,19 @@ impl LlmView {
     }
 
     pub fn mark_dirty(&mut self) { self.render_dirty = true; }
+
+    fn is_layer_visible(&self, layer_idx: usize, kind: LayerKind) -> bool {
+        if !self.compact_view || self.compact_stride <= 1 {
+            return true;
+        }
+        // Always show Embedding and Output.
+        if matches!(kind, LayerKind::Embedding | LayerKind::Output) {
+            return true;
+        }
+        // Show one "set" of layers per stride window.
+        // Each transformer block = 3 layers (Attn, LN, FFN). Show block 0, stride, 2*stride, …
+        layer_idx % (self.compact_stride * 3) < 3
+    }
 
     pub fn is_loading(&self) -> bool {
         self.worker.is_some() || self.ollama_graph_rx.is_some()
@@ -521,6 +540,7 @@ impl LlmView {
 
         let mut node_instances = Vec::new();
         for (li, layer) in graph.layers.iter().enumerate() {
+            if !self.is_layer_visible(li, layer.kind) { continue; }
             let base_col = layer.kind.base_color();
             for (ni, node) in layer.nodes.iter().enumerate() {
                 let fwd  = self.activation.as_ref().map(|a| a.glow_at(li, ni, now)).unwrap_or(0.0);
@@ -559,6 +579,8 @@ impl LlmView {
         for edge in &graph.edges {
             let Some(fl)  = graph.layers.get(edge.from_layer)  else { continue };
             let Some(tl)  = graph.layers.get(edge.to_layer)    else { continue };
+            if !self.is_layer_visible(edge.from_layer, fl.kind) { continue; }
+            if !self.is_layer_visible(edge.to_layer,   tl.kind) { continue; }
             let Some(fn_) = fl.nodes.get(edge.from_node)       else { continue };
             let Some(tn)  = tl.nodes.get(edge.to_node)         else { continue };
 
@@ -826,6 +848,17 @@ impl LlmView {
                 egui::Slider::new(&mut self.wave_speed, 0.25..=4.0)
                     .text(t!("llm.wave_speed").to_string()),
             );
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut self.compact_view, t!("llm.compact_view").to_string()).changed() {
+                    self.mark_dirty();
+                }
+                if self.compact_view {
+                    if ui.add(egui::Slider::new(&mut self.compact_stride, 2..=8usize)
+                        .text(t!("llm.compact_stride").to_string())).changed() {
+                        self.mark_dirty();
+                    }
+                }
+            });
         });
 
         // Loss curve (shown below sliders when training steps have been taken)
