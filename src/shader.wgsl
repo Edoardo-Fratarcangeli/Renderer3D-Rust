@@ -68,13 +68,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         result = result + vec3<f32>(0.2, 0.2, 0.05); // Subtle Golden Glow
     }
 
-    // LLM / SLM activation glow: alpha ∈ [3.0, 4.0]; intensity = alpha - 3.0
+    // LLM / SLM activation glow: alpha ∈ [3.0, 4.0]; intensity = alpha - 3.0.
+    // Uses the node's own instance_color as the emissive hue so the CPU side
+    // can freely choose cyan (forward pass) or orange (backward / training).
     if (in.instance_alpha >= 3.0) {
         let intensity = clamp(in.instance_alpha - 3.0, 0.0, 1.0);
-        let cyan  = vec3<f32>(0.0, 0.65, 1.0);
-        let white = vec3<f32>(1.0, 0.95, 0.85);
-        let glow_color = mix(cyan, white, intensity * intensity);
-        result = result + glow_color * intensity * 1.8;
+        result = result + in.instance_color * intensity * 2.2;
     }
 
     return vec4<f32>(result, 1.0);

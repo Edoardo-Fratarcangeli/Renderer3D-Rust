@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
+use crate::llm::arch::{ArchFamily, ArchSpec};
 use crate::llm::network::{Layer, LayerKind, NetworkGraph, Node, MAX_NODES_PER_LAYER};
 use crate::llm::tokenizer::Tokenizer;
 
@@ -153,16 +154,6 @@ pub fn from_gguf(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
         .unwrap_or(&arch)
         .to_owned();
 
-    let block_count = kv
-        .get(&format!("{arch}.block_count"))
-        .and_then(GgufValue::as_u64)
-        .unwrap_or(12) as usize;
-
-    let hidden_size = kv
-        .get(&format!("{arch}.embedding_length"))
-        .and_then(GgufValue::as_u64)
-        .unwrap_or(768) as usize;
-
     // ── Vocabulary ────────────────────────────────────────────────────
     let vocab: Vec<String> = kv
         .get("tokenizer.ggml.tokens")
@@ -175,49 +166,15 @@ pub fn from_gguf(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
         Some(Tokenizer::from_vocab(vocab))
     };
 
-    // ── Build layer structure from architecture metadata ──────────────
-    let nodes_per_layer = hidden_size.min(MAX_NODES_PER_LAYER);
+    // ── Build architecture spec from KV numeric metadata ──────────────
+    let numeric_meta: HashMap<String, u64> = kv
+        .iter()
+        .filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n)))
+        .collect();
 
-    // Per-layer importance: use the L2 norm of the first column of the
-    // attention-norm tensor if present; fall back to uniform 0.5.
-    let attn_norm_weights: Vec<f32> = tensor_shapes
-        .get("blk.0.attn_norm.weight")
-        .map(|dims| vec![0.5; dims.iter().product::<u64>().min(nodes_per_layer as u64) as usize])
-        .unwrap_or_else(|| vec![0.5; nodes_per_layer]);
-
-    let mut layers: Vec<Layer> = Vec::new();
-
-    // Embedding
-    let emb_nodes = tensor_shapes
-        .get("token_embd.weight")
-        .map(|dims| (dims.get(1).copied().unwrap_or(hidden_size as u64) as usize).min(MAX_NODES_PER_LAYER))
-        .unwrap_or(nodes_per_layer);
-    layers.push(Layer {
-        name: "Embedding".into(),
-        kind: LayerKind::Embedding,
-        nodes: uniform_nodes(emb_nodes, 0.6),
-    });
-
-    // Transformer blocks
-    for i in 0..block_count {
-        layers.push(Layer {
-            name: format!("Block {i} · Attention"),
-            kind: LayerKind::Attention,
-            nodes: capped_nodes(&attn_norm_weights),
-        });
-        layers.push(Layer {
-            name: format!("Block {i} · FFN"),
-            kind: LayerKind::FeedForward,
-            nodes: uniform_nodes(nodes_per_layer, 0.5),
-        });
-    }
-
-    // Output
-    layers.push(Layer {
-        name: "Output".into(),
-        kind: LayerKind::Output,
-        nodes: uniform_nodes(nodes_per_layer, 0.55),
-    });
+    let family = ArchFamily::detect(&arch, &name);
+    let spec   = ArchSpec::from_metadata(family, &arch, &numeric_meta);
+    let layers = crate::llm::arch::build_layers(&spec);
 
     let mut graph = NetworkGraph { name, layers, edges: vec![] };
     graph.layout();
@@ -235,12 +192,6 @@ fn capped_nodes(weights: &[f32]) -> Vec<Node> {
     sampled
         .into_iter()
         .map(|w| Node { position: [0.0; 3], weight_magnitude: w / max })
-        .collect()
-}
-
-fn uniform_nodes(n: usize, weight: f32) -> Vec<Node> {
-    (0..n.min(MAX_NODES_PER_LAYER))
-        .map(|_| Node { position: [0.0; 3], weight_magnitude: weight })
         .collect()
 }
 

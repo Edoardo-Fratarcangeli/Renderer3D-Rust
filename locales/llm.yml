@@ -148,3 +148,101 @@ _version: 2
   es: Carga un modelo para habilitar la inyección del prompt.
   fr: Chargez un modèle pour activer l'injection de prompt.
   de: Lade ein Modell, um die Prompt-Einschleusung zu aktivieren.
+
+"llm.tab_model":
+  en: Model
+  it: Modello
+  es: Modelo
+  fr: Modèle
+  de: Modell
+
+"llm.tab_ollama":
+  en: Ollama
+  it: Ollama
+  es: Ollama
+  fr: Ollama
+  de: Ollama
+
+"llm.ollama_heading":
+  en: Ollama Models
+  it: Modelli Ollama
+  es: Modelos Ollama
+  fr: Modèles Ollama
+  de: Ollama-Modelle
+
+"llm.ollama_hint":
+  en: "Browse locally-installed Ollama models. Click Refresh to connect."
+  it: "Sfoglia i modelli Ollama installati localmente. Clicca Aggiorna per connetterti."
+  es: "Explora los modelos Ollama instalados localmente. Haz clic en Actualizar para conectar."
+  fr: "Parcourez les modèles Ollama installés localement. Cliquez sur Actualiser pour vous connecter."
+  de: "Lokal installierte Ollama-Modelle durchsuchen. Klicke auf Aktualisieren zum Verbinden."
+
+"llm.btn_refresh":
+  en: Refresh
+  it: Aggiorna
+  es: Actualizar
+  fr: Actualiser
+  de: Aktualisieren
+
+"llm.btn_load_model":
+  en: Load Graph
+  it: Carica grafo
+  es: Cargar grafo
+  fr: Charger le graphe
+  de: Graph laden
+
+"llm.ollama_empty":
+  en: No models found. Click Refresh to query Ollama.
+  it: Nessun modello trovato. Clicca Aggiorna per interrogare Ollama.
+  es: No se encontraron modelos. Haz clic en Actualizar para consultar Ollama.
+  fr: Aucun modèle trouvé. Cliquez sur Actualiser pour interroger Ollama.
+  de: Keine Modelle gefunden. Klicke auf Aktualisieren, um Ollama abzufragen.
+
+"llm.inference_heading":
+  en: Live Inference
+  it: Inferenza in tempo reale
+  es: Inferencia en vivo
+  fr: Inférence en direct
+  de: Live-Inferenz
+
+"llm.btn_run_inference":
+  en: Run
+  it: Avvia
+  es: Ejecutar
+  fr: Lancer
+  de: Starten
+
+"llm.inference_active":
+  en: Generating…
+  it: Generazione…
+  es: Generando…
+  fr: Génération…
+  de: Generiert…
+
+"llm.inference_output":
+  en: Output
+  it: Output
+  es: Salida
+  fr: Sortie
+  de: Ausgabe
+
+"llm.inference_load_hint":
+  en: Load an Ollama model graph above to enable inference.
+  it: Carica prima un grafo Ollama per abilitare l'inferenza.
+  es: Carga primero un grafo Ollama para habilitar la inferencia.
+  fr: Chargez d'abord un graphe Ollama pour activer l'inférence.
+  de: Lade zuerst einen Ollama-Graphen, um die Inferenz zu aktivieren.
+
+"llm.btn_train_step":
+  en: Simulate Training Step
+  it: Simula passo di addestramento
+  es: Simular paso de entrenamiento
+  fr: Simuler un pas d'entraînement
+  de: Trainingsschritt simulieren
+
+"llm.training":
+  en: Training simulation (forward + backward)…
+  it: Simulazione training (avanti + indietro)…
+  es: Simulación de entrenamiento (adelante + atrás)…
+  fr: Simulation d'entraînement (avant + arrière)…
+  de: Trainings-Simulation (Vorwärts + Rückwärts)…
