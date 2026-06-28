@@ -246,3 +246,10 @@ _version: 2
   es: Simulación de entrenamiento (adelante + atrás)…
   fr: Simulation d'entraînement (avant + arrière)…
   de: Trainings-Simulation (Vorwärts + Rückwärts)…
+
+"llm.wave_speed":
+  en: Wave speed
+  it: Velocità onda
+  es: Velocidad de onda
+  fr: Vitesse d'onde
+  de: Wellengeschwindigkeit

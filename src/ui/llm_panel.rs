@@ -79,6 +79,7 @@ pub struct LlmView {
     pub status:          Option<StatusMessage>,
     pub visible:         bool,
     pub node_scale_mult: f32,
+    pub wave_speed: f32,
 
     render_dirty:     bool,
     animation_active: bool,
@@ -121,6 +122,7 @@ impl LlmView {
             status:      None,
             visible:     true,
             node_scale_mult: 1.0,
+            wave_speed: 1.0,
             render_dirty:     false,
             animation_active: false,
             worker:           None,
@@ -322,7 +324,7 @@ impl LlmView {
                 h % 256
             })
             .collect();
-        self.activation = Some(ActivationState::simulate(graph, &tokens));
+        self.activation = Some(ActivationState::simulate(graph, &tokens).with_speed(self.wave_speed));
         self.animation_active = true;
         self.render_dirty = true;
 
@@ -400,7 +402,7 @@ impl LlmView {
         self.status = Some(StatusMessage::info(format!(
             "Injecting {word_count} token(s): '{preview_str}'"
         )));
-        self.activation = Some(ActivationState::simulate(graph, &tokens));
+        self.activation = Some(ActivationState::simulate(graph, &tokens).with_speed(self.wave_speed));
         self.animation_active = true;
         self.render_dirty = true;
     }
@@ -409,7 +411,7 @@ impl LlmView {
 
     fn start_training_sim(&mut self) {
         let Some(graph) = &self.graph else { return };
-        self.activation = Some(ActivationState::simulate_training(graph));
+        self.activation = Some(ActivationState::simulate_training(graph).with_speed(self.wave_speed));
         self.animation_active = true;
         self.render_dirty = true;
         self.status = Some(StatusMessage::info(
@@ -732,6 +734,10 @@ impl LlmView {
             ui.add(
                 egui::Slider::new(&mut self.node_scale_mult, 0.4..=3.0)
                     .text(t!("llm.node_scale").to_string()),
+            );
+            ui.add(
+                egui::Slider::new(&mut self.wave_speed, 0.25..=4.0)
+                    .text(t!("llm.wave_speed").to_string()),
             );
         });
 

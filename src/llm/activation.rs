@@ -66,6 +66,14 @@ impl ActivationState {
         Self::build(graph, &tokens, ActivationMode::Training)
     }
 
+    /// Scale the animation duration. `mult > 1.0` = faster, `< 1.0` = slower.
+    pub fn with_speed(mut self, mult: f32) -> Self {
+        let factor = 1.0 / mult.max(0.1);
+        self.duration *= factor;
+        self.total_duration *= factor;
+        self
+    }
+
     fn build(graph: &NetworkGraph, tokens: &[u32], mode: ActivationMode) -> Self {
         let n_tokens = tokens.len().max(1);
         let values = graph
