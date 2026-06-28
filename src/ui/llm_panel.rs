@@ -108,6 +108,10 @@ pub struct LlmView {
     inference_token_buf: Vec<u32>,
     /// Tokens received since the last mini-wave was triggered.
     tokens_since_wave: u32,
+    /// Per-step loss values for the live training loss curve.
+    loss_history: Vec<f32>,
+    /// Count of training steps taken since model loaded.
+    training_step: u32,
 }
 
 impl Default for LlmView {
@@ -142,6 +146,8 @@ impl LlmView {
             inference_model:  String::new(),
             inference_token_buf: Vec::new(),
             tokens_since_wave: 0,
+            loss_history: Vec::new(),
+            training_step: 0,
         }
     }
 
@@ -436,6 +442,15 @@ impl LlmView {
 
     fn start_training_sim(&mut self) {
         let Some(graph) = &self.graph else { return };
+        self.training_step += 1;
+        let t = self.training_step as f32;
+        // Exponential decay + small stochastic noise.
+        let noise = ((t * 2.718_281 * 0.37).sin().powi(2)) * 0.12;
+        let loss = 3.5 * (-0.07 * t).exp() + noise + 0.05;
+        self.loss_history.push(loss);
+        if self.loss_history.len() > 60 {
+            self.loss_history.remove(0);
+        }
         self.activation = Some(ActivationState::simulate_training(graph).with_speed(self.wave_speed));
         self.animation_active = true;
         self.render_dirty = true;
@@ -474,6 +489,8 @@ impl LlmView {
         self.inference_text.clear();
         self.inference_token_buf.clear();
         self.tokens_since_wave = 0;
+        self.loss_history.clear();
+        self.training_step = 0;
         self.visible = false;
         self.render_dirty = true;
         self.status = None;
@@ -810,6 +827,38 @@ impl LlmView {
                     .text(t!("llm.wave_speed").to_string()),
             );
         });
+
+        // Loss curve (shown below sliders when training steps have been taken)
+        if !self.loss_history.is_empty() {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(t!("llm.loss_curve").to_string()).small().weak());
+            let desired = egui::vec2(ui.available_width(), 64.0);
+            let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 3.0, egui::Color32::from_gray(22));
+            let n = self.loss_history.len();
+            let max_loss = self.loss_history.iter().cloned().fold(0.0f32, f32::max).max(0.01);
+            let to_px = |i: usize, l: f32| -> egui::Pos2 {
+                let x = rect.left() + (i as f32 / (n - 1).max(1) as f32) * rect.width();
+                let y = rect.bottom() - (l / max_loss) * rect.height() * 0.88;
+                egui::pos2(x, y)
+            };
+            for i in 0..n.saturating_sub(1) {
+                painter.line_segment(
+                    [to_px(i, self.loss_history[i]), to_px(i + 1, self.loss_history[i + 1])],
+                    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 170, 40)),
+                );
+            }
+            if let Some(&last_loss) = self.loss_history.last() {
+                painter.text(
+                    rect.right_top() + egui::vec2(-4.0, 3.0),
+                    egui::Align2::RIGHT_TOP,
+                    format!("loss {last_loss:.3}  step {}", self.training_step),
+                    egui::FontId::proportional(10.0),
+                    egui::Color32::from_rgb(255, 210, 100),
+                );
+            }
+        }
 
         if !has_model {
             ui.colored_label(egui::Color32::DARK_GRAY, t!("llm.no_model_hint").to_string());

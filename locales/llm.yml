@@ -253,3 +253,10 @@ _version: 2
   es: Velocidad de onda
   fr: Vitesse d'onde
   de: Wellengeschwindigkeit
+
+"llm.loss_curve":
+  en: Training loss
+  it: Loss di addestramento
+  es: Pérdida de entrenamiento
+  fr: Perte d'entraînement
+  de: Trainings-Loss
