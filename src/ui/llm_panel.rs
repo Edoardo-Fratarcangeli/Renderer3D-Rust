@@ -104,6 +104,10 @@ pub struct LlmView {
     inference_rx:     Option<mpsc::Receiver<OllamaEvent>>,
     /// Which Ollama model is currently wired for inference.
     inference_model:  String,
+    /// Rolling buffer of pseudo-token IDs for per-token mini-waves.
+    inference_token_buf: Vec<u32>,
+    /// Tokens received since the last mini-wave was triggered.
+    tokens_since_wave: u32,
 }
 
 impl Default for LlmView {
@@ -136,6 +140,8 @@ impl LlmView {
             inference_active: false,
             inference_rx:     None,
             inference_model:  String::new(),
+            inference_token_buf: Vec::new(),
+            tokens_since_wave: 0,
         }
     }
 
@@ -345,6 +351,25 @@ impl LlmView {
             match rx.try_recv() {
                 Ok(OllamaEvent::Token(tok)) => {
                     self.inference_text.push_str(&tok);
+                    // Convert token text fragment to a pseudo-ID via djb2 hash.
+                    let id: u32 = tok.bytes().fold(5381u32, |h, b| h.wrapping_mul(33).wrapping_add(b as u32)) % 512;
+                    self.inference_token_buf.push(id);
+                    self.tokens_since_wave += 1;
+                    const WAVE_EVERY: u32 = 5;
+                    if self.tokens_since_wave >= WAVE_EVERY {
+                        if let Some(graph) = &self.graph {
+                            let recent: Vec<u32> = self.inference_token_buf
+                                .iter().rev().take(WAVE_EVERY as usize).copied().collect();
+                            let speed = self.wave_speed;
+                            self.activation = Some(
+                                ActivationState::simulate_fast(graph, &recent)
+                                    .with_speed(speed)
+                            );
+                            self.animation_active = true;
+                            self.render_dirty = true;
+                        }
+                        self.tokens_since_wave = 0;
+                    }
                 }
                 Ok(OllamaEvent::Done) => {
                     self.inference_rx = None;
@@ -447,6 +472,8 @@ impl LlmView {
         self.inference_active = false;
         self.inference_rx = None;
         self.inference_text.clear();
+        self.inference_token_buf.clear();
+        self.tokens_since_wave = 0;
         self.visible = false;
         self.render_dirty = true;
         self.status = None;

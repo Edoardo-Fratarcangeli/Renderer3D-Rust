@@ -66,6 +66,15 @@ impl ActivationState {
         Self::build(graph, &tokens, ActivationMode::Training)
     }
 
+    /// Short-duration wave for per-token inference animation (0.8 s default).
+    pub fn simulate_fast(graph: &NetworkGraph, tokens: &[u32]) -> Self {
+        let mut s = Self::build(graph, tokens, ActivationMode::Inference);
+        // Compress to ~20% of standard duration → snappier per-token feel.
+        s.duration       *= 0.20;
+        s.total_duration *= 0.20;
+        s
+    }
+
     /// Scale the animation duration. `mult > 1.0` = faster, `< 1.0` = slower.
     pub fn with_speed(mut self, mult: f32) -> Self {
         let factor = 1.0 / mult.max(0.1);
