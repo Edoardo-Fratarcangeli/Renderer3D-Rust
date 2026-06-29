@@ -9,21 +9,16 @@ use std::collections::HashMap;
 pub struct Tokenizer {
     pub vocab: Vec<String>,
     token_map: HashMap<String, u32>,
-    unk_id: u32,
 }
 
 impl Tokenizer {
     pub fn from_vocab(vocab: Vec<String>) -> Self {
-        let unk_id = vocab
-            .iter()
-            .position(|s| matches!(s.as_str(), "<unk>" | "[UNK]" | "<UNK>"))
-            .unwrap_or(0) as u32;
         let token_map = vocab
             .iter()
             .enumerate()
             .map(|(i, s)| (s.clone(), i as u32))
             .collect();
-        Self { vocab, token_map, unk_id }
+        Self { vocab, token_map }
     }
 
     /// Split by whitespace, then look up each word; unknown words hash into the

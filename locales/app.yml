@@ -76,6 +76,36 @@ _version: 2
   es: Mostrar ejes
   fr: Afficher les axes
   de: Achsen anzeigen
+"settings.grid_cell_size":
+  en: Cell Size
+  it: Dimensione cella
+  es: Tamaño celda
+  fr: Taille cellule
+  de: Zellengröße
+"settings.grid_max_extent":
+  en: Max Half-Extent
+  it: Semi-estensione max
+  es: Semi-extensión máx.
+  fr: Demi-étendue max
+  de: Max. Halbausdehnung
+"settings.grid_line_thickness":
+  en: Line Thickness
+  it: Spessore linea
+  es: Grosor de línea
+  fr: Épaisseur de ligne
+  de: Linienstärke
+"settings.grid_color":
+  en: Grid Color
+  it: Colore griglia
+  es: Color cuadrícula
+  fr: Couleur grille
+  de: Rasterfarbe
+"settings.bg_color":
+  en: Background Color
+  it: Colore sfondo
+  es: Color de fondo
+  fr: Couleur arrière-plan
+  de: Hintergrundfarbe
 
 # ── Status bar ───────────────────────────────────────────────────────────────
 "status.camera_eye":

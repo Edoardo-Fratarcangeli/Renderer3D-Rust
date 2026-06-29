@@ -206,106 +206,126 @@ pub fn create_plane(size: f32) -> MeshData {
     MeshData { vertices, indices }
 }
 
-// Just line grid, Normals Up
-pub fn create_grid(size: u32, spacing: f32, plane_normal: u8) -> MeshData {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    let half = (size as f32 * spacing) / 2.0;
-    let color = [0.4, 0.4, 0.4];
-    let normal = [0.0, 1.0, 0.0]; // Default up, doesn't matter for line shader mostly
+/// Build a grid mesh as flat quads (TriangleList) so line thickness is
+/// configurable. Rendered with `cull_mode: None` so it is visible from both
+/// sides of the plane.
+///
+/// * `cell_size`   — spacing between adjacent grid lines (world units)
+/// * `max_extent`  — half the total grid side length; total = 2 × max_extent
+/// * `thickness`   — visual half-width of each line (world units)
+/// * `color`       — RGB vertex color
+/// * `plane_normal`— 0 = XZ (Y up), 1 = XY (Z up), 2 = YZ (X up)
+pub fn create_grid(
+    cell_size: f32,
+    max_extent: f32,
+    thickness: f32,
+    color: [f32; 3],
+    plane_normal: u8,
+) -> MeshData {
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices:  Vec<u16>   = Vec::new();
 
-    // plane_normal: 0=Y (XZ grid), 1=Z (XY grid), 2=X (YZ grid)
+    let half = max_extent.max(0.01);
+    let cs   = cell_size.max(0.01);
+    let t    = (thickness * 0.5).max(1e-4);
 
-    for i in 0..=size {
-        let v = -half + (i as f32 * spacing);
-        let idx = vertices.len() as u16;
+    // Number of lines in each direction (inclusive of boundary).
+    let n = ((2.0 * half / cs).round() as u32).max(1) + 1;
 
-        if plane_normal == 0 {
-            // XZ Plane (Y is up)
-            vertices.push(Vertex {
-                position: [-half, 0.0, v],
-                color,
-                normal,
-            });
-            vertices.push(Vertex {
-                position: [half, 0.0, v],
-                color,
-                normal,
-            });
-        } else if plane_normal == 1 {
-            // XY Plane (Z is up)
-            vertices.push(Vertex {
-                position: [-half, v, 0.0],
-                color,
-                normal,
-            });
-            vertices.push(Vertex {
-                position: [half, v, 0.0],
-                color,
-                normal,
-            });
-        } else {
-            // YZ Plane (X is up)
-            vertices.push(Vertex {
-                position: [0.0, -half, v],
-                color,
-                normal,
-            });
-            vertices.push(Vertex {
-                position: [0.0, half, v],
-                color,
-                normal,
-            });
-        }
-
-        indices.push(idx);
-        indices.push(idx + 1);
+    // Macro: push a flat quad as two CCW triangles.
+    // With cull_mode=None the GPU draws both faces anyway, so one winding
+    // is sufficient and we save half the geometry.
+    macro_rules! push_quad {
+        ($p0:expr, $p1:expr, $p2:expr, $p3:expr, $nor:expr) => {{
+            let base = vertices.len() as u16;
+            for &pos in &[$p0, $p1, $p2, $p3] {
+                vertices.push(Vertex { position: pos, color, normal: $nor });
+            }
+            // Triangle 1: base, base+1, base+2
+            // Triangle 2: base, base+2, base+3
+            indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+        }};
     }
 
-    for i in 0..=size {
-        let v = -half + (i as f32 * spacing);
-        let idx = vertices.len() as u16;
-
-        if plane_normal == 0 {
-            // XZ Plane (Y is up)
-            vertices.push(Vertex {
-                position: [v, 0.0, -half],
-                color,
-                normal,
-            });
-            vertices.push(Vertex {
-                position: [v, 0.0, half],
-                color,
-                normal,
-            });
-        } else if plane_normal == 1 {
-            // XY Plane (Z is up)
-            vertices.push(Vertex {
-                position: [v, -half, 0.0],
-                color,
-                normal,
-            });
-            vertices.push(Vertex {
-                position: [v, half, 0.0],
-                color,
-                normal,
-            });
-        } else {
-            // YZ Plane (X is up)
-            vertices.push(Vertex {
-                position: [0.0, v, -half],
-                color,
-                normal,
-            });
-            vertices.push(Vertex {
-                position: [0.0, v, half],
-                color,
-                normal,
-            });
+    match plane_normal {
+        // ── XZ plane (Y up) ────────────────────────────────────────────────
+        0 => {
+            let nor = [0.0_f32, 1.0, 0.0];
+            // Lines parallel to X (varying Z)
+            for i in 0..n {
+                let z = -half + i as f32 * cs;
+                push_quad!(
+                    [-half, 0.0, z - t],
+                    [ half, 0.0, z - t],
+                    [ half, 0.0, z + t],
+                    [-half, 0.0, z + t],
+                    nor
+                );
+            }
+            // Lines parallel to Z (varying X)
+            for i in 0..n {
+                let x = -half + i as f32 * cs;
+                push_quad!(
+                    [x - t, 0.0, -half],
+                    [x + t, 0.0, -half],
+                    [x + t, 0.0,  half],
+                    [x - t, 0.0,  half],
+                    nor
+                );
+            }
         }
-
-        indices.push(idx);
-        indices.push(idx + 1);
+        // ── XY plane (Z up) ────────────────────────────────────────────────
+        1 => {
+            let nor = [0.0_f32, 0.0, 1.0];
+            // Lines parallel to X (varying Y)
+            for i in 0..n {
+                let y = -half + i as f32 * cs;
+                push_quad!(
+                    [-half, y - t, 0.0],
+                    [ half, y - t, 0.0],
+                    [ half, y + t, 0.0],
+                    [-half, y + t, 0.0],
+                    nor
+                );
+            }
+            // Lines parallel to Y (varying X)
+            for i in 0..n {
+                let x = -half + i as f32 * cs;
+                push_quad!(
+                    [x - t, -half, 0.0],
+                    [x + t, -half, 0.0],
+                    [x + t,  half, 0.0],
+                    [x - t,  half, 0.0],
+                    nor
+                );
+            }
+        }
+        // ── YZ plane (X up) ────────────────────────────────────────────────
+        _ => {
+            let nor = [1.0_f32, 0.0, 0.0];
+            // Lines parallel to Y (varying Z)
+            for i in 0..n {
+                let z = -half + i as f32 * cs;
+                push_quad!(
+                    [0.0, -half, z - t],
+                    [0.0,  half, z - t],
+                    [0.0,  half, z + t],
+                    [0.0, -half, z + t],
+                    nor
+                );
+            }
+            // Lines parallel to Z (varying Y)
+            for i in 0..n {
+                let y = -half + i as f32 * cs;
+                push_quad!(
+                    [0.0, y - t, -half],
+                    [0.0, y + t, -half],
+                    [0.0, y + t,  half],
+                    [0.0, y - t,  half],
+                    nor
+                );
+            }
+        }
     }
 
     MeshData { vertices, indices }
@@ -515,10 +535,10 @@ mod tests {
     #[test]
     fn grids_build_for_every_orientation() {
         for plane_normal in 0u8..=2 {
-            let m = create_grid(10, 1.0, plane_normal);
+            let m = create_grid(1.0, 10.0, 0.02, [0.4, 0.4, 0.4], plane_normal);
             assert_indices_in_range(&m);
-            // Grids are line lists: indices come in pairs.
-            assert_eq!(m.indices.len() % 2, 0);
+            // Grids are triangle lists: indices come in multiples of 3.
+            assert_eq!(m.indices.len() % 3, 0);
         }
     }
 

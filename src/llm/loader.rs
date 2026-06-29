@@ -280,6 +280,7 @@ impl<'a> GgufReader<'a> {
     }
 }
 
+#[allow(dead_code)]
 enum GgufValue {
     U8(u8), I8(i8), U16(u16), I16(i16),
     U32(u32), I32(i32), F32(f32), Bool(bool),

@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use cgmath::Matrix4;
+use cgmath::{InnerSpace, Matrix4};
 
 use crate::llm::activation::{ActivationMode, ActivationState};
 use crate::llm::exporter::AnimExporter;
@@ -125,6 +125,8 @@ pub struct LlmView {
     export_path: String,
     /// Status message from the last export operation.
     export_status: Option<StatusMessage>,
+    /// Node selected by ray-pick in the 3D viewport: (layer_idx, node_idx).
+    pub selected_node: Option<(usize, usize)>,
 }
 
 impl Default for LlmView {
@@ -166,6 +168,7 @@ impl LlmView {
             exporter: AnimExporter::new(),
             export_path: String::new(),
             export_status: None,
+            selected_node: None,
         }
     }
 
@@ -531,6 +534,7 @@ impl LlmView {
         self.visible = false;
         self.render_dirty = true;
         self.status = None;
+        self.selected_node = None;
     }
 
     pub fn set_visible(&mut self, visible: bool) {
@@ -542,6 +546,65 @@ impl LlmView {
 
     pub fn centroid(&self) -> Option<[f32; 3]> {
         self.graph.as_ref()?.centroid()
+    }
+
+    // ── Ray-pick against node spheres ──────────────────────────────────────
+
+    /// Test a world-space ray against all visible LLM node spheres.
+    /// Updates `selected_node` and returns `true` if any node was hit.
+    pub fn pick_node(
+        &mut self,
+        ray_origin: cgmath::Vector3<f32>,
+        ray_dir: cgmath::Vector3<f32>,
+    ) -> bool {
+        let Some(graph) = &self.graph else {
+            self.selected_node = None;
+            return false;
+        };
+        if !self.visible {
+            self.selected_node = None;
+            return false;
+        }
+
+        let mut best: Option<((usize, usize), f32)> = None;
+
+        for (li, layer) in graph.layers.iter().enumerate() {
+            if !self.is_layer_visible(li, layer.kind) {
+                continue;
+            }
+            for (ni, node) in layer.nodes.iter().enumerate() {
+                let c = cgmath::Vector3::new(
+                    node.position[0],
+                    node.position[1],
+                    node.position[2],
+                );
+                let scale = (NODE_BASE_SCALE
+                    + node.weight_magnitude * (NODE_MAX_SCALE - NODE_BASE_SCALE))
+                    * self.node_scale_mult;
+                // The primitive sphere has unit diameter (radius 0.5); inflate
+                // the pick radius so small nodes are still easy to click.
+                let r = scale * 0.5 * 2.0;
+
+                let oc = ray_origin - c;
+                let b = 2.0 * ray_dir.dot(oc);
+                let c_term = oc.dot(oc) - r * r;
+                let disc = b * b - 4.0 * c_term;
+                if disc >= 0.0 {
+                    let t = (-b - disc.sqrt()) * 0.5;
+                    if t > 0.0 && best.map_or(true, |(_, bt)| t < bt) {
+                        best = Some(((li, ni), t));
+                    }
+                }
+            }
+        }
+
+        if let Some(((li, ni), _)) = best {
+            self.selected_node = Some((li, ni));
+            true
+        } else {
+            self.selected_node = None;
+            false
+        }
     }
 
     // ── GPU render data ─────────────────────────────────────────────────────
@@ -694,10 +757,14 @@ impl LlmView {
         });
         ui.separator();
 
-        match self.active_tab {
+        let action = match self.active_tab {
             LlmTab::Model  => self.tab_model(ui),
             LlmTab::Ollama => { self.tab_ollama(ui); LlmAction::None }
-        }
+        };
+
+        self.show_node_inspector(ui);
+
+        action
     }
 
     // ── Model tab ─────────────────────────────────────────────────────────────
@@ -1095,7 +1162,7 @@ impl LlmView {
             );
         }
 
-        // Token output
+        // ── Token output ────────────────────────────────────────────────────
         if !self.inference_text.is_empty() || self.inference_active {
             ui.add_space(4.0);
             ui.label(t!("llm.inference_output").to_string());
@@ -1106,6 +1173,77 @@ impl LlmView {
                 .show(ui, |ui| {
                     ui.label(&self.inference_text);
                 });
+        }
+    }
+    // ── Node inspector ───────────────────────────────────────────────────────
+
+    fn show_node_inspector(&self, ui: &mut egui::Ui) {
+        let Some((li, ni)) = self.selected_node else { return };
+        let Some(graph) = &self.graph else { return };
+        let Some(layer) = graph.layers.get(li) else { return };
+        let Some(node) = layer.nodes.get(ni) else { return };
+
+        let now = Instant::now();
+        let fwd  = self.activation.as_ref().map(|a| a.glow_at(li, ni, now)).unwrap_or(0.0);
+        let back = self.activation.as_ref().map(|a| a.back_glow_at(li, ni, now)).unwrap_or(0.0);
+
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.strong("Node Inspector");
+            ui.label(
+                egui::RichText::new(format!(
+                    "Layer {} · Node {}/{}",
+                    li,
+                    ni,
+                    layer.nodes.len()
+                ))
+                .weak()
+                .small(),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            let kind_label = format!("{:?}", layer.kind);
+            ui.label(egui::RichText::new(kind_label).color(egui::Color32::from_rgb(
+                (layer.kind.base_color()[0] * 255.0) as u8,
+                (layer.kind.base_color()[1] * 255.0) as u8,
+                (layer.kind.base_color()[2] * 255.0) as u8,
+            )));
+            ui.label(egui::RichText::new(&layer.name).italics().weak());
+        });
+
+        ui.horizontal(|ui| {
+            ui.label(format!("Weight: {:.4}", node.weight_magnitude));
+            ui.add(
+                egui::ProgressBar::new(node.weight_magnitude)
+                    .desired_width(60.0),
+            );
+        });
+
+        ui.label(
+            egui::RichText::new(format!(
+                "Pos: ({:.2}, {:.2}, {:.2})",
+                node.position[0], node.position[1], node.position[2]
+            ))
+            .weak()
+            .small(),
+        );
+
+        if fwd > 0.01 || back > 0.01 {
+            ui.horizontal(|ui| {
+                if fwd > 0.01 {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(0, 180, 230),
+                        format!("Fwd: {:.1}%", fwd * 100.0),
+                    );
+                }
+                if back > 0.01 {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 140, 30),
+                        format!("Bwd: {:.1}%", back * 100.0),
+                    );
+                }
+            });
         }
     }
 }

@@ -34,8 +34,12 @@ pub const DEFAULT_SHOW_GRID_XZ: bool = false;
 pub const DEFAULT_SHOW_GRID_YZ: bool = false;
 pub const DEFAULT_SHOW_AXES: bool = true;
 
-// Background
-pub const DEFAULT_BG_COLOR: f64 = 0.1;
+// Background / grid visual defaults (also used by AppSettings::default)
+pub const DEFAULT_BG_COLOR:            [f32; 3] = [0.1, 0.1, 0.1];
+pub const DEFAULT_GRID_CELL_SIZE:      f32      = 1.0;
+pub const DEFAULT_GRID_MAX_EXTENT:     f32      = 10.0;
+pub const DEFAULT_GRID_LINE_THICKNESS: f32      = 0.02;
+pub const DEFAULT_GRID_COLOR:          [f32; 3] = [0.4, 0.4, 0.4];
 
 pub struct MeshBuffers {
     pub vertex_buffer: wgpu::Buffer,
@@ -64,6 +68,8 @@ pub struct State {
     // Render Pipelines
     render_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    /// TriangleList pipeline with cull_mode = None, used for thick grid quads.
+    grid_pipeline: wgpu::RenderPipeline,
 
     // Geometry Resources
     cube_mesh: MeshBuffers,
@@ -109,7 +115,13 @@ pub struct State {
     pub show_axes: bool,
 
     // Background
-    pub bg_color: f64,
+    pub bg_color: [f32; 3],
+
+    // Grid visual settings
+    pub grid_color:          [f32; 3],
+    pub grid_cell_size:      f32,
+    pub grid_max_extent:     f32,
+    pub grid_line_thickness: f32,
 
     pub bottom_panel_expanded: bool,
     pub last_click_time: std::time::Instant,
@@ -165,6 +177,47 @@ pub struct State {
 
 /// Above this many instances in one batch, spheres use the low-poly mesh.
 pub const LOD_SPHERE_THRESHOLD: u32 = 2000;
+
+/// Upload a CPU mesh to the GPU as a [`MeshBuffers`] pair (16-bit indices).
+fn make_mesh_buffers(device: &wgpu::Device, data: primitives::MeshData) -> MeshBuffers {
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label:    Some("Vertex Buffer"),
+        contents: bytemuck::cast_slice(&data.vertices),
+        usage:    wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label:    Some("Index Buffer"),
+        contents: bytemuck::cast_slice(&data.indices),
+        usage:    wgpu::BufferUsages::INDEX,
+    });
+    MeshBuffers { vertex_buffer, index_buffer, num_indices: data.indices.len() as u32 }
+}
+
+/// Shared egui widget: a color swatch button that opens an inline HSV picker.
+/// Returns `true` when the color was modified.
+fn color_edit_button(ui: &mut egui::Ui, label: &str, rgb: &mut [f32; 3]) -> bool {
+    let mut srgba = egui::Color32::from_rgb(
+        (rgb[0].clamp(0.0, 1.0) * 255.0) as u8,
+        (rgb[1].clamp(0.0, 1.0) * 255.0) as u8,
+        (rgb[2].clamp(0.0, 1.0) * 255.0) as u8,
+    );
+    let resp = ui.horizontal(|ui| {
+        let r = egui::color_picker::color_edit_button_srgba(
+            ui,
+            &mut srgba,
+            egui::color_picker::Alpha::Opaque,
+        );
+        ui.label(label);
+        r
+    }).inner;
+    let changed = resp.changed();
+    if changed {
+        rgb[0] = srgba.r() as f32 / 255.0;
+        rgb[1] = srgba.g() as f32 / 255.0;
+        rgb[2] = srgba.b() as f32 / 255.0;
+    }
+    changed
+}
 
 /// Small transparent icon button used by every row of the bottom object list
 /// (scene objects, imported datasets, …) so they share one look and one
@@ -236,43 +289,29 @@ impl State {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
-        // --- Helper to Upload Mesh ---
-        let upload_mesh = |data: crate::primitives::MeshData| -> MeshBuffers {
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(&data.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(&data.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-            MeshBuffers {
-                vertex_buffer,
-                index_buffer,
-                num_indices: data.indices.len() as u32,
-            }
-        };
+        // Load persisted settings (falls back to defaults if no file exists).
+        let saved = crate::settings::AppSettings::load();
 
         // --- Initialize Meshes ---
-        let cube_mesh = upload_mesh(primitives::create_cube());
-        let sphere_mesh = upload_mesh(primitives::create_sphere(0.5, 32, 32));
-        let sphere_lod_mesh = upload_mesh(primitives::create_sphere(0.5, 12, 8));
-        let plane_mesh = upload_mesh(primitives::create_plane(1.0));
+        let cube_mesh        = make_mesh_buffers(&device, primitives::create_cube());
+        let sphere_mesh      = make_mesh_buffers(&device, primitives::create_sphere(0.5, 32, 32));
+        let sphere_lod_mesh  = make_mesh_buffers(&device, primitives::create_sphere(0.5, 12, 8));
+        let plane_mesh       = make_mesh_buffers(&device, primitives::create_plane(1.0));
 
-        // Grids
-        let grid_size = 20;
-        let spacing = 1.0;
-        let grid_xy_mesh = upload_mesh(primitives::create_grid(grid_size, spacing, 1));
-        let grid_xz_mesh = upload_mesh(primitives::create_grid(grid_size, spacing, 0));
-        let grid_yz_mesh = upload_mesh(primitives::create_grid(grid_size, spacing, 2));
+        // Grids — built from saved settings
+        let gs = &saved.grid;
+        let grid_xy_mesh = make_mesh_buffers(&device,
+            primitives::create_grid(gs.cell_size, gs.max_extent, gs.line_thickness, gs.color, 1));
+        let grid_xz_mesh = make_mesh_buffers(&device,
+            primitives::create_grid(gs.cell_size, gs.max_extent, gs.line_thickness, gs.color, 0));
+        let grid_yz_mesh = make_mesh_buffers(&device,
+            primitives::create_grid(gs.cell_size, gs.max_extent, gs.line_thickness, gs.color, 2));
 
         // Axes (Thick)
-        let axes_mesh = upload_mesh(primitives::create_thick_axes(3.0, 0.05));
+        let axes_mesh = make_mesh_buffers(&device, primitives::create_thick_axes(3.0, 0.05));
 
         // Normal Arrow
-        let normal_arrow_mesh = upload_mesh(primitives::create_arrow(1.0, 0.04, [1.0, 1.0, 0.0]));
+        let normal_arrow_mesh = make_mesh_buffers(&device, primitives::create_arrow(1.0, 0.04, [1.0, 1.0, 0.0]));
 
         // --- Camera & Uniforms ---
         let camera = Camera {
@@ -406,6 +445,47 @@ impl State {
             multiview: None,
         });
 
+        // Grid Pipeline — TriangleList, no back-face culling so thick quads
+        // are visible from both sides of the plane.
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Grid Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc(), InstanceRaw::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         let egui_context = egui::Context::default();
 
         let mut style = (*egui_context.style()).clone();
@@ -442,6 +522,7 @@ impl State {
             size,
             render_pipeline,
             line_pipeline,
+            grid_pipeline,
             cube_mesh,
             sphere_mesh,
             plane_mesh,
@@ -460,19 +541,23 @@ impl State {
             camera_yaw: DEFAULT_CAMERA_YAW,
             camera_pitch: DEFAULT_CAMERA_PITCH,
             camera_dist: DEFAULT_CAMERA_DIST,
-            min_zoom: DEFAULT_MIN_ZOOM,
-            max_zoom: DEFAULT_MAX_ZOOM,
+            min_zoom:  saved.min_zoom,
+            max_zoom:  saved.max_zoom,
             new_obj_pos: DEFAULT_NEW_OBJ_POS,
             new_obj_type: GeometryType::Cube,
             new_obj_color: DEFAULT_NEW_OBJ_COLOR,
             show_settings: DEFAULT_SHOW_SETTINGS,
             show_add_panel: DEFAULT_SHOW_ADD_PANEL,
-            // Grids
-            show_grid_xy: DEFAULT_SHOW_GRID_XY,
-            show_grid_xz: DEFAULT_SHOW_GRID_XZ,
-            show_grid_yz: DEFAULT_SHOW_GRID_YZ,
-            show_axes: DEFAULT_SHOW_AXES,
-            bg_color: DEFAULT_BG_COLOR,
+            // Grids — from saved settings
+            show_grid_xy: saved.show_grid_xy,
+            show_grid_xz: saved.show_grid_xz,
+            show_grid_yz: saved.show_grid_yz,
+            show_axes:    saved.show_axes,
+            bg_color:     saved.bg_color,
+            grid_color:          saved.grid.color,
+            grid_cell_size:      saved.grid.cell_size,
+            grid_max_extent:     saved.grid.max_extent,
+            grid_line_thickness: saved.grid.line_thickness,
 
             bottom_panel_expanded: DEFAULT_BOTTOM_PANEL_EXPANDED,
             is_drag_active: false,
@@ -883,6 +968,14 @@ impl State {
                                             }
                                         }
                                     }
+
+                                    // LLM node picking
+                                    if self.llm_view.visible
+                                        && self.llm_view.graph.is_some()
+                                    {
+                                        let (ro, rd) = self.build_ray_ndc(x, y);
+                                        self.llm_view.pick_node(ro, rd);
+                                    }
                                 }
                             }
                         } else {
@@ -1068,6 +1161,44 @@ impl State {
             .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
     }
 
+    /// Rebuild the three grid GPU buffers from current grid settings and
+    /// persist all visual settings to disk.
+    fn rebuild_grids(&mut self) {
+        let (cs, ext, t, col) = (
+            self.grid_cell_size,
+            self.grid_max_extent,
+            self.grid_line_thickness,
+            self.grid_color,
+        );
+        self.grid_xy_mesh = make_mesh_buffers(&self.device,
+            primitives::create_grid(cs, ext, t, col, 1));
+        self.grid_xz_mesh = make_mesh_buffers(&self.device,
+            primitives::create_grid(cs, ext, t, col, 0));
+        self.grid_yz_mesh = make_mesh_buffers(&self.device,
+            primitives::create_grid(cs, ext, t, col, 2));
+        self.save_settings();
+    }
+
+    /// Snapshot all visual settings to the OS config directory.
+    fn save_settings(&self) {
+        crate::settings::AppSettings {
+            bg_color:     self.bg_color,
+            show_grid_xy: self.show_grid_xy,
+            show_grid_xz: self.show_grid_xz,
+            show_grid_yz: self.show_grid_yz,
+            show_axes:    self.show_axes,
+            min_zoom:     self.min_zoom,
+            max_zoom:     self.max_zoom,
+            grid: crate::settings::GridSettings {
+                cell_size:      self.grid_cell_size,
+                max_extent:     self.grid_max_extent,
+                line_thickness: self.grid_line_thickness,
+                color:          self.grid_color,
+            },
+        }
+        .save();
+    }
+
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         // Drain any in-flight 3D-model import before drawing this frame.
         self.poll_mesh_worker();
@@ -1105,6 +1236,8 @@ impl State {
         // Deferred actions
         let mut action_reset_view = false;
         let mut action_focus_selected = false;
+        let mut action_save_settings  = false;
+        let mut action_rebuild_grids  = false;
         let mut create_object = None;
 
         let mut action_edit_obj_id = None;
@@ -1232,10 +1365,9 @@ impl State {
                             });
                     });
 
-                    ui.add(
-                        egui::Slider::new(&mut self.bg_color, 0.0..=1.0)
-                            .text(t!("common.background").to_string()),
-                    );
+                    if color_edit_button(ui, &t!("settings.bg_color"), &mut self.bg_color) {
+                        action_save_settings = true;
+                    }
 
                     ui.separator();
                     ui.heading(t!("settings.camera_view").to_string());
@@ -1266,10 +1398,36 @@ impl State {
 
                     ui.separator();
                     ui.heading(t!("settings.grid_options").to_string());
-                    ui.checkbox(&mut self.show_grid_xy, t!("settings.grid_xy").to_string());
-                    ui.checkbox(&mut self.show_grid_xz, t!("settings.grid_xz").to_string());
-                    ui.checkbox(&mut self.show_grid_yz, t!("settings.grid_yz").to_string());
-                    ui.checkbox(&mut self.show_axes, t!("settings.show_axes").to_string());
+                    let mut vis_changed = false;
+                    vis_changed |= ui.checkbox(&mut self.show_grid_xy, t!("settings.grid_xy").to_string()).changed();
+                    vis_changed |= ui.checkbox(&mut self.show_grid_xz, t!("settings.grid_xz").to_string()).changed();
+                    vis_changed |= ui.checkbox(&mut self.show_grid_yz, t!("settings.grid_yz").to_string()).changed();
+                    vis_changed |= ui.checkbox(&mut self.show_axes,    t!("settings.show_axes").to_string()).changed();
+                    if vis_changed { action_save_settings = true; }
+
+                    ui.add_space(4.0);
+                    let mut grid_dirty = false;
+
+                    grid_dirty |= ui.add(
+                        egui::Slider::new(&mut self.grid_cell_size, 0.2..=10.0)
+                            .text(t!("settings.grid_cell_size").to_string())
+                            .logarithmic(true),
+                    ).changed();
+
+                    grid_dirty |= ui.add(
+                        egui::Slider::new(&mut self.grid_max_extent, 2.0..=50.0)
+                            .text(t!("settings.grid_max_extent").to_string()),
+                    ).changed();
+
+                    grid_dirty |= ui.add(
+                        egui::Slider::new(&mut self.grid_line_thickness, 0.005..=0.3)
+                            .text(t!("settings.grid_line_thickness").to_string())
+                            .logarithmic(true),
+                    ).changed();
+
+                    grid_dirty |= color_edit_button(ui, &t!("settings.grid_color"), &mut self.grid_color);
+
+                    if grid_dirty { action_rebuild_grids = true; }
                 });
 
             // Gear Button
@@ -2165,6 +2323,12 @@ impl State {
             }
         }
 
+        if action_rebuild_grids {
+            self.rebuild_grids(); // also calls save_settings internally
+        } else if action_save_settings {
+            self.save_settings();
+        }
+
         if let crate::ui::DatasetAction::FocusPoint(p) = dataset_action {
             self.camera_target = cgmath::Point3::new(p[0], p[1], p[2]);
         }
@@ -2443,9 +2607,9 @@ impl State {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: self.bg_color,
-                            g: self.bg_color,
-                            b: self.bg_color,
+                            r: self.bg_color[0] as f64,
+                            g: self.bg_color[1] as f64,
+                            b: self.bg_color[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -2465,8 +2629,8 @@ impl State {
 
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
 
-            // Draw Grid (Lines)
-            render_pass.set_pipeline(&self.line_pipeline);
+            // Draw Grid (thick quads, two-sided)
+            render_pass.set_pipeline(&self.grid_pipeline);
             render_pass.set_vertex_buffer(1, single_instance_buffer.slice(..));
 
             if self.show_grid_xy {
