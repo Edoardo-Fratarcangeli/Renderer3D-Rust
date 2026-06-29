@@ -20,6 +20,7 @@
 //! follows the same architecture (worker thread + dirty flag).
 
 pub mod dataset_table;
+pub mod llm_panel;
 pub mod distribution_chart;
 pub mod export_panel;
 pub mod geometry_panel;

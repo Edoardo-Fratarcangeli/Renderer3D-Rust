@@ -63,9 +63,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     var result = mixed_color * diffuse_strength;
 
-    // Selection Highlight (Emission-like)
-    if (in.instance_alpha > 1.5) {
+    // Selection Highlight (Emission-like) – only for selected scene objects
+    if (in.instance_alpha > 1.5 && in.instance_alpha < 2.5) {
         result = result + vec3<f32>(0.2, 0.2, 0.05); // Subtle Golden Glow
+    }
+
+    // LLM / SLM activation glow: alpha ∈ [3.0, 4.0]; intensity = alpha - 3.0.
+    // Uses the node's own instance_color as the emissive hue so the CPU side
+    // can freely choose cyan (forward pass) or orange (backward / training).
+    if (in.instance_alpha >= 3.0) {
+        let intensity = clamp(in.instance_alpha - 3.0, 0.0, 1.0);
+        result = result + in.instance_color * intensity * 2.2;
     }
 
     return vec4<f32>(result, 1.0);

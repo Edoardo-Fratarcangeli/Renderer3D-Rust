@@ -1,0 +1,290 @@
+# LLM / SLM parameter visualizer translations (rust-i18n combined format).
+# _version: 2 format – one entry per key, languages nested below.
+_version: 2
+
+"toolbar.llm":
+  en: "🧠 LLM"
+  it: "🧠 LLM"
+  es: "🧠 LLM"
+  fr: "🧠 LLM"
+  de: "🧠 LLM"
+
+"list.remove_llm":
+  en: Remove LLM graph
+  it: Rimuovi grafo LLM
+  es: Eliminar grafo LLM
+  fr: Supprimer le graphe LLM
+  de: LLM-Graph entfernen
+
+"list.focus_llm":
+  en: Focus LLM graph
+  it: Centra sul grafo LLM
+  es: Enfocar grafo LLM
+  fr: Centrer sur le graphe LLM
+  de: LLM-Graph fokussieren
+
+"llm.window_title":
+  en: LLM / SLM Visualizer
+  it: Visualizzatore LLM / SLM
+  es: Visualizador LLM / SLM
+  fr: Visualiseur LLM / SLM
+  de: LLM / SLM Visualizer
+
+"llm.heading_import":
+  en: Import Model
+  it: Importa modello
+  es: Importar modelo
+  fr: Importer le modèle
+  de: Modell importieren
+
+"llm.import_hint":
+  en: "Load a .gguf or .json model file to visualize its parameter network."
+  it: "Carica un file .gguf o .json per visualizzare la rete dei parametri."
+  es: "Carga un archivo .gguf o .json para visualizar la red de parámetros."
+  fr: "Chargez un fichier .gguf ou .json pour visualiser le réseau de paramètres."
+  de: "Lade eine .gguf- oder .json-Datei, um das Parameternetzwerk zu visualisieren."
+
+"llm.btn_load":
+  en: Load
+  it: Carica
+  es: Cargar
+  fr: Charger
+  de: Laden
+
+"llm.err_not_found":
+  en: File not found
+  it: File non trovato
+  es: Archivo no encontrado
+  fr: Fichier introuvable
+  de: Datei nicht gefunden
+
+"llm.btn_clear":
+  en: Clear
+  it: Cancella
+  es: Limpiar
+  fr: Effacer
+  de: Löschen
+
+"llm.btn_focus":
+  en: Focus
+  it: Centra
+  es: Enfocar
+  fr: Centrer
+  de: Fokussieren
+
+"llm.layers":
+  en: layers
+  it: livelli
+  es: capas
+  fr: couches
+  de: Schichten
+
+"llm.nodes":
+  en: nodes
+  it: nodi
+  es: nodos
+  fr: nœuds
+  de: Knoten
+
+"llm.edges":
+  en: edges
+  it: connessioni
+  es: conexiones
+  fr: connexions
+  de: Kanten
+
+"llm.heading_prompt":
+  en: Inject Prompt
+  it: Inietta prompt
+  es: Inyectar prompt
+  fr: Injecter un prompt
+  de: Prompt einschleusen
+
+"llm.prompt_hint":
+  en: Type a prompt to inject into the network and watch the activation wave…
+  it: Digita un prompt da iniettare nella rete e osserva l'onda di attivazione…
+  es: Escribe un prompt para inyectarlo en la red y observa la onda de activación…
+  fr: Saisissez un prompt à injecter dans le réseau et observez l'onde d'activation…
+  de: Gib einen Prompt ein, um ihn ins Netzwerk einzuschleusen und die Aktivierungswelle zu beobachten…
+
+"llm.btn_inject":
+  en: Inject
+  it: Inietta
+  es: Inyectar
+  fr: Injecter
+  de: Einschleusen
+
+"llm.btn_clear_anim":
+  en: Clear animation
+  it: Cancella animazione
+  es: Limpiar animación
+  fr: Effacer l'animation
+  de: Animation löschen
+
+"llm.propagating":
+  en: Propagating…
+  it: Propagazione…
+  es: Propagando…
+  fr: Propagation…
+  de: Propagiert…
+
+"llm.activated":
+  en: Activated
+  it: Attivato
+  es: Activado
+  fr: Activé
+  de: Aktiviert
+
+"llm.node_scale":
+  en: Node scale
+  it: Scala nodi
+  es: Escala de nodos
+  fr: Échelle des nœuds
+  de: Knotengröße
+
+"llm.no_model_hint":
+  en: Load a model above to enable prompt injection.
+  it: Carica un modello per abilitare l'iniezione del prompt.
+  es: Carga un modelo para habilitar la inyección del prompt.
+  fr: Chargez un modèle pour activer l'injection de prompt.
+  de: Lade ein Modell, um die Prompt-Einschleusung zu aktivieren.
+
+"llm.tab_model":
+  en: Model
+  it: Modello
+  es: Modelo
+  fr: Modèle
+  de: Modell
+
+"llm.tab_ollama":
+  en: Ollama
+  it: Ollama
+  es: Ollama
+  fr: Ollama
+  de: Ollama
+
+"llm.ollama_heading":
+  en: Ollama Models
+  it: Modelli Ollama
+  es: Modelos Ollama
+  fr: Modèles Ollama
+  de: Ollama-Modelle
+
+"llm.ollama_hint":
+  en: "Browse locally-installed Ollama models. Click Refresh to connect."
+  it: "Sfoglia i modelli Ollama installati localmente. Clicca Aggiorna per connetterti."
+  es: "Explora los modelos Ollama instalados localmente. Haz clic en Actualizar para conectar."
+  fr: "Parcourez les modèles Ollama installés localement. Cliquez sur Actualiser pour vous connecter."
+  de: "Lokal installierte Ollama-Modelle durchsuchen. Klicke auf Aktualisieren zum Verbinden."
+
+"llm.btn_refresh":
+  en: Refresh
+  it: Aggiorna
+  es: Actualizar
+  fr: Actualiser
+  de: Aktualisieren
+
+"llm.btn_load_model":
+  en: Load Graph
+  it: Carica grafo
+  es: Cargar grafo
+  fr: Charger le graphe
+  de: Graph laden
+
+"llm.ollama_empty":
+  en: No models found. Click Refresh to query Ollama.
+  it: Nessun modello trovato. Clicca Aggiorna per interrogare Ollama.
+  es: No se encontraron modelos. Haz clic en Actualizar para consultar Ollama.
+  fr: Aucun modèle trouvé. Cliquez sur Actualiser pour interroger Ollama.
+  de: Keine Modelle gefunden. Klicke auf Aktualisieren, um Ollama abzufragen.
+
+"llm.inference_heading":
+  en: Live Inference
+  it: Inferenza in tempo reale
+  es: Inferencia en vivo
+  fr: Inférence en direct
+  de: Live-Inferenz
+
+"llm.btn_run_inference":
+  en: Run
+  it: Avvia
+  es: Ejecutar
+  fr: Lancer
+  de: Starten
+
+"llm.inference_active":
+  en: Generating…
+  it: Generazione…
+  es: Generando…
+  fr: Génération…
+  de: Generiert…
+
+"llm.inference_output":
+  en: Output
+  it: Output
+  es: Salida
+  fr: Sortie
+  de: Ausgabe
+
+"llm.inference_load_hint":
+  en: Load an Ollama model graph above to enable inference.
+  it: Carica prima un grafo Ollama per abilitare l'inferenza.
+  es: Carga primero un grafo Ollama para habilitar la inferencia.
+  fr: Chargez d'abord un graphe Ollama pour activer l'inférence.
+  de: Lade zuerst einen Ollama-Graphen, um die Inferenz zu aktivieren.
+
+"llm.btn_train_step":
+  en: Simulate Training Step
+  it: Simula passo di addestramento
+  es: Simular paso de entrenamiento
+  fr: Simuler un pas d'entraînement
+  de: Trainingsschritt simulieren
+
+"llm.training":
+  en: Training simulation (forward + backward)…
+  it: Simulazione training (avanti + indietro)…
+  es: Simulación de entrenamiento (adelante + atrás)…
+  fr: Simulation d'entraînement (avant + arrière)…
+  de: Trainings-Simulation (Vorwärts + Rückwärts)…
+
+"llm.wave_speed":
+  en: Wave speed
+  it: Velocità onda
+  es: Velocidad de onda
+  fr: Vitesse d'onde
+  de: Wellengeschwindigkeit
+
+"llm.loss_curve":
+  en: Training loss
+  it: Loss di addestramento
+  es: Pérdida de entrenamiento
+  fr: Perte d'entraînement
+  de: Trainings-Loss
+
+"llm.compact_view":
+  en: Compact view
+  it: Vista compatta
+  es: Vista compacta
+  fr: Vue compacte
+  de: Kompaktansicht
+
+"llm.compact_stride":
+  en: stride
+  it: passo
+  es: paso
+  fr: pas
+  de: Schritt
+
+"llm.export_heading":
+  en: Export Animation
+  it: Esporta animazione
+  es: Exportar animación
+  fr: Exporter l'animation
+  de: Animation exportieren
+
+"llm.btn_record":
+  en: "⏺ Record"
+  it: "⏺ Registra"
+  es: "⏺ Grabar"
+  fr: "⏺ Enregistrer"
+  de: "⏺ Aufnehmen"
