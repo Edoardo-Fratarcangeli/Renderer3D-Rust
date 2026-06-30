@@ -5,16 +5,35 @@
 //! import itself, it only returns an [`ImportRequest`] for the caller
 //! ([`super::DatasetView::start_import`]) to execute.
 
-use super::{ImportRequest, ImportSource, ImportState};
-use crate::dataset::builtin::BuiltinDataset;
+use std::path::PathBuf;
 
-/// Short, user-facing description for each builtin benchmark button.
+use super::{ImportRequest, ImportSource, ImportState, NetSource};
+use crate::dataset::builtin::BuiltinDataset;
+use crate::llm::catalog::NetArch;
+use crate::llm::network::NodeStyle;
+
+/// Short, user-facing description for each builtin benchmark / CAE button.
 pub fn builtin_description(name: &str) -> String {
     match name {
         "blobs" => t!("dataset.builtin_blobs").to_string(),
         "spirals" => t!("dataset.builtin_spirals").to_string(),
         "swiss_roll" => t!("dataset.builtin_swiss_roll").to_string(),
+        "cae_thermal" => t!("dataset.cae_thermal").to_string(),
+        "cae_stress" => t!("dataset.cae_stress").to_string(),
+        "cae_flow" => t!("dataset.cae_flow").to_string(),
+        "cae_modal" => t!("dataset.cae_modal").to_string(),
         _ => t!("dataset.builtin_generic").to_string(),
+    }
+}
+
+/// Human-readable title for a CAE field button (the raw names are slugs).
+fn cae_title(name: &str) -> &'static str {
+    match name {
+        "cae_thermal" => "🌡 Thermal",
+        "cae_stress" => "🔩 Stress",
+        "cae_flow" => "💨 Fluid",
+        "cae_modal" => "〰 Modal",
+        _ => "CAE",
     }
 }
 
@@ -161,12 +180,127 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
         }
     });
 
+    // ── CAE / simulation field datasets (FEM-style banded contour clouds) ──
+    ui.add_space(8.0);
+    ui.separator();
+    ui.vertical_centered(|ui| {
+        ui.label(egui::RichText::new(t!("dataset.cae_heading").to_string()).strong());
+        ui.label(egui::RichText::new(t!("dataset.cae_hint").to_string()).weak().small());
+    });
+    ui.add_space(4.0);
+    ui.columns(BuiltinDataset::CAE_NAMES.len(), |cols| {
+        for (col, name) in cols.iter_mut().zip(BuiltinDataset::CAE_NAMES) {
+            col.vertical_centered(|ui| {
+                let button = egui::Button::new(egui::RichText::new(cae_title(name)).strong())
+                    .min_size(egui::vec2(96.0, 24.0));
+                if ui.add_enabled(!state.loading, button).clicked() {
+                    request = Some(ImportRequest {
+                        source: ImportSource::Builtin(name),
+                        max_rows: None,
+                        projection,
+                    });
+                }
+                ui.label(egui::RichText::new(builtin_description(name)).weak().small());
+            });
+        }
+    });
+
+    network_section(ui, state);
+
     if let Some(status) = &state.status {
         ui.add_space(8.0);
         ui.separator();
         ui.vertical_centered(|ui| status.show(ui));
     }
     request
+}
+
+/// Neural-network import, folded directly into the import form.
+///
+/// Covers the whole ML/DL zoo via [`NetArch`] presets (CNN 2D/3D, point clouds,
+/// graph NNs, autoencoders, GANs, RNNs, transformers, …) plus `.gguf`/`.json`
+/// model files, with render-style (spheres / voxels / points) and accent-color
+/// controls. It mutates [`ImportState`]; the host drains
+/// [`super::DatasetView::take_network_request`] to build and install the graph.
+fn network_section(ui: &mut egui::Ui, state: &mut ImportState) {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.vertical_centered(|ui| {
+        ui.label(egui::RichText::new(t!("llm.net_heading").to_string()).strong());
+        ui.label(egui::RichText::new(t!("llm.net_hint").to_string()).weak().small());
+    });
+    ui.add_space(4.0);
+
+    // ── Architecture preset picker + build ──
+    ui.horizontal(|ui| {
+        ui.label(t!("llm.net_arch").to_string());
+        egui::ComboBox::from_id_source("net_arch_combo")
+            .selected_text(state.net_arch.label())
+            .width(240.0)
+            .show_ui(ui, |ui| {
+                // Grouped by ML paradigm (Supervised, Unsupervised, RL, …) so the
+                // picker mirrors the ML/DL taxonomy; architecture family is shown
+                // on hover.
+                for (gi, paradigm) in crate::llm::catalog::PARADIGMS.iter().enumerate() {
+                    if gi > 0 {
+                        ui.separator();
+                    }
+                    ui.label(egui::RichText::new(*paradigm).weak().small());
+                    for arch in NetArch::ALL.iter().filter(|a| a.paradigm() == *paradigm) {
+                        ui.selectable_value(&mut state.net_arch, *arch, arch.label())
+                            .on_hover_text(format!("{} · {}", arch.group(), arch.paradigm()));
+                    }
+                }
+            });
+        if ui
+            .button(egui::RichText::new(t!("llm.net_build").to_string()).strong())
+            .clicked()
+        {
+            state.net_request = Some(NetSource::Preset(state.net_arch));
+        }
+    });
+
+    // ── Model file (.gguf / .json) ──
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut state.net_path)
+                .hint_text("model.gguf  ·  model.json")
+                .desired_width(280.0),
+        );
+        let can_load = !state.net_path.trim().is_empty();
+        if ui
+            .add_enabled(can_load, egui::Button::new(t!("llm.net_load_file").to_string()))
+            .clicked()
+        {
+            state.net_request = Some(NetSource::File(PathBuf::from(state.net_path.trim())));
+        }
+    });
+
+    // ── Render style ──
+    ui.horizontal(|ui| {
+        ui.label(t!("llm.net_style").to_string());
+        for style in NodeStyle::ALL {
+            let label = match style {
+                NodeStyle::Spheres => t!("llm.style_spheres"),
+                NodeStyle::Voxels => t!("llm.style_voxels"),
+                NodeStyle::Points => t!("llm.style_points"),
+            };
+            ui.radio_value(&mut state.net_style, style, label.to_string());
+        }
+    });
+
+    // ── Accent color override ──
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut state.net_accent_enabled, t!("llm.net_accent").to_string());
+        ui.add_enabled_ui(state.net_accent_enabled, |ui| {
+            ui.color_edit_button_rgb(&mut state.net_accent);
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(t!("llm.net_advanced").to_string()).clicked() {
+                state.open_network_window = true;
+            }
+        });
+    });
 }
 
 #[cfg(test)]

@@ -58,5 +58,5 @@ fn test_show_axes() {
 // Background Test
 #[test]
 fn test_bg_color() {
-    assert_eq!(DEFAULT_BG_COLOR, 0.1_f64, "Background Color mismatch");
+    assert_eq!(DEFAULT_BG_COLOR, [0.1_f32, 0.1, 0.1], "Background Color mismatch");
 }

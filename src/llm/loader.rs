@@ -57,6 +57,39 @@ pub enum JsonLayerKind {
     FeedForward,
     LayerNorm,
     Output,
+    // Generic ML/DL structures (see [`crate::llm::network::LayerKind`]).
+    Input,
+    Dense,
+    Convolution,
+    Pooling,
+    Recurrent,
+    Graph,
+    PointSet,
+    Residual,
+    Latent,
+    Upsample,
+}
+
+impl From<JsonLayerKind> for LayerKind {
+    fn from(k: JsonLayerKind) -> Self {
+        match k {
+            JsonLayerKind::Embedding   => LayerKind::Embedding,
+            JsonLayerKind::Attention   => LayerKind::Attention,
+            JsonLayerKind::FeedForward => LayerKind::FeedForward,
+            JsonLayerKind::LayerNorm   => LayerKind::LayerNorm,
+            JsonLayerKind::Output      => LayerKind::Output,
+            JsonLayerKind::Input       => LayerKind::Input,
+            JsonLayerKind::Dense       => LayerKind::Dense,
+            JsonLayerKind::Convolution => LayerKind::Convolution,
+            JsonLayerKind::Pooling     => LayerKind::Pooling,
+            JsonLayerKind::Recurrent   => LayerKind::Recurrent,
+            JsonLayerKind::Graph       => LayerKind::Graph,
+            JsonLayerKind::PointSet    => LayerKind::PointSet,
+            JsonLayerKind::Residual    => LayerKind::Residual,
+            JsonLayerKind::Latent      => LayerKind::Latent,
+            JsonLayerKind::Upsample    => LayerKind::Upsample,
+        }
+    }
 }
 
 /// Parse a JSON model description into a [`NetworkGraph`].
@@ -74,13 +107,7 @@ pub fn from_json(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
         .layers
         .into_iter()
         .map(|jl| {
-            let kind = match jl.kind {
-                JsonLayerKind::Embedding   => LayerKind::Embedding,
-                JsonLayerKind::Attention   => LayerKind::Attention,
-                JsonLayerKind::FeedForward => LayerKind::FeedForward,
-                JsonLayerKind::LayerNorm   => LayerKind::LayerNorm,
-                JsonLayerKind::Output      => LayerKind::Output,
-            };
+            let kind = LayerKind::from(jl.kind);
             let raw = if !jl.node_weights.is_empty() {
                 jl.node_weights
             } else {

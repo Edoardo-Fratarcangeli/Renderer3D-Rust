@@ -38,6 +38,8 @@ use crate::dataset::index::{apply_filter, FilterSpec, SearchQuery};
 use crate::dataset::preprocessor::{self, Projection, ProjectionMethod, ProjectionSpec};
 use crate::dataset::stream::{StreamConfig, StreamEvent, StreamSession};
 use crate::dataset::{builtin, loader, Dataset, DatasetIndex};
+use crate::llm::catalog::NetArch;
+use crate::llm::network::NodeStyle;
 use crate::visualization::point_cloud::{self, PointCloudSettings};
 
 /// Directory holding metadata / index / projection caches.
@@ -69,6 +71,17 @@ pub enum ImportSource {
     Path(PathBuf),
     /// One of the synthetic benchmark generators (see [`builtin`]).
     Builtin(&'static str),
+}
+
+/// What kind of neural network to import from the Import tab. Handled by the
+/// host (`State`), which builds the graph and installs it into the LLM/network
+/// visualizer — there is no separate top-level button for it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NetSource {
+    /// One of the built-in architecture presets ([`NetArch`]).
+    Preset(NetArch),
+    /// A model file on disk (`.gguf` / `.json`).
+    File(PathBuf),
 }
 
 /// A fully specified import request produced by the import dialog.
@@ -212,6 +225,22 @@ pub struct ImportState {
     pub status: Option<StatusMessage>,
     /// True while the worker thread is importing.
     pub loading: bool,
+
+    // ── Neural-network import (integrated into this same tab) ──
+    /// Currently selected architecture preset.
+    pub net_arch: NetArch,
+    /// Path typed in the model-file field (`.gguf` / `.json`).
+    pub net_path: String,
+    /// How network nodes are drawn (spheres / voxels / points).
+    pub net_style: NodeStyle,
+    /// Override node colors with [`Self::net_accent`].
+    pub net_accent_enabled: bool,
+    /// User accent color used when [`Self::net_accent_enabled`].
+    pub net_accent: [f32; 3],
+    /// Pending network-import request drained by the host each frame.
+    pub net_request: Option<NetSource>,
+    /// Set when the user asks to open the advanced inference/animation window.
+    pub open_network_window: bool,
 }
 
 /// Build a [`ProjectionSpec`] from the PCA/Radial flags + dims + axes. Shared
@@ -310,6 +339,7 @@ impl DatasetView {
                 max_rows: 100_000,
                 dims: 3,
                 axes: [0, 1, 2],
+                net_accent: [0.20, 0.65, 1.00],
                 ..Default::default()
             },
             export: ExportState {
@@ -328,6 +358,17 @@ impl DatasetView {
             render_dirty: false,
             worker: None,
         }
+    }
+
+    /// Drain a pending neural-network import request (preset or model file).
+    /// The host builds the graph and installs it into the LLM visualizer.
+    pub fn take_network_request(&mut self) -> Option<NetSource> {
+        self.import.net_request.take()
+    }
+
+    /// Drain the "open advanced network window" intent (one-shot).
+    pub fn take_open_network(&mut self) -> bool {
+        std::mem::take(&mut self.import.open_network_window)
     }
 
     /// True once per change to the visible point set; the host should

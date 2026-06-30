@@ -91,12 +91,18 @@ impl ActivationState {
             .enumerate()
             .map(|(li, layer)| {
                 let kind_boost = match layer.kind {
-                    LayerKind::Embedding   => 1.30,
-                    LayerKind::Attention   => 1.20,
-                    LayerKind::FeedForward => 1.00,
-                    LayerKind::LayerNorm   => 0.75,
-                    LayerKind::Output      => 1.10,
-                    LayerKind::Expert      => 1.00,
+                    LayerKind::Embedding | LayerKind::Input       => 1.30,
+                    LayerKind::Attention                          => 1.20,
+                    LayerKind::FeedForward | LayerKind::Dense     => 1.00,
+                    LayerKind::Convolution | LayerKind::Graph
+                        | LayerKind::PointSet                     => 1.15,
+                    LayerKind::Recurrent                          => 1.10,
+                    LayerKind::Pooling                            => 0.85,
+                    LayerKind::LayerNorm | LayerKind::Residual    => 0.75,
+                    LayerKind::Latent                             => 1.25,
+                    LayerKind::Upsample                           => 1.05,
+                    LayerKind::Output                             => 1.10,
+                    LayerKind::Expert                             => 1.00,
                 };
                 layer
                     .nodes

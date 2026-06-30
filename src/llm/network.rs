@@ -15,8 +15,15 @@ pub const NODE_SPACING: f32 = 0.45;
 pub const NODE_BASE_SCALE: f32 = 0.10;
 pub const NODE_MAX_SCALE: f32 = 0.32;
 
+/// Type of a layer in the visualized network.
+///
+/// The first six variants describe transformer/LLM building blocks; the rest
+/// generalize the visualizer to the wider ML/DL zoo (CNNs, RNNs, graph and
+/// point-cloud networks, autoencoders, …) so any architecture in
+/// [`crate::llm::catalog`] can be represented with a meaningful color/icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerKind {
+    // ── Transformer / LLM ──
     Embedding,
     Attention,
     FeedForward,
@@ -24,6 +31,28 @@ pub enum LayerKind {
     Output,
     /// MoE expert FFN — only a subset activate per token.
     Expert,
+
+    // ── Generic ML / DL ──
+    /// Raw input layer (image tensor, feature vector, point set, …).
+    Input,
+    /// Fully-connected / dense (MLP) layer.
+    Dense,
+    /// Convolutional layer (2D or 3D feature maps).
+    Convolution,
+    /// Pooling / subsampling layer.
+    Pooling,
+    /// Recurrent cell block (RNN / LSTM / GRU).
+    Recurrent,
+    /// Graph message-passing layer (GCN / GAT / GraphSAGE).
+    Graph,
+    /// Point-cloud set-abstraction / grouping layer (PointNet family).
+    PointSet,
+    /// Residual / skip-connection junction.
+    Residual,
+    /// Latent / bottleneck code (autoencoder, VAE).
+    Latent,
+    /// Up-sampling / transposed-convolution / decoder layer.
+    Upsample,
 }
 
 impl LayerKind {
@@ -36,6 +65,67 @@ impl LayerKind {
             LayerKind::LayerNorm   => [0.55, 0.55, 0.35],
             LayerKind::Output      => [0.75, 0.35, 0.25],
             LayerKind::Expert      => [0.55, 0.20, 0.70],
+            LayerKind::Input       => [0.30, 0.55, 0.75],
+            LayerKind::Dense       => [0.40, 0.45, 0.70],
+            LayerKind::Convolution => [0.20, 0.60, 0.65],
+            LayerKind::Pooling     => [0.35, 0.50, 0.40],
+            LayerKind::Recurrent   => [0.65, 0.40, 0.55],
+            LayerKind::Graph       => [0.30, 0.65, 0.35],
+            LayerKind::PointSet    => [0.70, 0.55, 0.25],
+            LayerKind::Residual    => [0.60, 0.60, 0.60],
+            LayerKind::Latent      => [0.70, 0.25, 0.50],
+            LayerKind::Upsample    => [0.45, 0.55, 0.70],
+        }
+    }
+
+    /// Short emoji icon shown in layer lists and inspectors.
+    pub fn icon(self) -> &'static str {
+        match self {
+            LayerKind::Embedding   => "📥",
+            LayerKind::Attention   => "👁",
+            LayerKind::FeedForward => "⚡",
+            LayerKind::LayerNorm   => "📐",
+            LayerKind::Output      => "📤",
+            LayerKind::Expert      => "🔷",
+            LayerKind::Input       => "🟢",
+            LayerKind::Dense       => "▦",
+            LayerKind::Convolution => "🟦",
+            LayerKind::Pooling     => "🔽",
+            LayerKind::Recurrent   => "🔁",
+            LayerKind::Graph       => "🕸",
+            LayerKind::PointSet    => "✶",
+            LayerKind::Residual    => "➕",
+            LayerKind::Latent      => "🎯",
+            LayerKind::Upsample    => "🔼",
+        }
+    }
+}
+
+/// How node primitives are drawn in the 3D viewport.
+///
+/// The geometry mesh is chosen by the renderer ([`crate::state`]) from
+/// [`NodeStyle::geometry`]; `Voxels` additionally snaps node positions to a
+/// regular grid so a network reads as a stack of voxel blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NodeStyle {
+    /// Smooth spheres (default).
+    #[default]
+    Spheres,
+    /// Axis-aligned cubes on a voxel grid.
+    Voxels,
+    /// Small dot-like spheres (point-cloud look).
+    Points,
+}
+
+impl NodeStyle {
+    pub const ALL: [NodeStyle; 3] = [NodeStyle::Spheres, NodeStyle::Voxels, NodeStyle::Points];
+
+    /// Per-node scale multiplier applied on top of the user node-scale slider.
+    pub fn scale_mult(self) -> f32 {
+        match self {
+            NodeStyle::Spheres => 1.0,
+            NodeStyle::Voxels  => 1.0,
+            NodeStyle::Points  => 0.45,
         }
     }
 }
