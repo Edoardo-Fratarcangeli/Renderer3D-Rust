@@ -288,3 +288,80 @@ _version: 2
   es: "⏺ Grabar"
   fr: "⏺ Enregistrer"
   de: "⏺ Aufnehmen"
+
+"llm.net_heading":
+  en: "🧠 Neural Networks"
+  it: "🧠 Reti neurali"
+  es: "🧠 Redes neuronales"
+  fr: "🧠 Réseaux de neurones"
+  de: "🧠 Neuronale Netze"
+
+"llm.net_hint":
+  en: "Build a network architecture or load a .gguf/.json model — visualized in 3D."
+  it: "Costruisci un'architettura di rete o carica un modello .gguf/.json — visualizzato in 3D."
+  es: "Crea una arquitectura de red o carga un modelo .gguf/.json — visualizado en 3D."
+  fr: "Construisez une architecture ou chargez un modèle .gguf/.json — visualisé en 3D."
+  de: "Erstelle eine Netzarchitektur oder lade ein .gguf/.json-Modell — in 3D dargestellt."
+
+"llm.net_arch":
+  en: Architecture
+  it: Architettura
+  es: Arquitectura
+  fr: Architecture
+  de: Architektur
+
+"llm.net_build":
+  en: Build
+  it: Costruisci
+  es: Construir
+  fr: Construire
+  de: Erstellen
+
+"llm.net_load_file":
+  en: Load file
+  it: Carica file
+  es: Cargar archivo
+  fr: Charger un fichier
+  de: Datei laden
+
+"llm.net_style":
+  en: Style
+  it: Stile
+  es: Estilo
+  fr: Style
+  de: Stil
+
+"llm.style_spheres":
+  en: Spheres
+  it: Sfere
+  es: Esferas
+  fr: Sphères
+  de: Kugeln
+
+"llm.style_voxels":
+  en: Voxels
+  it: Voxel
+  es: Vóxeles
+  fr: Voxels
+  de: Voxel
+
+"llm.style_points":
+  en: Points
+  it: Punti
+  es: Puntos
+  fr: Points
+  de: Punkte
+
+"llm.net_accent":
+  en: Accent color
+  it: Colore accento
+  es: Color de acento
+  fr: Couleur d'accent
+  de: Akzentfarbe
+
+"llm.net_advanced":
+  en: Advanced…
+  it: Avanzate…
+  es: Avanzado…
+  fr: Avancé…
+  de: Erweitert…

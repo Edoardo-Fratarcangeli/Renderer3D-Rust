@@ -29,10 +29,13 @@ use cgmath::{InnerSpace, Matrix4};
 use crate::llm::activation::{ActivationMode, ActivationState};
 use crate::llm::exporter::AnimExporter;
 use crate::llm::loader;
-use crate::llm::network::{LayerKind, NetworkGraph, NODE_BASE_SCALE, NODE_MAX_SCALE};
+use crate::llm::network::{
+    LayerKind, NetworkGraph, NodeStyle, NODE_BASE_SCALE, NODE_MAX_SCALE, NODE_SPACING,
+};
 use crate::llm::ollama::{self, OllamaEvent, OllamaModel};
 use crate::llm::tokenizer::Tokenizer;
 use crate::model::{InstanceRaw, Vertex};
+use crate::scene::GeometryType;
 
 use super::StatusMessage;
 
@@ -83,6 +86,15 @@ pub struct LlmView {
     pub visible:         bool,
     pub node_scale_mult: f32,
     pub wave_speed: f32,
+
+    /// How node primitives are drawn (spheres / voxels / points).
+    pub render_style: NodeStyle,
+    /// When true, all node base colors are overridden by [`Self::accent_color`].
+    pub accent_enabled: bool,
+    /// User accent color (linear RGB) used when [`Self::accent_enabled`].
+    pub accent_color: [f32; 3],
+    /// Grid cell size used to snap node positions in [`NodeStyle::Voxels`].
+    pub voxel_grid: f32,
 
     render_dirty:     bool,
     animation_active: bool,
@@ -146,6 +158,10 @@ impl LlmView {
             visible:     true,
             node_scale_mult: 1.0,
             wave_speed: 1.0,
+            render_style:     NodeStyle::default(),
+            accent_enabled:   false,
+            accent_color:     [0.20, 0.65, 1.00],
+            voxel_grid:       NODE_SPACING,
             render_dirty:     false,
             animation_active: false,
             worker:           None,
@@ -548,6 +564,44 @@ impl LlmView {
         self.graph.as_ref()?.centroid()
     }
 
+    /// Primitive mesh the renderer should instance for node bodies.
+    pub fn node_geometry(&self) -> GeometryType {
+        match self.render_style {
+            NodeStyle::Voxels => GeometryType::Cube,
+            // Spheres and Points both use the sphere mesh; Points just scales
+            // it down (see [`NodeStyle::scale_mult`]).
+            NodeStyle::Spheres | NodeStyle::Points => GeometryType::Sphere,
+        }
+    }
+
+    /// Install a pre-built architecture graph (catalog preset). Mirrors the
+    /// file-import path but is synchronous since presets are tiny.
+    pub fn load_preset(&mut self, graph: NetworkGraph) {
+        self.install_graph(graph, None, |g| {
+            format!("Loaded '{}' — {} layers · {} nodes · {} edges",
+                g.name, g.layers.len(), g.node_count(), g.edges.len())
+        });
+    }
+
+    /// Update render style and accent color; marks the scene dirty only when a
+    /// value actually changed so it is cheap to call every frame.
+    pub fn apply_style(
+        &mut self,
+        style: NodeStyle,
+        accent_enabled: bool,
+        accent_color: [f32; 3],
+    ) {
+        let changed = self.render_style != style
+            || self.accent_enabled != accent_enabled
+            || self.accent_color != accent_color;
+        if changed {
+            self.render_style = style;
+            self.accent_enabled = accent_enabled;
+            self.accent_color = accent_color;
+            self.render_dirty = true;
+        }
+    }
+
     // ── Ray-pick against node spheres ──────────────────────────────────────
 
     /// Test a world-space ray against all visible LLM node spheres.
@@ -619,10 +673,17 @@ impl LlmView {
 
         let now = Instant::now();
 
+        let style = self.render_style;
+        let style_mult = style.scale_mult();
         let mut node_instances = Vec::new();
         for (li, layer) in graph.layers.iter().enumerate() {
             if !self.is_layer_visible(li, layer.kind) { continue; }
-            let base_col = layer.kind.base_color();
+            // Accent color overrides the per-kind palette when enabled.
+            let base_col = if self.accent_enabled {
+                self.accent_color
+            } else {
+                layer.kind.base_color()
+            };
             for (ni, node) in layer.nodes.iter().enumerate() {
                 let fwd  = self.activation.as_ref().map(|a| a.glow_at(li, ni, now)).unwrap_or(0.0);
                 let back = self.activation.as_ref().map(|a| a.back_glow_at(li, ni, now)).unwrap_or(0.0);
@@ -631,6 +692,7 @@ impl LlmView {
                 let scale = (NODE_BASE_SCALE
                     + node.weight_magnitude * (NODE_MAX_SCALE - NODE_BASE_SCALE))
                     * self.node_scale_mult
+                    * style_mult
                     * (1.0 + total_glow * 0.5);
 
                 let [r, g, b] = if total_glow > 0.01 {
@@ -645,7 +707,13 @@ impl LlmView {
 
                 let alpha = if total_glow > 0.01 { 3.0 + total_glow } else { 1.0 };
 
-                let p = node.position;
+                // In voxel mode snap node centers onto a regular grid so the
+                // network reads as stacked blocks instead of free spheres.
+                let p = if style == NodeStyle::Voxels {
+                    snap_to_grid(node.position, self.voxel_grid)
+                } else {
+                    node.position
+                };
                 let model = Matrix4::from_translation(cgmath::Vector3::new(p[0], p[1], p[2]))
                     * Matrix4::from_scale(scale);
 
@@ -857,15 +925,7 @@ impl LlmView {
                         };
 
                         let row_resp = ui.horizontal(|ui| {
-                            let icon = match kind {
-                                LayerKind::Embedding   => "📥",
-                                LayerKind::Attention   => "👁",
-                                LayerKind::FeedForward => "⚡",
-                                LayerKind::LayerNorm   => "📐",
-                                LayerKind::Output      => "📤",
-                                LayerKind::Expert      => "🔷",
-                            };
-                            ui.label(icon);
+                            ui.label(kind.icon());
                             ui.label(name.as_str());
                             ui.add(
                                 egui::ProgressBar::new(*wmean)
@@ -1249,6 +1309,19 @@ impl LlmView {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Snap a world-space position onto a regular grid of cell size `g`.
+#[inline]
+fn snap_to_grid(p: [f32; 3], g: f32) -> [f32; 3] {
+    if g <= 1e-4 {
+        return p;
+    }
+    [
+        (p[0] / g).round() * g,
+        (p[1] / g).round() * g,
+        (p[2] / g).round() * g,
+    ]
+}
 
 #[inline]
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {

@@ -5,8 +5,12 @@
 //! import itself, it only returns an [`ImportRequest`] for the caller
 //! ([`super::DatasetView::start_import`]) to execute.
 
-use super::{ImportRequest, ImportSource, ImportState};
+use std::path::PathBuf;
+
+use super::{ImportRequest, ImportSource, ImportState, NetSource};
 use crate::dataset::builtin::BuiltinDataset;
+use crate::llm::catalog::NetArch;
+use crate::llm::network::NodeStyle;
 
 /// Short, user-facing description for each builtin benchmark button.
 pub fn builtin_description(name: &str) -> String {
@@ -161,12 +165,99 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
         }
     });
 
+    network_section(ui, state);
+
     if let Some(status) = &state.status {
         ui.add_space(8.0);
         ui.separator();
         ui.vertical_centered(|ui| status.show(ui));
     }
     request
+}
+
+/// Neural-network import, folded directly into the import form.
+///
+/// Covers the whole ML/DL zoo via [`NetArch`] presets (CNN 2D/3D, point clouds,
+/// graph NNs, autoencoders, GANs, RNNs, transformers, …) plus `.gguf`/`.json`
+/// model files, with render-style (spheres / voxels / points) and accent-color
+/// controls. It mutates [`ImportState`]; the host drains
+/// [`super::DatasetView::take_network_request`] to build and install the graph.
+fn network_section(ui: &mut egui::Ui, state: &mut ImportState) {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.vertical_centered(|ui| {
+        ui.label(egui::RichText::new(t!("llm.net_heading").to_string()).strong());
+        ui.label(egui::RichText::new(t!("llm.net_hint").to_string()).weak().small());
+    });
+    ui.add_space(4.0);
+
+    // ── Architecture preset picker + build ──
+    ui.horizontal(|ui| {
+        ui.label(t!("llm.net_arch").to_string());
+        egui::ComboBox::from_id_source("net_arch_combo")
+            .selected_text(state.net_arch.label())
+            .show_ui(ui, |ui| {
+                let mut last_group = "";
+                for arch in NetArch::ALL {
+                    if arch.group() != last_group {
+                        if !last_group.is_empty() {
+                            ui.separator();
+                        }
+                        ui.label(egui::RichText::new(arch.group()).weak().small());
+                        last_group = arch.group();
+                    }
+                    ui.selectable_value(&mut state.net_arch, arch, arch.label());
+                }
+            });
+        if ui
+            .button(egui::RichText::new(t!("llm.net_build").to_string()).strong())
+            .clicked()
+        {
+            state.net_request = Some(NetSource::Preset(state.net_arch));
+        }
+    });
+
+    // ── Model file (.gguf / .json) ──
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut state.net_path)
+                .hint_text("model.gguf  ·  model.json")
+                .desired_width(280.0),
+        );
+        let can_load = !state.net_path.trim().is_empty();
+        if ui
+            .add_enabled(can_load, egui::Button::new(t!("llm.net_load_file").to_string()))
+            .clicked()
+        {
+            state.net_request = Some(NetSource::File(PathBuf::from(state.net_path.trim())));
+        }
+    });
+
+    // ── Render style ──
+    ui.horizontal(|ui| {
+        ui.label(t!("llm.net_style").to_string());
+        for style in NodeStyle::ALL {
+            let label = match style {
+                NodeStyle::Spheres => t!("llm.style_spheres"),
+                NodeStyle::Voxels => t!("llm.style_voxels"),
+                NodeStyle::Points => t!("llm.style_points"),
+            };
+            ui.radio_value(&mut state.net_style, style, label.to_string());
+        }
+    });
+
+    // ── Accent color override ──
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut state.net_accent_enabled, t!("llm.net_accent").to_string());
+        ui.add_enabled_ui(state.net_accent_enabled, |ui| {
+            ui.color_edit_button_rgb(&mut state.net_accent);
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(t!("llm.net_advanced").to_string()).clicked() {
+                state.open_network_window = true;
+            }
+        });
+    });
 }
 
 #[cfg(test)]

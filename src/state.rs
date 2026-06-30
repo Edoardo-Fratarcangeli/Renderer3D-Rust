@@ -1282,9 +1282,10 @@ impl State {
                         if ui.button(t!("toolbar.sketch").to_string()).clicked() {
                             self.sketch_view.show_window = !self.sketch_view.show_window;
                         }
-                        if ui.button(t!("toolbar.llm").to_string()).clicked() {
-                            self.llm_view.show_window = !self.llm_view.show_window;
-                        }
+                        // Neural-network / LLM import lives inside the Dataset
+                        // import window (no standalone toolbar button); its
+                        // advanced inference/animation window is opened from
+                        // there. See the network section of `import_dialog`.
                         // Measurement tool toggle. While active, clicking two
                         // surface points reports the distance between them.
                         if ui
@@ -1335,6 +1336,35 @@ impl State {
 
             // Dataset visualizer window (import, table, filters, search, export)
             dataset_action = self.dataset_view.show(ctx);
+
+            // Neural-network import is integrated into the dataset import tab:
+            // drain any request and install it into the LLM/network visualizer.
+            if let Some(src) = self.dataset_view.take_network_request() {
+                match src {
+                    crate::ui::NetSource::Preset(arch) => {
+                        self.llm_view.load_preset(arch.build());
+                    }
+                    crate::ui::NetSource::File(path) => {
+                        if path.exists() {
+                            self.llm_view.load_file(path);
+                        } else {
+                            self.llm_view.status = Some(crate::ui::StatusMessage::error(
+                                format!("{}: {}", t!("llm.err_not_found"), path.display()),
+                            ));
+                        }
+                    }
+                }
+            }
+            if self.dataset_view.take_open_network() {
+                self.llm_view.show_window = true;
+            }
+            // Keep render style + accent color (chosen in the import tab) in
+            // sync with the visualizer every frame; cheap when unchanged.
+            let imp = &self.dataset_view.import;
+            let (net_style, net_accent_on, net_accent) =
+                (imp.net_style, imp.net_accent_enabled, imp.net_accent);
+            self.llm_view.apply_style(net_style, net_accent_on, net_accent);
+
             // Geometry import window (paste / files / layers)
             geometry_focus = self.geometry_view.show(ctx);
             // Sketch & solid composer window
@@ -2743,16 +2773,22 @@ impl State {
                 render_pass.draw(0..*edge_count, 0..1);
             }
 
-            // Draw LLM node spheres (triangle pipeline, instanced, low-poly LOD)
+            // Draw LLM/network nodes (triangle pipeline, instanced). The body
+            // mesh follows the chosen render style: cubes for voxel mode, the
+            // low-poly sphere for spheres/points.
             if let Some((node_buf, node_count)) = &self.llm_node_batch {
+                let node_mesh = match self.llm_view.node_geometry() {
+                    GeometryType::Cube => &self.cube_mesh,
+                    _ => &self.sphere_lod_mesh,
+                };
                 render_pass.set_pipeline(&self.render_pipeline);
-                render_pass.set_vertex_buffer(0, self.sphere_lod_mesh.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(0, node_mesh.vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, node_buf.slice(..));
                 render_pass.set_index_buffer(
-                    self.sphere_lod_mesh.index_buffer.slice(..),
+                    node_mesh.index_buffer.slice(..),
                     wgpu::IndexFormat::Uint16,
                 );
-                render_pass.draw_indexed(0..self.sphere_lod_mesh.num_indices, 0, 0..*node_count);
+                render_pass.draw_indexed(0..node_mesh.num_indices, 0, 0..*node_count);
             }
 
             // Render UI
