@@ -44,11 +44,38 @@ pub enum NetArch {
     GraphSage,
     Transformer,
     Vit,
+    // ── Generative / advanced DL ──
+    Diffusion,
+    Pinn,
+    // ── Learning paradigms ──
+    Dqn,
+    ActorCritic,
+    SimClr,
+    TransferLearning,
+    SemiSupervised,
+    AnomalyDetector,
+    Seq2Seq,
 }
+
+/// ML paradigms in canonical display order, used to group the catalog. Every
+/// entry is guaranteed to have ≥1 representative in [`NetArch::ALL`] (enforced
+/// by a unit test).
+pub const PARADIGMS: [&str; 10] = [
+    "Supervised",
+    "Unsupervised",
+    "Self-supervised",
+    "Semi-supervised",
+    "Transfer",
+    "Reinforcement",
+    "Time series",
+    "Anomaly detection",
+    "Generative",
+    "Physics-informed",
+];
 
 impl NetArch {
     /// Every architecture, in display order.
-    pub const ALL: [NetArch; 19] = [
+    pub const ALL: [NetArch; 28] = [
         NetArch::Mlp,
         NetArch::Cnn2d,
         NetArch::Vgg,
@@ -68,6 +95,15 @@ impl NetArch {
         NetArch::GraphSage,
         NetArch::Transformer,
         NetArch::Vit,
+        NetArch::Diffusion,
+        NetArch::Pinn,
+        NetArch::Dqn,
+        NetArch::ActorCritic,
+        NetArch::SimClr,
+        NetArch::TransferLearning,
+        NetArch::SemiSupervised,
+        NetArch::AnomalyDetector,
+        NetArch::Seq2Seq,
     ];
 
     /// Short, human-facing name (proper nouns — not localized).
@@ -92,19 +128,52 @@ impl NetArch {
             NetArch::GraphSage   => "GraphSAGE",
             NetArch::Transformer => "Transformer",
             NetArch::Vit         => "Vision Transformer",
+            NetArch::Diffusion   => "Diffusion (DDPM U-Net)",
+            NetArch::Pinn        => "Physics-informed NN",
+            NetArch::Dqn         => "Deep Q-Network",
+            NetArch::ActorCritic => "Actor–Critic (A2C)",
+            NetArch::SimClr      => "SimCLR (contrastive)",
+            NetArch::TransferLearning => "Transfer (backbone+head)",
+            NetArch::SemiSupervised   => "Semi-supervised (student/teacher)",
+            NetArch::AnomalyDetector  => "Anomaly Detector (AE)",
+            NetArch::Seq2Seq     => "Seq2Seq forecaster",
         }
     }
 
-    /// Coarse grouping used to lay the catalog out in sections.
+    /// Coarse architectural grouping used to lay the catalog out in sections.
     pub fn group(self) -> &'static str {
         match self {
             NetArch::Mlp => "Dense",
             NetArch::Cnn2d | NetArch::Vgg | NetArch::Resnet | NetArch::Unet | NetArch::Cnn3d => "Convolutional",
-            NetArch::Autoencoder | NetArch::Vae | NetArch::Gan => "Generative",
-            NetArch::Rnn | NetArch::Lstm | NetArch::Gru => "Recurrent",
+            NetArch::Autoencoder | NetArch::Vae | NetArch::Gan | NetArch::Diffusion => "Generative",
+            NetArch::Rnn | NetArch::Lstm | NetArch::Gru | NetArch::Seq2Seq => "Recurrent",
             NetArch::PointNet | NetArch::PointNetPp => "Point cloud",
             NetArch::Gcn | NetArch::Gat | NetArch::GraphSage => "Graph",
             NetArch::Transformer | NetArch::Vit => "Attention",
+            NetArch::Pinn => "Physics-informed",
+            NetArch::Dqn | NetArch::ActorCritic => "Reinforcement",
+            NetArch::SimClr | NetArch::TransferLearning | NetArch::SemiSupervised
+                | NetArch::AnomalyDetector => "Representation",
+        }
+    }
+
+    /// Machine-learning paradigm this architecture exemplifies. Mirrors the
+    /// user-facing ML taxonomy so every listed topic has a representative.
+    pub fn paradigm(self) -> &'static str {
+        match self {
+            NetArch::Mlp | NetArch::Cnn2d | NetArch::Vgg | NetArch::Resnet
+                | NetArch::Unet | NetArch::Cnn3d | NetArch::PointNet | NetArch::PointNetPp
+                | NetArch::Gcn | NetArch::Gat | NetArch::GraphSage
+                | NetArch::Transformer | NetArch::Vit => "Supervised",
+            NetArch::Autoencoder | NetArch::Vae => "Unsupervised",
+            NetArch::Gan | NetArch::Diffusion => "Generative",
+            NetArch::Pinn => "Physics-informed",
+            NetArch::Dqn | NetArch::ActorCritic => "Reinforcement",
+            NetArch::SimClr => "Self-supervised",
+            NetArch::TransferLearning => "Transfer",
+            NetArch::SemiSupervised => "Semi-supervised",
+            NetArch::AnomalyDetector => "Anomaly detection",
+            NetArch::Rnn | NetArch::Lstm | NetArch::Gru | NetArch::Seq2Seq => "Time series",
         }
     }
 
@@ -130,6 +199,15 @@ impl NetArch {
             NetArch::GraphSage   => graph_net("GraphSAGE"),
             NetArch::Transformer => transformer(false),
             NetArch::Vit         => transformer(true),
+            NetArch::Diffusion   => diffusion(),
+            NetArch::Pinn        => pinn(),
+            NetArch::Dqn         => dqn(),
+            NetArch::ActorCritic => actor_critic(),
+            NetArch::SimClr      => simclr(),
+            NetArch::TransferLearning => transfer_learning(),
+            NetArch::SemiSupervised   => semi_supervised(),
+            NetArch::AnomalyDetector  => anomaly_detector(),
+            NetArch::Seq2Seq     => seq2seq(),
         };
         let mut graph = NetworkGraph {
             name: self.label().to_string(),
@@ -342,6 +420,104 @@ fn transformer(vision: bool) -> Vec<Layer> {
     l
 }
 
+fn diffusion() -> Vec<Layer> {
+    vec![
+        layer("Noisy x_t", LayerKind::Input, 49, 0.50),
+        layer("Timestep embed", LayerKind::Embedding, 16, 0.62),
+        layer("Down Conv", LayerKind::Convolution, 36, 0.72),
+        layer("Down + Attn", LayerKind::Attention, 24, 0.70),
+        layer("Bottleneck", LayerKind::Latent, 16, 0.82),
+        layer("Up Conv", LayerKind::Upsample, 24, 0.58),
+        layer("Skip ⊕", LayerKind::Residual, 16, 0.55),
+        layer("Up Conv", LayerKind::Upsample, 36, 0.58),
+        layer("Predicted ε", LayerKind::Output, 49, 0.64),
+    ]
+}
+
+fn pinn() -> Vec<Layer> {
+    vec![
+        layer("Collocation (x,y,t)", LayerKind::Input, 12, 0.55),
+        layer("Dense · tanh", LayerKind::Dense, 24, 0.62),
+        layer("Dense · tanh", LayerKind::Dense, 24, 0.64),
+        layer("Dense · tanh", LayerKind::Dense, 24, 0.64),
+        layer("u(x,y,t)", LayerKind::Output, 8, 0.70),
+        layer("PDE residual ∂", LayerKind::Latent, 8, 0.88),
+        layer("BC / IC loss", LayerKind::Output, 6, 0.72),
+    ]
+}
+
+fn dqn() -> Vec<Layer> {
+    vec![
+        layer("State s", LayerKind::Input, 24, 0.55),
+        layer("Dense", LayerKind::Dense, 28, 0.62),
+        layer("Dense", LayerKind::Dense, 24, 0.62),
+        layer("Q(s, a)", LayerKind::Output, 12, 0.70),
+    ]
+}
+
+fn actor_critic() -> Vec<Layer> {
+    vec![
+        layer("State s", LayerKind::Input, 24, 0.55),
+        layer("Shared encoder", LayerKind::Dense, 28, 0.62),
+        layer("Actor head", LayerKind::Dense, 20, 0.64),
+        layer("π(a|s)", LayerKind::Output, 12, 0.70),
+        layer("Critic head", LayerKind::Dense, 16, 0.60),
+        layer("V(s)", LayerKind::Output, 4, 0.72),
+    ]
+}
+
+fn simclr() -> Vec<Layer> {
+    vec![
+        layer("Augmented views", LayerKind::Input, 49, 0.50),
+        layer("Shared encoder (Conv)", LayerKind::Convolution, 36, 0.72),
+        layer("Global pool", LayerKind::Pooling, 16, 0.46),
+        layer("Projection head", LayerKind::Dense, 20, 0.62),
+        layer("z embedding", LayerKind::Latent, 12, 0.82),
+        layer("NT-Xent contrast", LayerKind::Output, 8, 0.74),
+    ]
+}
+
+fn transfer_learning() -> Vec<Layer> {
+    vec![
+        layer("Input", LayerKind::Input, 49, 0.46),
+        layer("❄ Frozen backbone", LayerKind::Convolution, 40, 0.70),
+        layer("❄ Frozen backbone", LayerKind::Convolution, 32, 0.70),
+        layer("❄ Frozen backbone", LayerKind::Pooling, 16, 0.44),
+        layer("New head (Dense)", LayerKind::Dense, 24, 0.64),
+        layer("Fine-tuned output", LayerKind::Output, 12, 0.66),
+    ]
+}
+
+fn semi_supervised() -> Vec<Layer> {
+    vec![
+        layer("Labeled + unlabeled", LayerKind::Input, 36, 0.52),
+        layer("Shared encoder", LayerKind::Dense, 28, 0.62),
+        layer("Feature space", LayerKind::Latent, 16, 0.78),
+        layer("Supervised head", LayerKind::Dense, 16, 0.60),
+        layer("Pseudo-label / consistency", LayerKind::Residual, 12, 0.56),
+        layer("Output", LayerKind::Output, 10, 0.66),
+    ]
+}
+
+/// Anomaly detection = reconstruction autoencoder + an error-scoring head.
+/// Reuses [`autoencoder`] so the encoder/decoder topology is defined once.
+fn anomaly_detector() -> Vec<Layer> {
+    let mut l = autoencoder(false);
+    l.push(layer("Recon. error → score", LayerKind::Output, 8, 0.72));
+    l
+}
+
+fn seq2seq() -> Vec<Layer> {
+    vec![
+        layer("Input window", LayerKind::Input, 16, 0.52),
+        layer("Encoder LSTM", LayerKind::Recurrent, 28, 0.70),
+        layer("Context vector", LayerKind::Latent, 12, 0.82),
+        layer("Decoder LSTM", LayerKind::Recurrent, 28, 0.70),
+        layer("Attention", LayerKind::Attention, 16, 0.66),
+        layer("Forecast horizon", LayerKind::Output, 16, 0.64),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,12 +542,29 @@ mod tests {
         for arch in NetArch::ALL {
             assert!(!arch.label().is_empty());
             assert!(!arch.group().is_empty());
+            assert!(!arch.paradigm().is_empty());
         }
         // Labels are distinct.
         for (i, a) in NetArch::ALL.iter().enumerate() {
             for b in &NetArch::ALL[i + 1..] {
                 assert_ne!(a.label(), b.label());
             }
+        }
+    }
+
+    #[test]
+    fn every_ml_topic_has_a_representative() {
+        // The full ML/DL taxonomy the visualizer must cover.
+        let paradigms = [
+            "Supervised", "Unsupervised", "Reinforcement", "Semi-supervised",
+            "Self-supervised", "Transfer", "Anomaly detection", "Time series",
+            "Generative", "Physics-informed",
+        ];
+        for topic in paradigms {
+            assert!(
+                NetArch::ALL.iter().any(|a| a.paradigm() == topic),
+                "no architecture represents paradigm '{topic}'"
+            );
         }
     }
 }

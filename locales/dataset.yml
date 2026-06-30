@@ -311,6 +311,44 @@ _version: 2
   fr: jeu de données synthétique
   de: synthetischer Datensatz
 
+# ── CAE / simulation fields ─────────────────────────────────────────────────
+"dataset.cae_heading":
+  en: "🔬 CAE / simulation fields"
+  it: "🔬 Campi CAE / simulazione"
+  es: "🔬 Campos CAE / simulación"
+  fr: "🔬 Champs CAE / simulation"
+  de: "🔬 CAE- / Simulationsfelder"
+"dataset.cae_hint":
+  en: "FEM-style scalar fields over a geometry — color shows the contour bands."
+  it: "Campi scalari stile FEM su una geometria — il colore mostra le bande di contorno."
+  es: "Campos escalares tipo FEM sobre una geometría — el color muestra las bandas de contorno."
+  fr: "Champs scalaires de type FEM sur une géométrie — la couleur montre les bandes de contour."
+  de: "FEM-artige Skalarfelder über einer Geometrie — die Farbe zeigt die Konturbänder."
+"dataset.cae_thermal":
+  en: heat conduction, °C
+  it: conduzione termica, °C
+  es: conducción de calor, °C
+  fr: conduction thermique, °C
+  de: Wärmeleitung, °C
+"dataset.cae_stress":
+  en: cantilever bending stress, MPa
+  it: stress di flessione a mensola, MPa
+  es: tensión de flexión en voladizo, MPa
+  fr: contrainte de flexion en porte-à-faux, MPa
+  de: Biegespannung Kragträger, MPa
+"dataset.cae_flow":
+  en: flow past a cylinder, m/s
+  it: flusso attorno a un cilindro, m/s
+  es: flujo alrededor de un cilindro, m/s
+  fr: écoulement autour d'un cylindre, m/s
+  de: Strömung um einen Zylinder, m/s
+"dataset.cae_modal":
+  en: plate vibration mode, mm
+  it: modo di vibrazione della piastra, mm
+  es: modo de vibración de placa, mm
+  fr: mode de vibration de plaque, mm
+  de: Plattenschwingungsmodus, mm
+
 # ── Export panel ─────────────────────────────────────────────────────────────
 "dataset.export_heading":
   en: Export filtered subset

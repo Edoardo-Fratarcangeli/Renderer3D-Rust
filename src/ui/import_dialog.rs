@@ -12,13 +12,28 @@ use crate::dataset::builtin::BuiltinDataset;
 use crate::llm::catalog::NetArch;
 use crate::llm::network::NodeStyle;
 
-/// Short, user-facing description for each builtin benchmark button.
+/// Short, user-facing description for each builtin benchmark / CAE button.
 pub fn builtin_description(name: &str) -> String {
     match name {
         "blobs" => t!("dataset.builtin_blobs").to_string(),
         "spirals" => t!("dataset.builtin_spirals").to_string(),
         "swiss_roll" => t!("dataset.builtin_swiss_roll").to_string(),
+        "cae_thermal" => t!("dataset.cae_thermal").to_string(),
+        "cae_stress" => t!("dataset.cae_stress").to_string(),
+        "cae_flow" => t!("dataset.cae_flow").to_string(),
+        "cae_modal" => t!("dataset.cae_modal").to_string(),
         _ => t!("dataset.builtin_generic").to_string(),
+    }
+}
+
+/// Human-readable title for a CAE field button (the raw names are slugs).
+fn cae_title(name: &str) -> &'static str {
+    match name {
+        "cae_thermal" => "🌡 Thermal",
+        "cae_stress" => "🔩 Stress",
+        "cae_flow" => "💨 Fluid",
+        "cae_modal" => "〰 Modal",
+        _ => "CAE",
     }
 }
 
@@ -165,6 +180,31 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
         }
     });
 
+    // ── CAE / simulation field datasets (FEM-style banded contour clouds) ──
+    ui.add_space(8.0);
+    ui.separator();
+    ui.vertical_centered(|ui| {
+        ui.label(egui::RichText::new(t!("dataset.cae_heading").to_string()).strong());
+        ui.label(egui::RichText::new(t!("dataset.cae_hint").to_string()).weak().small());
+    });
+    ui.add_space(4.0);
+    ui.columns(BuiltinDataset::CAE_NAMES.len(), |cols| {
+        for (col, name) in cols.iter_mut().zip(BuiltinDataset::CAE_NAMES) {
+            col.vertical_centered(|ui| {
+                let button = egui::Button::new(egui::RichText::new(cae_title(name)).strong())
+                    .min_size(egui::vec2(96.0, 24.0));
+                if ui.add_enabled(!state.loading, button).clicked() {
+                    request = Some(ImportRequest {
+                        source: ImportSource::Builtin(name),
+                        max_rows: None,
+                        projection,
+                    });
+                }
+                ui.label(egui::RichText::new(builtin_description(name)).weak().small());
+            });
+        }
+    });
+
     network_section(ui, state);
 
     if let Some(status) = &state.status {
@@ -196,17 +236,20 @@ fn network_section(ui: &mut egui::Ui, state: &mut ImportState) {
         ui.label(t!("llm.net_arch").to_string());
         egui::ComboBox::from_id_source("net_arch_combo")
             .selected_text(state.net_arch.label())
+            .width(240.0)
             .show_ui(ui, |ui| {
-                let mut last_group = "";
-                for arch in NetArch::ALL {
-                    if arch.group() != last_group {
-                        if !last_group.is_empty() {
-                            ui.separator();
-                        }
-                        ui.label(egui::RichText::new(arch.group()).weak().small());
-                        last_group = arch.group();
+                // Grouped by ML paradigm (Supervised, Unsupervised, RL, …) so the
+                // picker mirrors the ML/DL taxonomy; architecture family is shown
+                // on hover.
+                for (gi, paradigm) in crate::llm::catalog::PARADIGMS.iter().enumerate() {
+                    if gi > 0 {
+                        ui.separator();
                     }
-                    ui.selectable_value(&mut state.net_arch, arch, arch.label());
+                    ui.label(egui::RichText::new(*paradigm).weak().small());
+                    for arch in NetArch::ALL.iter().filter(|a| a.paradigm() == *paradigm) {
+                        ui.selectable_value(&mut state.net_arch, *arch, arch.label())
+                            .on_hover_text(format!("{} · {}", arch.group(), arch.paradigm()));
+                    }
                 }
             });
         if ui
