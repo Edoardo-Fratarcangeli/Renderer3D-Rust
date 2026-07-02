@@ -1,0 +1,8 @@
+(A) Real STEP (.step/.stp) import via a BREP tessellation backend (e.g. truck) — currently recognised but not tessellated (docs/GEOMETRY_IMPORT.md) +import @geometry
+(A) Code signing of the installers: macOS notarization and Windows Authenticode to remove first-launch security prompts (docs/PACKAGING.md) +packaging @release
+(A) Enable auto-update: generate the signing key with scripts/gen-update-key.sh and embed the public key (docs/PACKAGING.md › Auto-update) +packaging @release
+(B) Polygon Composer Fase C: holes in profiles (inner loops) via bridge in the ear-clipping tessellator (docs/POLYGON_COMPOSER.md) +sketch @geometry
+(B) Polygon Composer Fase C: extrusion/loft of a profile as a special case of the solid composer +brep @geometry
+(B) Polygon Composer Fase C: dedicated vertex/edge picking (today picking is triangle→object only) +ui @picking
+(B) Polygon Composer Fase C: persistence of sketches and solids in the project file format +sketch @persistence
+(C) Unify the historical MeshData duplication: primitives::MeshData (u16 indices) vs mesh::MeshData (u32 indices) (docs/POLYGON_COMPOSER.md § Principi architetturali) +refactor @tech-debt
