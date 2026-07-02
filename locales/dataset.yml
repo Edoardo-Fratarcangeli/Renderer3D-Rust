@@ -50,6 +50,48 @@ _version: 2
   de: Importiere eine Datei oder ein Benchmark über den Tab Importieren.
 
 # ── Labels tab ───────────────────────────────────────────────────────────────
+"dataset.spatial_heading":
+  en: Spatial filter
+  it: Filtro spaziale
+  es: Filtro espacial
+  fr: Filtre spatial
+  de: Räumlicher Filter
+"dataset.spatial_hint":
+  en: Use a scene sphere or cube as a volume and keep only the points inside or outside it.
+  it: Usa una sfera o un cubo della scena come volume e mostra solo i punti interni o esterni.
+  es: Usa una esfera o un cubo de la escena como volumen y muestra solo los puntos internos o externos.
+  fr: Utilisez une sphère ou un cube de la scène comme volume et gardez seulement les points intérieurs ou extérieurs.
+  de: Nutze eine Kugel oder einen Würfel der Szene als Volumen und behalte nur die Punkte innen oder außen.
+"dataset.spatial_object":
+  en: "Volume:"
+  it: "Volume:"
+  es: "Volumen:"
+  fr: "Volume :"
+  de: "Volumen:"
+"dataset.spatial_none":
+  en: (none)
+  it: (nessuno)
+  es: (ninguno)
+  fr: (aucun)
+  de: (keins)
+"dataset.spatial_inside":
+  en: Inside
+  it: Interni
+  es: Internos
+  fr: Intérieurs
+  de: Innen
+"dataset.spatial_outside":
+  en: Outside
+  it: Esterni
+  es: Externos
+  fr: Extérieurs
+  de: Außen
+"dataset.spatial_no_volumes":
+  en: Create a sphere or cube in the Objects window to use it as a filter volume.
+  it: Crea una sfera o un cubo nella finestra Oggetti per usarlo come volume di filtro.
+  es: Crea una esfera o un cubo en la ventana Objetos para usarlo como volumen de filtro.
+  fr: Créez une sphère ou un cube dans la fenêtre Objets pour l'utiliser comme volume de filtre.
+  de: Erstelle eine Kugel oder einen Würfel im Objekte-Fenster, um sie als Filtervolumen zu nutzen.
 "dataset.distribution":
   en: Distribution
   it: Distribuzione

@@ -1330,6 +1330,37 @@ impl State {
                     });
             }
 
+            // Spatial dataset filter: offer scene spheres/cubes as volumes
+            // and resolve the selected one's transform every frame, so the
+            // filter follows the object live (move/resize/delete included).
+            {
+                use crate::visualization::spatial::{FilterVolume, VolumeShape};
+                self.dataset_view.scene_volumes = self
+                    .objects
+                    .iter()
+                    .filter(|o| {
+                        matches!(o.geometry_type, GeometryType::Sphere | GeometryType::Cube)
+                    })
+                    .map(|o| (o.id, o.label.clone()))
+                    .collect();
+                let volume = self.dataset_view.spatial_object.and_then(|id| {
+                    self.objects.iter().find(|o| o.id == id).and_then(|o| {
+                        let shape = match o.geometry_type {
+                            GeometryType::Sphere => VolumeShape::Sphere,
+                            GeometryType::Cube => VolumeShape::Cube,
+                            _ => return None,
+                        };
+                        FilterVolume::new(shape, o.instance.to_model_matrix())
+                    })
+                });
+                // The picked object no longer qualifies (deleted or its type
+                // changed): drop the selection with the volume.
+                if self.dataset_view.spatial_object.is_some() && volume.is_none() {
+                    self.dataset_view.spatial_object = None;
+                }
+                self.dataset_view.sync_spatial(volume);
+            }
+
             // Dataset visualizer window (import, table, filters, search, export)
             dataset_action = self.dataset_view.show(ctx);
 
