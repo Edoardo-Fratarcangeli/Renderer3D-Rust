@@ -10,7 +10,7 @@
 //! headless by the tests below. The host (`State`) drains
 //! [`SketchView::take_requests`] each frame and performs the GPU upload.
 
-use crate::sketch::{Plane, Profile, Sketch, Vec2, DEFAULT_TOLERANCE};
+use crate::sketch::{Plane, Profile, Segment, Sketch, Vec2, DEFAULT_TOLERANCE};
 
 use super::StatusMessage;
 
@@ -41,6 +41,8 @@ pub enum ShapeMode {
     Polygon,
     /// Curved circle (built from arcs).
     Circle,
+    /// Open circular arc (rendered as a curved polyline).
+    Arc,
     /// Custom point list (closed surface or open polyline).
     Custom,
 }
@@ -72,6 +74,9 @@ pub struct SketchView {
     pub shape: ShapeMode,
     pub n_sides: usize,
     pub radius: f32,
+    /// Arc sweep, degrees CCW from the X axis (Arc mode).
+    pub arc_start_deg: f32,
+    pub arc_end_deg: f32,
     /// Closure flag for the custom point list.
     pub closed: bool,
     /// Plane origin offset, so successive faces can be stacked into a solid.
@@ -99,6 +104,8 @@ impl SketchView {
             shape: ShapeMode::Polygon,
             n_sides: 5,
             radius: 1.0,
+            arc_start_deg: 0.0,
+            arc_end_deg: 180.0,
             closed: true,
             offset: [0.0, 0.0, 0.0],
             custom_text: String::new(),
@@ -123,6 +130,24 @@ impl SketchView {
             ShapeMode::Circle => Profile::circle(self.radius)
                 .map(|p| (p, true))
                 .map_err(|e| e.to_string()),
+            ShapeMode::Arc => {
+                let start = self.arc_start_deg.to_radians();
+                let end = self.arc_end_deg.to_radians();
+                if self.radius <= 0.0 || (end - start).abs() < 1e-3 {
+                    return Err(t!("sketch.arc_invalid").to_string());
+                }
+                let profile = Profile::new(
+                    vec![Segment::Arc {
+                        center: [0.0, 0.0],
+                        radius: self.radius,
+                        start,
+                        end,
+                    }],
+                    false,
+                );
+                profile.validate().map_err(|e| e.to_string())?;
+                Ok((profile, false))
+            }
             ShapeMode::Custom => {
                 let pts = parse_points(&self.custom_text)?;
                 Profile::from_points(&pts, self.closed)
@@ -237,6 +262,11 @@ impl SketchView {
             );
             ui.selectable_value(
                 &mut self.shape,
+                ShapeMode::Arc,
+                t!("sketch.shape_arc").to_string(),
+            );
+            ui.selectable_value(
+                &mut self.shape,
                 ShapeMode::Custom,
                 t!("sketch.shape_custom").to_string(),
             );
@@ -257,6 +287,26 @@ impl SketchView {
                 ui.horizontal(|ui| {
                     ui.label(t!("sketch.radius").to_string());
                     ui.add(egui::Slider::new(&mut self.radius, 0.1..=10.0));
+                });
+            }
+            ShapeMode::Arc => {
+                ui.horizontal(|ui| {
+                    ui.label(t!("sketch.radius").to_string());
+                    ui.add(egui::Slider::new(&mut self.radius, 0.1..=10.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t!("sketch.arc_angles").to_string());
+                    ui.add(
+                        egui::DragValue::new(&mut self.arc_start_deg)
+                            .speed(1.0)
+                            .suffix("°"),
+                    );
+                    ui.label("→");
+                    ui.add(
+                        egui::DragValue::new(&mut self.arc_end_deg)
+                            .speed(1.0)
+                            .suffix("°"),
+                    );
                 });
             }
             ShapeMode::Custom => {
@@ -393,6 +443,28 @@ mod tests {
         assert!(matches!(reqs[0], SketchRequest::Surface { .. }));
         // Draining clears the queue.
         assert!(view.take_requests().is_empty());
+    }
+
+    #[test]
+    fn arc_produces_an_open_curved_polyline() {
+        let mut view = SketchView::new();
+        view.shape = ShapeMode::Arc;
+        view.radius = 2.0;
+        view.arc_start_deg = 0.0;
+        view.arc_end_deg = 90.0;
+        view.create_surface();
+        // Open profile: a stroke request is queued, no composer face stored.
+        let reqs = view.take_requests();
+        assert_eq!(reqs.len(), 1);
+        assert!(view.surfaces.is_empty());
+        // Degenerate sweep is rejected with an error status.
+        view.arc_end_deg = view.arc_start_deg;
+        view.create_surface();
+        assert!(view.take_requests().is_empty());
+        assert!(matches!(
+            view.status.as_ref().unwrap().kind,
+            super::super::StatusKind::Error
+        ));
     }
 
     #[test]

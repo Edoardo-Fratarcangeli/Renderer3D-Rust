@@ -44,6 +44,24 @@ _version: 2
   es: Círculo
   fr: Cercle
   de: Kreis
+"sketch.shape_arc":
+  en: Arc
+  it: Arco
+  es: Arco
+  fr: Arc
+  de: Bogen
+"sketch.arc_angles":
+  en: "Angles:"
+  it: "Angoli:"
+  es: "Ángulos:"
+  fr: "Angles :"
+  de: "Winkel:"
+"sketch.arc_invalid":
+  en: invalid arc (radius must be positive and the sweep non-empty)
+  it: arco non valido (raggio positivo e ampiezza non nulla richiesti)
+  es: arco no válido (radio positivo y barrido no vacío requeridos)
+  fr: arc non valide (rayon positif et balayage non vide requis)
+  de: ungültiger Bogen (positiver Radius und nicht leerer Winkel nötig)
 "sketch.shape_custom":
   en: Custom
   it: Personalizzato
