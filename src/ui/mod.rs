@@ -629,7 +629,7 @@ impl DatasetView {
             }
             let closest = ray_origin + ray_dir * t;
             let d = (closest - cgmath::Vector3::new(p[0], p[1], p[2])).magnitude();
-            if d <= radius && best.map_or(true, |(_, bt)| t < bt) {
+            if d <= radius && best.is_none_or(|(_, bt)| t < bt) {
                 best = Some((row, t));
             }
         }

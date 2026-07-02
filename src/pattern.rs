@@ -46,23 +46,34 @@ pub fn linear(base: [f32; 3], step: [f32; 3], count: usize) -> Vec<Placement> {
         .collect()
 }
 
-/// Circular array on the plane spanned by the orthonormal `u`/`v` axes:
-/// `count` placements on the circle of `radius` around `center`, from
-/// `start_deg` sweeping `sweep_deg`. A full 360° sweep leaves out the
-/// duplicate end position. `orient` points each instance along the tangent.
-pub fn circular(
-    center: [f32; 3],
-    u: [f32; 3],
-    v: [f32; 3],
-    radius: f32,
-    start_deg: f32,
-    sweep_deg: f32,
-    count: usize,
-    orient: bool,
-) -> Vec<Placement> {
+/// Geometry of a circular array: the ring lives on the plane spanned by the
+/// orthonormal `u`/`v` axes around `center`, at `radius`, swept from
+/// `start_deg` over `sweep_deg` degrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ring {
+    pub center: [f32; 3],
+    pub u: [f32; 3],
+    pub v: [f32; 3],
+    pub radius: f32,
+    pub start_deg: f32,
+    pub sweep_deg: f32,
+}
+
+/// Circular array: `count` placements on the ring. A full 360° sweep leaves
+/// out the duplicate end position; an open arc includes both endpoints.
+/// `orient` points each instance along the tangent.
+pub fn circular(ring: Ring, count: usize, orient: bool) -> Vec<Placement> {
     if count == 0 {
         return Vec::new();
     }
+    let Ring {
+        center,
+        u,
+        v,
+        radius,
+        start_deg,
+        sweep_deg,
+    } = ring;
     let full_turn = (sweep_deg.abs() - 360.0).abs() < 1e-3;
     // Closed ring: N evenly spaced. Open arc: include both endpoints.
     let denom = if full_turn {
@@ -180,12 +191,14 @@ mod tests {
     #[test]
     fn circular_full_turn_spaces_n_without_duplicate() {
         let p = circular(
-            [0.0; 3],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            2.0,
-            0.0,
-            360.0,
+            Ring {
+                center: [0.0; 3],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+                radius: 2.0,
+                start_deg: 0.0,
+                sweep_deg: 360.0,
+            },
             4,
             false,
         );
@@ -203,12 +216,14 @@ mod tests {
     #[test]
     fn circular_open_arc_includes_both_endpoints() {
         let p = circular(
-            [0.0; 3],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            1.0,
-            0.0,
-            90.0,
+            Ring {
+                center: [0.0; 3],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+                radius: 1.0,
+                start_deg: 0.0,
+                sweep_deg: 90.0,
+            },
             3,
             true,
         );

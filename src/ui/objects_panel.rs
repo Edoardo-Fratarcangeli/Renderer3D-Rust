@@ -330,12 +330,14 @@ impl ObjectsView {
             ArrayKind::Circular => {
                 let (u, v) = plane_axes(self.array.plane);
                 Ok(pattern::circular(
-                    self.array.center,
-                    u,
-                    v,
-                    self.array.radius,
-                    self.array.start_deg,
-                    self.array.sweep_deg,
+                    pattern::Ring {
+                        center: self.array.center,
+                        u,
+                        v,
+                        radius: self.array.radius,
+                        start_deg: self.array.start_deg,
+                        sweep_deg: self.array.sweep_deg,
+                    },
                     self.array.count,
                     self.array.orient,
                 ))

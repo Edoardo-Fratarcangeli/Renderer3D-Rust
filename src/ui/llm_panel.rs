@@ -11,7 +11,7 @@
 //! ### Tabs
 //!  - **Model** — import .gguf/.json, layer inspector, prompt injection.
 //!  - **Ollama** — browse locally-installed Ollama models, load graph,
-//!                 run streaming inference with live token display.
+//!    run streaming inference with live token display.
 //!
 //! ### Shader convention
 //! `InstanceRaw::color.a` encodes glow state:
@@ -55,6 +55,13 @@ pub enum LlmAction {
     None,
     FocusGraph([f32; 3]),
 }
+
+/// Channel receiving a loaded network graph (+ optional tokenizer) from a
+/// background worker (file import and Ollama /api/show share it).
+type GraphWorkerRx = mpsc::Receiver<Result<(NetworkGraph, Option<Tokenizer>), String>>;
+
+/// Per-layer digest for the inspector list: (name, kind, node count, color).
+type LayerSummary = (String, LayerKind, usize, (f32, f32, f32));
 
 // ─── Render data ─────────────────────────────────────────────────────────────
 
@@ -100,7 +107,7 @@ pub struct LlmView {
     animation_active: bool,
 
     // File import worker
-    worker: Option<mpsc::Receiver<Result<(NetworkGraph, Option<Tokenizer>), String>>>,
+    worker: Option<GraphWorkerRx>,
 
     // ── Ollama ──────────────────────────────────────────────────────────────
     active_tab:    LlmTab,
@@ -111,7 +118,7 @@ pub struct LlmView {
     /// Worker loading the Ollama model list.
     ollama_list_rx: Option<mpsc::Receiver<Result<Vec<OllamaModel>, String>>>,
     /// Worker loading an Ollama model graph via /api/show.
-    ollama_graph_rx: Option<mpsc::Receiver<Result<(NetworkGraph, Option<Tokenizer>), String>>>,
+    ollama_graph_rx: Option<GraphWorkerRx>,
 
     // ── Inference (Ollama streaming) ─────────────────────────────────────────
     inference_text:   String,
@@ -499,7 +506,7 @@ impl LlmView {
         self.training_step += 1;
         let t = self.training_step as f32;
         // Exponential decay + small stochastic noise.
-        let noise = ((t * 2.718_281 * 0.37).sin().powi(2)) * 0.12;
+        let noise = ((t * std::f32::consts::E * 0.37).sin().powi(2)) * 0.12;
         let loss = 3.5 * (-0.07 * t).exp() + noise + 0.05;
         self.loss_history.push(loss);
         if self.loss_history.len() > 60 {
@@ -645,7 +652,7 @@ impl LlmView {
                 let disc = b * b - 4.0 * c_term;
                 if disc >= 0.0 {
                     let t = (-b - disc.sqrt()) * 0.5;
-                    if t > 0.0 && best.map_or(true, |(_, bt)| t < bt) {
+                    if t > 0.0 && best.is_none_or(|(_, bt)| t < bt) {
                         best = Some(((li, ni), t));
                     }
                 }
@@ -896,7 +903,7 @@ impl LlmView {
             );
 
             // Collect layer data to avoid borrow conflicts with self.activation inside egui closure.
-            let layer_summaries: Vec<(String, LayerKind, usize, (f32, f32, f32))> = graph
+            let layer_summaries: Vec<LayerSummary> = graph
                 .layers
                 .iter()
                 .map(|l| (l.name.clone(), l.kind, l.nodes.len(), layer_stats(l)))
@@ -1013,11 +1020,15 @@ impl LlmView {
                 if ui.checkbox(&mut self.compact_view, t!("llm.compact_view").to_string()).changed() {
                     self.mark_dirty();
                 }
-                if self.compact_view {
-                    if ui.add(egui::Slider::new(&mut self.compact_stride, 2..=8usize)
-                        .text(t!("llm.compact_stride").to_string())).changed() {
-                        self.mark_dirty();
-                    }
+                if self.compact_view
+                    && ui
+                        .add(
+                            egui::Slider::new(&mut self.compact_stride, 2..=8usize)
+                                .text(t!("llm.compact_stride").to_string()),
+                        )
+                        .changed()
+                {
+                    self.mark_dirty();
                 }
             });
         });
