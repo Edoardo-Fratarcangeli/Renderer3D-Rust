@@ -144,6 +144,22 @@ impl GeometryView {
         build_batches(&self.layers)
     }
 
+    /// Toggle a layer's visibility (marks the instance buffers dirty).
+    pub fn toggle_layer_visibility(&mut self, index: usize) {
+        if let Some(layer) = self.layers.get_mut(index) {
+            layer.visible = !layer.visible;
+            self.render_dirty = true;
+        }
+    }
+
+    /// Remove a layer (marks the instance buffers dirty).
+    pub fn remove_layer_at(&mut self, index: usize) {
+        if index < self.layers.len() {
+            self.layers.remove(index);
+            self.render_dirty = true;
+        }
+    }
+
     /// Take a pending 3D-model import request, if the user clicked "Import 3D
     /// model" this frame. The host loads the file and adds it to the scene.
     pub fn take_mesh_request(&mut self) -> Option<std::path::PathBuf> {
@@ -309,53 +325,30 @@ impl GeometryView {
                 });
             });
 
-            let mut remove_idx = None;
-            let mut changed = false;
+            // Same unified row widget as the bottom entity list.
+            use super::entity_list::{self, EntityRow, RowAction};
+            let mut layer_action = None;
             egui::ScrollArea::vertical()
                 .max_height(180.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    for (i, layer) in self.layers.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            let eye = if layer.visible { "👁" } else { "🕶" };
-                            if ui
-                                .button(eye)
-                                .on_hover_text(t!("geometry.toggle_visibility").to_string())
-                                .clicked()
-                            {
-                                layer.visible = !layer.visible;
-                                changed = true;
-                            }
-                            ui.label(egui::RichText::new(&layer.name).strong());
-                            ui.label(egui::RichText::new(format!("({})", layer.len())).weak());
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui
-                                        .button("🗑")
-                                        .on_hover_text(t!("geometry.remove_layer").to_string())
-                                        .clicked()
-                                    {
-                                        remove_idx = Some(i);
-                                    }
-                                    if ui
-                                        .button("🎯")
-                                        .on_hover_text(t!("geometry.focus_layer").to_string())
-                                        .clicked()
-                                    {
-                                        focus = layer.centroid();
-                                    }
-                                },
-                            );
-                        });
+                    for (i, layer) in self.layers.iter().enumerate() {
+                        let spec = EntityRow::entry("🧊", &layer.name)
+                            .subtitle(format!("({})", layer.len()))
+                            .visible(layer.visible);
+                        match entity_list::row(ui, &spec) {
+                            RowAction::None => {}
+                            action => layer_action = Some((i, action)),
+                        }
                     }
                 });
-            if let Some(i) = remove_idx {
-                self.layers.remove(i);
-                changed = true;
-            }
-            if changed {
-                self.render_dirty = true;
+            if let Some((i, action)) = layer_action {
+                match action {
+                    RowAction::ToggleVisibility => self.toggle_layer_visibility(i),
+                    RowAction::Delete => self.remove_layer_at(i),
+                    RowAction::Focus => focus = self.layers[i].centroid(),
+                    _ => {}
+                }
             }
         } else {
             ui.add_space(12.0);

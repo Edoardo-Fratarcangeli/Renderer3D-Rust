@@ -9,19 +9,7 @@ _version: 2
   fr: "🧠 LLM"
   de: "🧠 LLM"
 
-"list.remove_llm":
-  en: Remove LLM graph
-  it: Rimuovi grafo LLM
-  es: Eliminar grafo LLM
-  fr: Supprimer le graphe LLM
-  de: LLM-Graph entfernen
 
-"list.focus_llm":
-  en: Focus LLM graph
-  it: Centra sul grafo LLM
-  es: Enfocar grafo LLM
-  fr: Centrer sur le graphe LLM
-  de: LLM-Graph fokussieren
 
 "llm.window_title":
   en: LLM / SLM Visualizer

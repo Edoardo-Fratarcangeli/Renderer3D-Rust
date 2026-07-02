@@ -95,24 +95,6 @@ _version: 2
   es: "%{count} geometrías en total"
   fr: "%{count} géométries au total"
   de: "%{count} Geometrien insgesamt"
-"geometry.toggle_visibility":
-  en: Toggle layer visibility
-  it: Mostra/nascondi livello
-  es: Mostrar/ocultar capa
-  fr: Afficher/masquer la couche
-  de: Ebenensichtbarkeit umschalten
-"geometry.remove_layer":
-  en: Remove layer
-  it: Rimuovi livello
-  es: Eliminar capa
-  fr: Supprimer la couche
-  de: Ebene entfernen
-"geometry.focus_layer":
-  en: Focus camera on layer
-  it: Inquadra il livello
-  es: Enfocar la cámara en la capa
-  fr: Cadrer la caméra sur la couche
-  de: Kamera auf Ebene fokussieren
 "geometry.no_layers":
   en: No layers yet — paste data or import a file.
   it: Nessun livello — incolla dati o importa un file.

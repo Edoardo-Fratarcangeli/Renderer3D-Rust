@@ -400,18 +400,12 @@ _version: 2
   es: Visibilidad
   fr: Visibilité
   de: Sichtbarkeit
-"list.remove_dataset":
-  en: Remove dataset
-  it: Rimuovi dataset
-  es: Eliminar conjunto de datos
-  fr: Supprimer le jeu de données
-  de: Datensatz entfernen
-"list.focus_dataset":
-  en: Focus camera on dataset
-  it: Inquadra il dataset
-  es: Enfocar la cámara en el conjunto
-  fr: Cadrer la caméra sur le jeu de données
-  de: Kamera auf Datensatz fokussieren
+"list.focus":
+  en: Focus the camera on this entity
+  it: Inquadra questa entità
+  es: Enfocar esta entidad
+  fr: Cadrer cette entité
+  de: Kamera auf dieses Element richten
 "list.rows":
   en: rows
   it: righe

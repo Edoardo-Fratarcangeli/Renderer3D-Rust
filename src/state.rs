@@ -218,17 +218,6 @@ fn color_edit_button(ui: &mut egui::Ui, label: &str, rgb: &mut [f32; 3]) -> bool
     changed
 }
 
-/// Small transparent icon button used by every row of the bottom object list
-/// (scene objects, imported datasets, …) so they share one look and one
-/// implementation instead of repeating the `Button`/`RichText` boilerplate.
-fn list_icon_button(ui: &mut egui::Ui, icon: &str, color: egui::Color32, hover: &str) -> bool {
-    ui.add(
-        egui::Button::new(egui::RichText::new(icon).color(color)).fill(egui::Color32::TRANSPARENT),
-    )
-    .on_hover_text(hover)
-    .clicked()
-}
-
 impl State {
     pub async fn new(window: Window) -> Self {
         let window = std::sync::Arc::new(window);
@@ -1587,252 +1576,135 @@ impl State {
                                     .max_height(250.0)
                                     .show(ui, |ui| {
                                         ui.spacing_mut().item_spacing.y = 2.0;
+                                        use crate::ui::entity_list::{self, EntityRow, RowAction};
+
+                                        // --- Scene objects (hand-built + imported meshes) ---
                                         let mut select_exclusive_id = None;
                                         for obj in self.objects.iter_mut() {
-                                            ui.horizontal(|ui| {
-                                                // Unique Name (Selectable)
-                                                let response = ui.selectable_label(
-                                                    obj.selected,
-                                                    egui::RichText::new(&obj.label)
-                                                        .strong()
-                                                        .size(14.0),
-                                                );
-                                                if response.clicked() {
-                                                    let modifiers = ui.ctx().input(|i| i.modifiers);
-                                                    if modifiers.ctrl
-                                                        || modifiers.shift
-                                                        || modifiers.mac_cmd
-                                                    {
-                                                        obj.selected = !obj.selected;
-                                                    } else {
-                                                        select_exclusive_id = Some(obj.id);
-                                                    }
+                                            let editing = action_edit_obj_id == Some(obj.id)
+                                                || self.editing_obj_id == Some(obj.id);
+                                            let spec = EntityRow {
+                                                icon: None,
+                                                title: &obj.label,
+                                                subtitle: None,
+                                                selected: obj.selected,
+                                                selectable: true,
+                                                visible: Some(obj.visible),
+                                                show_label: Some(obj.show_label),
+                                                can_edit: true,
+                                                editing,
+                                                can_focus: false,
+                                                can_delete: true,
+                                            };
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::Select { exclusive: true } => {
+                                                    select_exclusive_id = Some(obj.id);
                                                 }
-                                                if response.double_clicked() {
+                                                RowAction::Select { exclusive: false } => {
+                                                    obj.selected = !obj.selected;
+                                                }
+                                                RowAction::Open | RowAction::Edit => {
                                                     action_edit_obj_id = Some(obj.id);
+                                                    self.editing_obj_draft = Some(obj.clone());
+                                                    self.should_focus_name = true;
                                                 }
-
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(
-                                                        egui::Align::Center,
-                                                    ),
-                                                    |ui| {
-                                                        // Edit / delete / label / visibility icons
-                                                        // share the same look via `list_icon_button`.
-                                                        let is_editing = action_edit_obj_id
-                                                            == Some(obj.id)
-                                                            || self.editing_obj_id == Some(obj.id);
-                                                        let edit_color = if is_editing {
-                                                            egui::Color32::from_rgb(0, 150, 255)
-                                                        } else {
-                                                            ui.visuals().text_color()
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "✏",
-                                                            edit_color,
-                                                            &t!("list.edit"),
-                                                        ) {
-                                                            action_edit_obj_id = Some(obj.id);
-                                                            self.editing_obj_draft =
-                                                                Some(obj.clone());
-                                                            self.should_focus_name = true;
-                                                        }
-
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🗑",
-                                                            egui::Color32::from_rgb(255, 100, 100),
-                                                            &t!("list.delete"),
-                                                        ) {
-                                                            action_delete_obj_id = Some(obj.id);
-                                                        }
-
-                                                        let label_color = if obj.show_label {
-                                                            egui::Color32::from_rgb(0, 200, 255)
-                                                        } else {
-                                                            egui::Color32::from_rgb(150, 150, 150)
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🏷",
-                                                            label_color,
-                                                            &t!("list.toggle_label"),
-                                                        ) {
-                                                            obj.show_label = !obj.show_label;
-                                                        }
-
-                                                        // Visibility (opposite colors when hidden).
-                                                        let (vis_icon, vis_color) = if obj.visible {
-                                                            (
-                                                                "👁",
-                                                                egui::Color32::from_rgb(
-                                                                    100, 255, 100,
-                                                                ),
-                                                            )
-                                                        } else {
-                                                            (
-                                                                "🕶",
-                                                                egui::Color32::from_rgb(
-                                                                    255, 100, 100,
-                                                                ),
-                                                            )
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            vis_icon,
-                                                            vis_color,
-                                                            &t!("list.visibility"),
-                                                        ) {
-                                                            obj.visible = !obj.visible;
-                                                        }
-                                                    },
-                                                );
-                                            });
+                                                RowAction::ToggleLabel => {
+                                                    obj.show_label = !obj.show_label;
+                                                }
+                                                RowAction::ToggleVisibility => {
+                                                    obj.visible = !obj.visible;
+                                                }
+                                                RowAction::Delete => {
+                                                    action_delete_obj_id = Some(obj.id);
+                                                }
+                                                _ => {}
+                                            }
                                         }
-
                                         if let Some(id) = select_exclusive_id {
                                             for obj in &mut self.objects {
                                                 obj.selected = obj.id == id;
                                             }
                                         }
 
-                                        // --- Imported dataset ---
-                                        // The dataset visualizer no longer owns
-                                        // an "Explore" list; its imported data
-                                        // lives here, in the same list as every
-                                        // other object.
-                                        let dataset_entry =
-                                            self.dataset_view.loaded.as_ref().map(|l| {
-                                                (
-                                                    l.dataset.metadata.name.clone(),
-                                                    l.dataset.n_rows(),
-                                                )
-                                            });
-                                        if let Some((name, n_rows)) = dataset_entry {
-                                            let visible = self.dataset_view.visible;
-                                            let centroid = self.dataset_view.centroid();
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    egui::RichText::new(format!("📊 {}", name))
-                                                        .strong()
-                                                        .size(14.0),
-                                                );
-                                                ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "({} {})",
-                                                        n_rows,
-                                                        t!("list.rows")
-                                                    ))
-                                                    .weak(),
-                                                );
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(
-                                                        egui::Align::Center,
-                                                    ),
-                                                    |ui| {
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🗑",
-                                                            egui::Color32::from_rgb(255, 100, 100),
-                                                            &t!("list.remove_dataset"),
-                                                        ) {
-                                                            remove_dataset = true;
-                                                        }
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🎯",
-                                                            ui.visuals().text_color(),
-                                                            &t!("list.focus_dataset"),
-                                                        ) {
-                                                            dataset_focus = centroid;
-                                                        }
-                                                        let (vis_icon, vis_color) = if visible {
-                                                            (
-                                                                "👁",
-                                                                egui::Color32::from_rgb(
-                                                                    100, 255, 100,
-                                                                ),
-                                                            )
-                                                        } else {
-                                                            (
-                                                                "🕶",
-                                                                egui::Color32::from_rgb(
-                                                                    255, 100, 100,
-                                                                ),
-                                                            )
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            vis_icon,
-                                                            vis_color,
-                                                            &t!("list.visibility"),
-                                                        ) {
-                                                            self.dataset_view.set_visible(!visible);
-                                                        }
-                                                    },
-                                                );
-                                            });
+                                        // --- Imported geometry layers ---
+                                        let mut layer_action = None;
+                                        for (i, layer) in
+                                            self.geometry_view.layers.iter().enumerate()
+                                        {
+                                            let subtitle = format!("({})", layer.len());
+                                            let spec = EntityRow::entry("🧊", &layer.name)
+                                                .subtitle(subtitle)
+                                                .visible(layer.visible);
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::None => {}
+                                                action => layer_action = Some((i, action)),
+                                            }
+                                        }
+                                        if let Some((i, action)) = layer_action {
+                                            match action {
+                                                RowAction::ToggleVisibility => {
+                                                    self.geometry_view.toggle_layer_visibility(i);
+                                                }
+                                                RowAction::Delete => {
+                                                    self.geometry_view.remove_layer_at(i);
+                                                }
+                                                RowAction::Focus => {
+                                                    geometry_focus =
+                                                        self.geometry_view.layers[i].centroid();
+                                                }
+                                                _ => {}
+                                            }
                                         }
 
-                                        // --- LLM / SLM graph ---
-                                        if let Some(graph) = &self.llm_view.graph {
-                                            let llm_name = graph.name.clone();
-                                            let n_layers = graph.layers.len();
-                                            let n_nodes  = graph.node_count();
-                                            let llm_vis  = self.llm_view.visible;
-                                            let llm_cen  = self.llm_view.centroid();
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    egui::RichText::new(format!("🧠 {llm_name}"))
-                                                        .strong()
-                                                        .size(14.0),
-                                                );
-                                                ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "({n_layers} {} · {n_nodes} {})",
-                                                        t!("llm.layers"),
-                                                        t!("llm.nodes"),
-                                                    ))
-                                                    .weak(),
-                                                );
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(egui::Align::Center),
-                                                    |ui| {
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🗑",
-                                                            egui::Color32::from_rgb(255, 100, 100),
-                                                            &t!("list.remove_llm"),
-                                                        ) {
-                                                            remove_llm = true;
-                                                        }
-                                                        if let Some(c) = llm_cen {
-                                                            if list_icon_button(
-                                                                ui,
-                                                                "🎯",
-                                                                ui.visuals().text_color(),
-                                                                &t!("list.focus_llm"),
-                                                            ) {
-                                                                llm_focus = Some(c);
-                                                            }
-                                                        }
-                                                        let (vis_icon, vis_color) = if llm_vis {
-                                                            ("👁", egui::Color32::from_rgb(100, 255, 100))
-                                                        } else {
-                                                            ("🕶", egui::Color32::from_rgb(255, 100, 100))
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            vis_icon,
-                                                            vis_color,
-                                                            &t!("list.visibility"),
-                                                        ) {
-                                                            self.llm_view.set_visible(!llm_vis);
-                                                        }
-                                                    },
-                                                );
-                                            });
+                                        // --- Imported dataset (single live entry) ---
+                                        let dataset_info = self.dataset_view.loaded.as_ref().map(
+                                            |l| (l.dataset.metadata.name.clone(), l.dataset.n_rows()),
+                                        );
+                                        if let Some((name, n_rows)) = dataset_info {
+                                            let subtitle =
+                                                format!("({} {})", n_rows, t!("list.rows"));
+                                            let spec = EntityRow::entry("📊", &name)
+                                                .subtitle(subtitle)
+                                                .visible(self.dataset_view.visible);
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::ToggleVisibility => {
+                                                    let v = self.dataset_view.visible;
+                                                    self.dataset_view.set_visible(!v);
+                                                }
+                                                RowAction::Delete => remove_dataset = true,
+                                                RowAction::Focus => {
+                                                    dataset_focus = self.dataset_view.centroid();
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+
+                                        // --- LLM / neural network graph ---
+                                        let llm_info = self.llm_view.graph.as_ref().map(|g| {
+                                            (g.name.clone(), g.layers.len(), g.node_count())
+                                        });
+                                        if let Some((name, n_layers, n_nodes)) = llm_info {
+                                            let subtitle = format!(
+                                                "({} {} · {} {})",
+                                                n_layers,
+                                                t!("llm.layers"),
+                                                n_nodes,
+                                                t!("llm.nodes"),
+                                            );
+                                            let spec = EntityRow::entry("🧠", &name)
+                                                .subtitle(subtitle)
+                                                .visible(self.llm_view.visible);
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::ToggleVisibility => {
+                                                    let v = self.llm_view.visible;
+                                                    self.llm_view.set_visible(!v);
+                                                }
+                                                RowAction::Delete => remove_llm = true,
+                                                RowAction::Focus => {
+                                                    llm_focus = self.llm_view.centroid();
+                                                }
+                                                _ => {}
+                                            }
                                         }
                                     });
                             });
