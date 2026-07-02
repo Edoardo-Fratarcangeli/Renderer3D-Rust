@@ -397,6 +397,9 @@ impl DatasetView {
         self.search_text.clear();
         self.search_error = None;
         self.settings.highlighted_row = None;
+        // Fresh dataset, fresh editable color table (palette defaults).
+        self.settings.label_colors =
+            crate::visualization::color_mapper::palette(loaded.dataset.label_names.len());
         self.visible = true;
         self.loaded = Some(loaded);
         self.recompute_visible();
@@ -754,14 +757,24 @@ impl DatasetView {
             DatasetTab::Labels => {
                 let loaded = self.loaded.as_ref().unwrap();
                 let stats = loaded.dataset.metadata.labels.clone();
-                if label_filter::show(ui, &stats, &mut self.enabled_labels) {
+                if label_filter::show(
+                    ui,
+                    &stats,
+                    &mut self.enabled_labels,
+                    &mut self.settings.label_colors,
+                ) {
                     self.recompute_visible();
                 }
                 ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
                     ui.label(egui::RichText::new(t!("dataset.distribution").to_string()).heading());
                 });
-                distribution_chart::show(ui, &stats, &self.enabled_labels);
+                distribution_chart::show(
+                    ui,
+                    &stats,
+                    &self.enabled_labels,
+                    &self.settings.label_colors,
+                );
             }
             DatasetTab::View => {
                 let mut changed = false;

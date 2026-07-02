@@ -1632,9 +1632,10 @@ impl State {
                                             self.geometry_view.layers.iter().enumerate()
                                         {
                                             let subtitle = format!("({})", layer.len());
-                                            let spec = EntityRow::entry("🧊", &layer.name)
+                                            let mut spec = EntityRow::entry("🧊", &layer.name)
                                                 .subtitle(subtitle)
                                                 .visible(layer.visible);
+                                            spec.can_edit = true;
                                             match entity_list::row(ui, &spec) {
                                                 RowAction::None => {}
                                                 action => layer_action = Some((i, action)),
@@ -1652,6 +1653,9 @@ impl State {
                                                     geometry_focus =
                                                         self.geometry_view.layers[i].centroid();
                                                 }
+                                                RowAction::Edit | RowAction::Open => {
+                                                    self.geometry_view.show_window = true;
+                                                }
                                                 _ => {}
                                             }
                                         }
@@ -1663,9 +1667,10 @@ impl State {
                                         if let Some((name, n_rows)) = dataset_info {
                                             let subtitle =
                                                 format!("({} {})", n_rows, t!("list.rows"));
-                                            let spec = EntityRow::entry("📊", &name)
+                                            let mut spec = EntityRow::entry("📊", &name)
                                                 .subtitle(subtitle)
                                                 .visible(self.dataset_view.visible);
+                                            spec.can_edit = true;
                                             match entity_list::row(ui, &spec) {
                                                 RowAction::ToggleVisibility => {
                                                     let v = self.dataset_view.visible;
@@ -1674,6 +1679,14 @@ impl State {
                                                 RowAction::Delete => remove_dataset = true,
                                                 RowAction::Focus => {
                                                     dataset_focus = self.dataset_view.centroid();
+                                                }
+                                                RowAction::Edit | RowAction::Open => {
+                                                    // Properties of the data: the same View tab
+                                                    // used at import time (size, shape, colors,
+                                                    // projection).
+                                                    self.dataset_view.show_window = true;
+                                                    self.dataset_view.tab =
+                                                        crate::ui::DatasetTab::View;
                                                 }
                                                 _ => {}
                                             }
@@ -1691,9 +1704,10 @@ impl State {
                                                 n_nodes,
                                                 t!("llm.nodes"),
                                             );
-                                            let spec = EntityRow::entry("🧠", &name)
+                                            let mut spec = EntityRow::entry("🧠", &name)
                                                 .subtitle(subtitle)
                                                 .visible(self.llm_view.visible);
+                                            spec.can_edit = true;
                                             match entity_list::row(ui, &spec) {
                                                 RowAction::ToggleVisibility => {
                                                     let v = self.llm_view.visible;
@@ -1702,6 +1716,9 @@ impl State {
                                                 RowAction::Delete => remove_llm = true,
                                                 RowAction::Focus => {
                                                     llm_focus = self.llm_view.centroid();
+                                                }
+                                                RowAction::Edit | RowAction::Open => {
+                                                    self.llm_view.show_window = true;
                                                 }
                                                 _ => {}
                                             }

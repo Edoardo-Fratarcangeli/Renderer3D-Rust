@@ -22,6 +22,9 @@ pub struct PointCloudSettings {
     pub geometry_policy: GeometryPolicy,
     /// How point colors are chosen (per label, or by distance from center).
     pub color_mode: ColorMode,
+    /// User-editable color per label id; ids beyond the vec (or an empty
+    /// vec) fall back to the default palette.
+    pub label_colors: Vec<[f32; 3]>,
     /// Row highlighted from the table/search (drawn bigger + selected tint).
     pub highlighted_row: Option<u32>,
 }
@@ -32,8 +35,20 @@ impl Default for PointCloudSettings {
             point_size: 0.06,
             geometry_policy: GeometryPolicy::default(),
             color_mode: ColorMode::default(),
+            label_colors: Vec::new(),
             highlighted_row: None,
         }
+    }
+}
+
+impl PointCloudSettings {
+    /// Effective color for a label id: the user override when present,
+    /// otherwise the default palette.
+    pub fn label_color(&self, label: u32) -> [f32; 3] {
+        self.label_colors
+            .get(label as usize)
+            .copied()
+            .unwrap_or_else(|| color_for_label(label))
     }
 }
 
@@ -106,7 +121,7 @@ pub fn build_instances(
         };
         let color = match settings.color_mode {
             ColorMode::ByDistance => color_for_distance(t),
-            ColorMode::ByLabel => color_for_label(label),
+            ColorMode::ByLabel => settings.label_color(label),
         };
 
         let highlighted = settings.highlighted_row == Some(row);
