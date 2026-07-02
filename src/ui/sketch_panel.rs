@@ -201,21 +201,10 @@ impl SketchView {
 
     /// Poll nothing; draw the window. Returns nothing (status is internal).
     pub fn show(&mut self, ctx: &egui::Context) {
-        if !self.show_window {
-            return;
-        }
-        let mut open = true;
-        let screen_center = ctx.screen_rect().center();
-        egui::Window::new(t!("sketch.window_title").to_string())
-            .open(&mut open)
-            .default_size([440.0, 520.0])
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(screen_center)
-            .resizable(true)
-            .show(ctx, |ui| self.contents(ui));
-        if !open {
-            self.show_window = false;
-        }
+        let mut show_window = self.show_window;
+        super::tool_window::ToolWindow::new(t!("sketch.window_title"), [440.0, 520.0])
+            .show(ctx, &mut show_window, |ui| self.contents(ui));
+        self.show_window = show_window;
     }
 
     fn contents(&mut self, ui: &mut egui::Ui) {

@@ -800,30 +800,24 @@ impl LlmView {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
-        let mut action = LlmAction::None;
-        let mut open   = true;
-        let center     = ctx.screen_rect().center();
-
-        egui::Window::new(t!("llm.window_title").to_string())
-            .open(&mut open)
-            .fixed_size([520.0, 600.0])
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(center)
-            .show(ctx, |ui| {
-                action = self.window_body(ui);
-            });
-
-        if !open { self.show_window = false; }
+        let mut show_window = self.show_window;
+        let action = super::tool_window::ToolWindow::fixed(t!("llm.window_title"), [520.0, 600.0])
+            .show(ctx, &mut show_window, |ui| self.window_body(ui))
+            .unwrap_or(LlmAction::None);
+        self.show_window = show_window;
         action
     }
 
     fn window_body(&mut self, ui: &mut egui::Ui) -> LlmAction {
         // ── Tab bar ────────────────────────────────────────────────────────
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.active_tab, LlmTab::Model,  t!("llm.tab_model").to_string());
-            ui.selectable_value(&mut self.active_tab, LlmTab::Ollama, t!("llm.tab_ollama").to_string());
-        });
-        ui.separator();
+        super::tool_window::tab_bar(
+            ui,
+            &mut self.active_tab,
+            vec![
+                super::tool_window::TabItem::new(LlmTab::Model, t!("llm.tab_model")),
+                super::tool_window::TabItem::new(LlmTab::Ollama, t!("llm.tab_ollama")),
+            ],
+        );
 
         let action = match self.active_tab {
             LlmTab::Model  => self.tab_model(ui),

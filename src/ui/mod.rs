@@ -30,6 +30,7 @@ pub mod label_filter;
 pub mod search_panel;
 pub mod sketch_panel;
 pub mod stream_panel;
+pub mod tool_window;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -668,23 +669,13 @@ impl DatasetView {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
-        let mut action = DatasetAction::None;
-        let mut open = true;
-        let screen_center = ctx.screen_rect().center();
-        egui::Window::new(t!("dataset.window_title").to_string())
-            .open(&mut open)
-            // Fixed footprint: the window must not grow when a dataset is
-            // loaded. Long content scrolls inside instead of widening.
-            .fixed_size([540.0, 520.0])
-            // Spawn centered on screen; remains draggable afterwards.
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(screen_center)
-            .show(ctx, |ui| {
-                action = self.contents(ui);
-            });
-        if !open {
-            self.show_window = false;
-        }
+        // Fixed footprint: the window must not grow when a dataset is
+        // loaded. Long content scrolls inside instead of widening.
+        let mut show_window = self.show_window;
+        let action = tool_window::ToolWindow::fixed(t!("dataset.window_title"), [540.0, 520.0])
+            .show(ctx, &mut show_window, |ui| self.contents(ui))
+            .unwrap_or(DatasetAction::None);
+        self.show_window = show_window;
         action
     }
 
@@ -693,32 +684,23 @@ impl DatasetView {
         let action = DatasetAction::None;
 
         // --- Tab bar (centered) ---
-        ui.vertical_centered(|ui| {
-            ui.horizontal(|ui| {
-                for tab in DatasetTab::ALL {
-                    let enabled = !tab.needs_dataset() || self.loaded.is_some();
-                    let selected = self.tab == tab;
-                    // The Stream tab shows a live status dot (green active /
-                    // blue receiving / red error) right on its label.
-                    let title = if tab == DatasetTab::Stream && self.stream.is_active() {
-                        format!("⏺ {}", tab.title())
-                    } else {
-                        tab.title()
-                    };
-                    let mut label = egui::RichText::new(title).size(14.0);
-                    if tab == DatasetTab::Stream && self.stream.is_active() {
-                        label = label.color(self.stream.dot_color());
-                    }
-                    if ui
-                        .add_enabled(enabled, egui::SelectableLabel::new(selected, label))
-                        .clicked()
-                    {
-                        self.tab = tab;
-                    }
+        let items = DatasetTab::ALL
+            .iter()
+            .map(|&tab| {
+                let enabled = !tab.needs_dataset() || self.loaded.is_some();
+                let mut item = tool_window::TabItem::new(tab, tab.title()).enabled(enabled);
+                // The Stream tab shows a live status dot (green active /
+                // blue receiving / red error) right on its label.
+                if tab == DatasetTab::Stream && self.stream.is_active() {
+                    item = item.styled(
+                        egui::RichText::new(format!("⏺ {}", tab.title()))
+                            .color(self.stream.dot_color()),
+                    );
                 }
-            });
-        });
-        ui.separator();
+                item
+            })
+            .collect();
+        tool_window::tab_bar(ui, &mut self.tab, items);
 
         // --- Summary strip ---
         if let Some(loaded) = &self.loaded {

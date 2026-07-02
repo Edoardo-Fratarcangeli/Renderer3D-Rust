@@ -179,25 +179,11 @@ impl GeometryView {
     /// the user clicks a layer's focus button.
     pub fn show(&mut self, ctx: &egui::Context) -> Option<[f32; 3]> {
         self.poll_worker();
-        if !self.show_window {
-            return None;
-        }
-
-        let mut focus = None;
-        let mut open = true;
-        let screen_center = ctx.screen_rect().center();
-        egui::Window::new(t!("geometry.window_title").to_string())
-            .open(&mut open)
-            .default_size([460.0, 480.0])
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(screen_center)
-            .resizable(true)
-            .show(ctx, |ui| {
-                focus = self.contents(ui);
-            });
-        if !open {
-            self.show_window = false;
-        }
+        let mut show_window = self.show_window;
+        let focus = super::tool_window::ToolWindow::new(t!("geometry.window_title"), [460.0, 480.0])
+            .show(ctx, &mut show_window, |ui| self.contents(ui))
+            .flatten();
+        self.show_window = show_window;
         focus
     }
 
