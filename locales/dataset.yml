@@ -57,23 +57,23 @@ _version: 2
   fr: Filtre spatial
   de: Räumlicher Filter
 "dataset.spatial_hint":
-  en: Use a scene sphere or cube as a volume and keep only the points inside or outside it.
-  it: Usa una sfera o un cubo della scena come volume e mostra solo i punti interni o esterni.
-  es: Usa una esfera o un cubo de la escena como volumen y muestra solo los puntos internos o externos.
-  fr: Utilisez une sphère ou un cube de la scène comme volume et gardez seulement les points intérieurs ou extérieurs.
-  de: Nutze eine Kugel oder einen Würfel der Szene als Volumen und behalte nur die Punkte innen oder außen.
-"dataset.spatial_object":
-  en: "Volume:"
-  it: "Volume:"
-  es: "Volumen:"
-  fr: "Volume :"
-  de: "Volumen:"
-"dataset.spatial_none":
-  en: (none)
-  it: (nessuno)
-  es: (ninguno)
-  fr: (aucun)
-  de: (keins)
+  en: Pick any number of scene spheres/cubes as volumes and keep only the points inside or outside them.
+  it: Scegli quante sfere/cubi della scena vuoi come volumi e mostra solo i punti interni o esterni.
+  es: Elige cuantas esferas/cubos de la escena quieras como volúmenes y muestra solo los puntos internos o externos.
+  fr: Choisissez autant de sphères/cubes de la scène que voulu comme volumes et gardez seulement les points intérieurs ou extérieurs.
+  de: Wähle beliebig viele Kugeln/Würfel der Szene als Volumen und behalte nur die Punkte innen oder außen.
+"dataset.spatial_any":
+  en: At least one (OR)
+  it: Almeno uno (O)
+  es: Al menos uno (O)
+  fr: Au moins un (OU)
+  de: Mindestens eins (ODER)
+"dataset.spatial_all":
+  en: All (AND)
+  it: Tutti (E)
+  es: Todos (Y)
+  fr: Tous (ET)
+  de: Alle (UND)
 "dataset.spatial_inside":
   en: Inside
   it: Interni

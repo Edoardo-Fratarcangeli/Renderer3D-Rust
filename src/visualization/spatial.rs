@@ -17,12 +17,42 @@ pub enum VolumeShape {
     Cube,
 }
 
-/// Keep points inside or outside the volume.
+/// Keep points inside or outside the combined volume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpatialMode {
     #[default]
     Inside,
     Outside,
+}
+
+/// How multiple volumes combine into one containment test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpatialCombine {
+    /// Union: a point counts as inside when *any* volume contains it (OR).
+    #[default]
+    Any,
+    /// Intersection: a point counts as inside only when *all* volumes
+    /// contain it (AND).
+    All,
+}
+
+/// Combined filter over N volumes: containment is the union/intersection of
+/// the volumes per `combine`, then `mode` keeps the points inside or outside
+/// that combined region. With no volumes every point passes.
+pub fn keeps(
+    volumes: &[FilterVolume],
+    p: [f32; 3],
+    mode: SpatialMode,
+    combine: SpatialCombine,
+) -> bool {
+    if volumes.is_empty() {
+        return true;
+    }
+    let inside = match combine {
+        SpatialCombine::Any => volumes.iter().any(|v| v.contains(p)),
+        SpatialCombine::All => volumes.iter().all(|v| v.contains(p)),
+    };
+    inside == (mode == SpatialMode::Inside)
 }
 
 /// A world-space filter volume: shape + inverse model matrix.
@@ -96,6 +126,34 @@ mod tests {
         for p in [[0.0, 0.0, 0.2], [3.0, 0.0, 0.0]] {
             assert_ne!(v.keeps(p, SpatialMode::Inside), v.keeps(p, SpatialMode::Outside));
         }
+    }
+
+    #[test]
+    fn multi_volume_union_and_intersection() {
+        // Two unit-diameter spheres at x=0 and x=0.6: they overlap around
+        // x≈0.3; only the left one contains the origin.
+        let a = sphere_at([0.0; 3], 1.0);
+        let b = sphere_at([0.6, 0.0, 0.0], 1.0);
+        let vols = vec![a, b];
+        let overlap = [0.3, 0.0, 0.0];
+        let left_only = [-0.3, 0.0, 0.0];
+        let far = [5.0, 0.0, 0.0];
+
+        use SpatialCombine::*;
+        use SpatialMode::*;
+        assert!(keeps(&vols, overlap, Inside, Any));
+        assert!(keeps(&vols, overlap, Inside, All));
+        assert!(keeps(&vols, left_only, Inside, Any));
+        assert!(!keeps(&vols, left_only, Inside, All));
+        assert!(!keeps(&vols, far, Inside, Any));
+        // Outside is the exact complement of the combined region.
+        for p in [overlap, left_only, far] {
+            for c in [Any, All] {
+                assert_ne!(keeps(&vols, p, Inside, c), keeps(&vols, p, Outside, c));
+            }
+        }
+        // No volumes: everything passes.
+        assert!(keeps(&[], far, Inside, Any));
     }
 
     #[test]

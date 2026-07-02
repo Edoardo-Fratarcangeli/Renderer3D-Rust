@@ -45,7 +45,7 @@ use crate::dataset::{builtin, loader, Dataset, DatasetIndex};
 use crate::llm::catalog::NetArch;
 use crate::llm::network::NodeStyle;
 use crate::visualization::point_cloud::{self, PointCloudSettings};
-use crate::visualization::spatial::{FilterVolume, SpatialMode};
+use crate::visualization::spatial::{self, FilterVolume, SpatialCombine, SpatialMode};
 
 /// Directory holding metadata / index / projection caches.
 pub const CACHE_DIR: &str = ".r3d_cache";
@@ -311,16 +311,18 @@ pub struct DatasetView {
     /// (set by 3D point picking).
     pub scroll_to_highlight: bool,
 
-    /// Scene object used as a spatial filter volume (sphere/cube id), if any.
-    pub spatial_object: Option<usize>,
-    /// Keep points inside or outside the volume.
+    /// Scene objects used as spatial filter volumes (sphere/cube ids).
+    pub spatial_objects: HashSet<usize>,
+    /// Keep points inside or outside the combined volume.
     pub spatial_mode: SpatialMode,
+    /// Union (any) or intersection (all) of the selected volumes.
+    pub spatial_combine: SpatialCombine,
     /// Candidate volumes for the picker: (object id, label). Refreshed by
     /// the host every frame from the scene.
     pub scene_volumes: Vec<(usize, String)>,
-    /// Resolved world-space volume of [`Self::spatial_object`], synced by
-    /// the host so the filter follows the object when it moves.
-    spatial_volume: Option<FilterVolume>,
+    /// Resolved world-space volumes of [`Self::spatial_objects`], synced by
+    /// the host so the filter follows the objects when they move.
+    spatial_volumes: Vec<FilterVolume>,
 
     /// Label ids currently visible.
     pub enabled_labels: HashSet<u32>,
@@ -371,10 +373,11 @@ impl DatasetView {
             visible: true,
             list_selected: false,
             scroll_to_highlight: false,
-            spatial_object: None,
+            spatial_objects: HashSet::new(),
             spatial_mode: SpatialMode::default(),
+            spatial_combine: SpatialCombine::default(),
             scene_volumes: Vec::new(),
-            spatial_volume: None,
+            spatial_volumes: Vec::new(),
             enabled_labels: HashSet::new(),
             search_text: String::new(),
             search_error: None,
@@ -587,12 +590,12 @@ impl DatasetView {
         }
     }
 
-    /// Host-side sync of the resolved spatial filter volume. Re-filters when
-    /// the volume actually changed (object picked, moved, resized or
+    /// Host-side sync of the resolved spatial filter volumes. Re-filters
+    /// when a volume actually changed (object picked, moved, resized or
     /// deleted), so the interaction is live while staying cheap.
-    pub fn sync_spatial(&mut self, volume: Option<FilterVolume>) {
-        if self.spatial_volume != volume {
-            self.spatial_volume = volume;
+    pub fn sync_spatial(&mut self, volumes: Vec<FilterVolume>) {
+        if self.spatial_volumes != volumes {
+            self.spatial_volumes = volumes;
             self.recompute_visible();
         }
     }
@@ -701,12 +704,13 @@ impl DatasetView {
             query,
         };
         self.visible_rows = apply_filter(&loaded.dataset, &loaded.index, &spec);
-        // Spatial filter: keep rows inside/outside the selected scene volume.
-        if let Some(volume) = &self.spatial_volume {
+        // Spatial filter: keep rows inside/outside the combined scene volumes.
+        if !self.spatial_volumes.is_empty() {
             let points = &loaded.projection.points;
-            let mode = self.spatial_mode;
-            self.visible_rows
-                .retain(|&row| volume.keeps(points[row as usize], mode));
+            let (mode, combine) = (self.spatial_mode, self.spatial_combine);
+            self.visible_rows.retain(|&row| {
+                spatial::keeps(&self.spatial_volumes, points[row as usize], mode, combine)
+            });
         }
         // Drop the highlight if it was filtered out.
         if let Some(h) = self.settings.highlighted_row {
@@ -891,64 +895,73 @@ impl DatasetView {
                     Some(t!("dataset.spatial_hint").to_string()),
                 );
                 let mut spatial_changed = false;
-                ui.horizontal(|ui| {
-                    ui.label(t!("dataset.spatial_object").to_string());
-                    let selected_text = self
-                        .spatial_object
-                        .and_then(|id| {
-                            self.scene_volumes
-                                .iter()
-                                .find(|(vid, _)| *vid == id)
-                                .map(|(_, name)| name.clone())
-                        })
-                        .unwrap_or_else(|| t!("dataset.spatial_none").to_string());
-                    egui::ComboBox::from_id_source("spatial_volume_combo")
-                        .selected_text(selected_text)
-                        .show_ui(ui, |ui| {
-                            spatial_changed |= ui
-                                .selectable_value(
-                                    &mut self.spatial_object,
-                                    None,
-                                    t!("dataset.spatial_none").to_string(),
-                                )
-                                .changed();
-                            for (id, name) in self.scene_volumes.clone() {
-                                spatial_changed |= ui
-                                    .selectable_value(
-                                        &mut self.spatial_object,
-                                        Some(id),
-                                        name,
-                                    )
-                                    .changed();
-                            }
-                        });
-                    ui.add_enabled_ui(self.spatial_object.is_some(), |ui| {
-                        spatial_changed |= ui
-                            .radio_value(
-                                &mut self.spatial_mode,
-                                SpatialMode::Inside,
-                                t!("dataset.spatial_inside").to_string(),
-                            )
-                            .changed();
-                        spatial_changed |= ui
-                            .radio_value(
-                                &mut self.spatial_mode,
-                                SpatialMode::Outside,
-                                t!("dataset.spatial_outside").to_string(),
-                            )
-                            .changed();
-                    });
-                });
                 if self.scene_volumes.is_empty() {
                     ui.label(
                         egui::RichText::new(t!("dataset.spatial_no_volumes").to_string()).weak(),
                     );
+                } else {
+                    // Multi-select: any number of scene volumes participate.
+                    egui::ScrollArea::vertical()
+                        .id_source("spatial_volumes_scroll")
+                        .max_height(90.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for (id, name) in self.scene_volumes.clone() {
+                                let mut on = self.spatial_objects.contains(&id);
+                                if ui.checkbox(&mut on, name).changed() {
+                                    if on {
+                                        self.spatial_objects.insert(id);
+                                    } else {
+                                        self.spatial_objects.remove(&id);
+                                    }
+                                    spatial_changed = true;
+                                }
+                            }
+                        });
+                    let n_selected = self.spatial_objects.len();
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(n_selected > 0, |ui| {
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_mode,
+                                    SpatialMode::Inside,
+                                    t!("dataset.spatial_inside").to_string(),
+                                )
+                                .changed();
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_mode,
+                                    SpatialMode::Outside,
+                                    t!("dataset.spatial_outside").to_string(),
+                                )
+                                .changed();
+                        });
+                        // Union vs intersection only matters from 2 volumes up.
+                        ui.add_enabled_ui(n_selected > 1, |ui| {
+                            ui.separator();
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_combine,
+                                    SpatialCombine::Any,
+                                    t!("dataset.spatial_any").to_string(),
+                                )
+                                .changed();
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_combine,
+                                    SpatialCombine::All,
+                                    t!("dataset.spatial_all").to_string(),
+                                )
+                                .changed();
+                        });
+                    });
                 }
                 if spatial_changed {
-                    // Deselecting clears the volume immediately; a new pick is
-                    // resolved by the host on the next frame (sync_spatial).
-                    if self.spatial_object.is_none() {
-                        self.spatial_volume = None;
+                    // Deselecting all clears the volumes immediately; newly
+                    // picked ones are resolved by the host on the next frame
+                    // (sync_spatial), which re-filters again.
+                    if self.spatial_objects.is_empty() {
+                        self.spatial_volumes.clear();
                     }
                     self.recompute_visible();
                 }
@@ -1400,7 +1413,7 @@ mod tests {
         .unwrap();
 
         view.spatial_mode = SpatialMode::Inside;
-        view.sync_spatial(Some(volume.clone()));
+        view.sync_spatial(vec![volume.clone()]);
         let inside = view.visible_rows.len();
 
         view.spatial_mode = SpatialMode::Outside;
@@ -1409,13 +1422,28 @@ mod tests {
 
         // Inside + outside partition the filtered set exactly.
         assert_eq!(inside + outside, total);
-        assert!(inside > 0 && outside > 0, "blobs straddle the unit sphere");
+        assert!(inside > 0 && outside > 0, "sphere splits the blob dataset");
 
-        // Clearing the volume restores the full set; unchanged sync is a no-op.
-        view.sync_spatial(None);
+        // With a second, disjoint far-away volume the intersection is empty
+        // while the union matches the single-sphere result.
+        let far = FilterVolume::new(
+            VolumeShape::Sphere,
+            cgmath::Matrix4::from_translation(cgmath::Vector3::new(1e6, 0.0, 0.0)),
+        )
+        .unwrap();
+        view.spatial_mode = SpatialMode::Inside;
+        view.spatial_combine = SpatialCombine::All;
+        view.sync_spatial(vec![volume.clone(), far.clone()]);
+        assert_eq!(view.visible_rows.len(), 0, "disjoint intersection is empty");
+        view.spatial_combine = SpatialCombine::Any;
+        view.recompute_visible();
+        assert_eq!(view.visible_rows.len(), inside, "union = single sphere");
+
+        // Clearing the volumes restores the full set; unchanged sync is a no-op.
+        view.sync_spatial(Vec::new());
         assert_eq!(view.visible_rows.len(), total);
         view.take_render_dirty();
-        view.sync_spatial(None);
+        view.sync_spatial(Vec::new());
         assert!(!view.take_render_dirty(), "no-op sync must not re-filter");
     }
 

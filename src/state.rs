@@ -1343,7 +1343,7 @@ impl State {
                     })
                     .map(|o| (o.id, o.label.clone()))
                     .collect();
-                let volume = self.dataset_view.spatial_object.and_then(|id| {
+                let resolve = |id: usize| {
                     self.objects.iter().find(|o| o.id == id).and_then(|o| {
                         let shape = match o.geometry_type {
                             GeometryType::Sphere => VolumeShape::Sphere,
@@ -1352,13 +1352,18 @@ impl State {
                         };
                         FilterVolume::new(shape, o.instance.to_model_matrix())
                     })
-                });
-                // The picked object no longer qualifies (deleted or its type
-                // changed): drop the selection with the volume.
-                if self.dataset_view.spatial_object.is_some() && volume.is_none() {
-                    self.dataset_view.spatial_object = None;
-                }
-                self.dataset_view.sync_spatial(volume);
+                };
+                // Drop picks that no longer qualify (deleted or type changed),
+                // then resolve the survivors in a stable (id) order.
+                self.dataset_view
+                    .spatial_objects
+                    .retain(|&id| resolve(id).is_some());
+                let mut ids: Vec<usize> =
+                    self.dataset_view.spatial_objects.iter().copied().collect();
+                ids.sort_unstable();
+                let volumes: Vec<FilterVolume> =
+                    ids.into_iter().filter_map(resolve).collect();
+                self.dataset_view.sync_spatial(volumes);
             }
 
             // Dataset visualizer window (import, table, filters, search, export)
