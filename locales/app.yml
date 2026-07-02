@@ -492,6 +492,30 @@ _version: 2
   es: Enfocar esta entidad
   fr: Cadrer cette entité
   de: Kamera auf dieses Element richten
+"menu.focus":
+  en: Focus
+  it: Inquadra
+  es: Enfocar
+  fr: Cadrer
+  de: Fokussieren
+"menu.duplicate":
+  en: Duplicate
+  it: Duplica
+  es: Duplicar
+  fr: Dupliquer
+  de: Duplizieren
+"menu.mirror":
+  en: Mirror
+  it: Specchia
+  es: Reflejar
+  fr: Miroir
+  de: Spiegeln
+"menu.flip":
+  en: Flip 180°
+  it: Inverti 180°
+  es: Invertir 180°
+  fr: Retourner 180°
+  de: Umdrehen 180°
 "list.rows":
   en: rows
   it: righe

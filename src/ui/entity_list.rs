@@ -42,6 +42,9 @@ pub struct EntityRow<'a> {
     pub can_focus: bool,
     /// Show the delete button.
     pub can_delete: bool,
+    /// Offer the CAD transform entries (duplicate / mirror / flip) in the
+    /// right-click context menu (scene objects only).
+    pub cad_actions: bool,
 }
 
 impl<'a> EntityRow<'a> {
@@ -59,6 +62,7 @@ impl<'a> EntityRow<'a> {
             editing: false,
             can_focus: true,
             can_delete: true,
+            cad_actions: false,
         }
     }
 
@@ -71,6 +75,14 @@ impl<'a> EntityRow<'a> {
         self.visible = Some(v);
         self
     }
+}
+
+/// World axis used by the mirror context-menu entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirrorAxis {
+    X,
+    Y,
+    Z,
 }
 
 /// What the user asked to do with the row this frame.
@@ -86,6 +98,13 @@ pub enum RowAction {
     Edit,
     Delete,
     Focus,
+    /// Context menu: clone the entity in place.
+    Duplicate,
+    /// Context menu: add a duplicate mirrored across the world plane
+    /// orthogonal to this axis.
+    Mirror(MirrorAxis),
+    /// Context menu: flip the entity 180° around the vertical (Z) axis.
+    Flip,
 }
 
 /// Draw one row; returns the (single) action requested this frame.
@@ -98,7 +117,7 @@ pub fn row(ui: &mut egui::Ui, spec: &EntityRow) -> RowAction {
             None => spec.title.to_string(),
         };
         let text = egui::RichText::new(title).strong().size(14.0);
-        if spec.selectable {
+        let response = if spec.selectable {
             let response = ui.selectable_label(spec.selected, text);
             if response.clicked() {
                 let m = ui.ctx().input(|i| i.modifiers);
@@ -109,9 +128,54 @@ pub fn row(ui: &mut egui::Ui, spec: &EntityRow) -> RowAction {
             if response.double_clicked() {
                 action = RowAction::Open;
             }
+            response
         } else {
-            ui.label(text);
-        }
+            // Sense clicks so the right-click context menu opens on plain
+            // (non-selectable) rows too.
+            ui.add(egui::Label::new(text).sense(egui::Sense::click()))
+        };
+        // Right-click context menu: the classic entity actions, gated by the
+        // same capability flags as the trailing icon buttons.
+        response.context_menu(|ui| {
+            if spec.can_edit && ui.button(t!("list.edit").to_string()).clicked() {
+                action = RowAction::Edit;
+                ui.close_menu();
+            }
+            if spec.can_focus && ui.button(t!("menu.focus").to_string()).clicked() {
+                action = RowAction::Focus;
+                ui.close_menu();
+            }
+            if spec.cad_actions {
+                ui.separator();
+                if ui.button(t!("menu.duplicate").to_string()).clicked() {
+                    action = RowAction::Duplicate;
+                    ui.close_menu();
+                }
+                ui.menu_button(t!("menu.mirror").to_string(), |ui| {
+                    for (axis, label) in [
+                        (MirrorAxis::X, "X"),
+                        (MirrorAxis::Y, "Y"),
+                        (MirrorAxis::Z, "Z"),
+                    ] {
+                        if ui.button(label).clicked() {
+                            action = RowAction::Mirror(axis);
+                            ui.close_menu();
+                        }
+                    }
+                });
+                if ui.button(t!("menu.flip").to_string()).clicked() {
+                    action = RowAction::Flip;
+                    ui.close_menu();
+                }
+            }
+            if spec.can_delete {
+                ui.separator();
+                if ui.button(t!("list.delete").to_string()).clicked() {
+                    action = RowAction::Delete;
+                    ui.close_menu();
+                }
+            }
+        });
         if let Some(subtitle) = &spec.subtitle {
             ui.label(egui::RichText::new(subtitle).weak());
         }

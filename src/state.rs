@@ -1236,6 +1236,10 @@ impl State {
         let mut action_edit_obj_id = None;
         let mut action_close_editor = false;
         let mut action_delete_obj_id = None;
+        // Context-menu actions on scene-object rows.
+        let mut action_duplicate_obj_id: Option<usize> = None;
+        let mut action_mirror_obj: Option<(usize, crate::ui::entity_list::MirrorAxis)> = None;
+        let mut action_flip_obj_id: Option<usize> = None;
         let mut action_confirm_edit = false;
         let mut dataset_action = crate::ui::DatasetAction::None;
         let mut geometry_focus: Option<[f32; 3]> = None;
@@ -1639,6 +1643,7 @@ impl State {
                                                 editing,
                                                 can_focus: false,
                                                 can_delete: true,
+                                                cad_actions: true,
                                             };
                                             match entity_list::row(ui, &spec) {
                                                 RowAction::Select { exclusive: true } => {
@@ -1660,6 +1665,15 @@ impl State {
                                                 }
                                                 RowAction::Delete => {
                                                     action_delete_obj_id = Some(obj.id);
+                                                }
+                                                RowAction::Duplicate => {
+                                                    action_duplicate_obj_id = Some(obj.id);
+                                                }
+                                                RowAction::Mirror(axis) => {
+                                                    action_mirror_obj = Some((obj.id, axis));
+                                                }
+                                                RowAction::Flip => {
+                                                    action_flip_obj_id = Some(obj.id);
                                                 }
                                                 _ => {}
                                             }
@@ -2076,6 +2090,59 @@ impl State {
                 }
             }
             self.editing_obj_id = None;
+        }
+
+        // Context-menu: duplicate in place (same semantics as Ctrl+D).
+        if let Some(id) = action_duplicate_obj_id {
+            if let Some(obj) = self.objects.iter().find(|o| o.id == id) {
+                let mut copy = obj.clone();
+                copy.id = self.next_id;
+                self.next_id += 1;
+                self.push_undo(UndoCommand::Add(copy.clone()));
+                self.objects.push(copy);
+            }
+        }
+
+        // Context-menu: add a duplicate mirrored across the world plane
+        // orthogonal to the chosen axis (position component negated, the
+        // other two Euler components flipped).
+        if let Some((id, axis)) = action_mirror_obj {
+            use crate::ui::entity_list::MirrorAxis;
+            if let Some(obj) = self.objects.iter().find(|o| o.id == id) {
+                let mut copy = obj.clone();
+                copy.id = self.next_id;
+                self.next_id += 1;
+                let a = match axis {
+                    MirrorAxis::X => 0,
+                    MirrorAxis::Y => 1,
+                    MirrorAxis::Z => 2,
+                };
+                copy.instance.position[a] = -copy.instance.position[a];
+                for e in 0..3 {
+                    if e != a {
+                        copy.rotation_euler[e] = -copy.rotation_euler[e];
+                    }
+                }
+                copy.update_rotation();
+                self.push_undo(UndoCommand::Add(copy.clone()));
+                self.objects.push(copy);
+            }
+        }
+
+        // Context-menu: flip 180° around the vertical (Z) axis, in place and
+        // undoable as an edit.
+        if let Some(id) = action_flip_obj_id {
+            if let Some(obj) = self.objects.iter_mut().find(|o| o.id == id) {
+                let old = obj.clone();
+                let z = &mut obj.rotation_euler[2];
+                *z += 180.0;
+                if *z > 180.0 {
+                    *z -= 360.0;
+                }
+                obj.update_rotation();
+                let new = obj.clone();
+                self.push_undo(UndoCommand::Edit { old, new });
+            }
         }
 
         if let Some(id_to_delete) = action_delete_obj_id {
