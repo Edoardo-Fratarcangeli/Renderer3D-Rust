@@ -30,6 +30,7 @@ entity list at the bottom of the main window:
 
 - **➕ Objects** — everything built by hand, in one tabbed window:
   - **Primitives**: cube / sphere / plane via a form (name, transform, color, label, per-type properties). The *same form* edits any object later (double-click or ✏ in the list).
+  - **Array**: CAD-style parametric repetition of the primitive template — linear (step vector), circular (plane/center/radius/sweep, optionally oriented along the tangent) or **along the sketched curve** (arc-length resampling); one undoable action per array.
   - **Sketch**: regular polygons, circles, circular **arcs** and custom point lists on a chosen plane → filled surfaces (closed) or polylines/ribbons (open).
   - **Composer**: weld closed surfaces into watertight 3D solids by shared edges.
 - **📥 Import** — 3D model files:
@@ -44,9 +45,11 @@ entity list at the bottom of the main window:
   - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), Excel (xlsx/xls/ods, first sheet), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
   - **Neural networks / LLMs**: architecture presets or model files (`.gguf`/`.json`) render as 3D layer graphs, with the advanced inference/animation window one click away.
   - **Editable label colors**: the Labels tab's swatches are color pickers; the 3D cloud and the distribution chart follow your palette live.
+  - **Spatial filter**: pick any number of scene spheres/cubes as volumes and keep only the points **inside or outside** them, combined with **OR** (union) or **AND** (intersection). The filter follows the objects live (move/resize/delete) and feeds the same pipeline as every other filter — table, chart and CSV export included.
 - **🔌 Stream** — runtime data, in its own tool window: the app listens on a TCP port and ingests rows live from an external producer (Python, …) while running, with **Start/Stop** and a status dot (🟢 active / 🔵 receiving / 🔴 error). Two wire formats behind one decoder strategy: **NDJSON** (maximum compatibility, no extra deps) and **Arrow IPC stream** (optional `arrow-stream` feature, high throughput). Streamed rows flow through the same projection/filter/render pipeline as file import.
 - **📏 Measure** — toggle it, then click two surface points (on meshes or primitives) to read the straight-line distance between them, drawn as a labelled segment in the viewport. Works on every entity type.
 - **Synced selection**: click a dataset point in the 3D view to highlight its row, select the dataset entry in the entity list and scroll the data table (shown under the list) to it; click a table row to highlight and focus the camera on that point.
+- **Context menu**: right-click any entity row for the classic actions — properties, focus, delete everywhere, plus duplicate / mirror X·Y·Z / flip 180° for scene objects (all undoable).
 
 More on the data pipeline:
 

@@ -10,3 +10,6 @@ x 2026-07-02 UI restructure: toolbar as Objects / Import / Data / Stream + Measu
 x 2026-07-02 Shared tool-window chrome + tab bar; unified entity list; properties editable post-creation (incl. label colors) +ui @ux
 x 2026-07-02 Synced selection: 3D point picking ↔ entity list ↔ data table under the list +ui @picking
 x 2026-07-02 Sketch arc shape mode (open curved polylines) +sketch @geometry
+x 2026-07-02 N-volume spatial filter (AND/OR) — scene spheres/cubes interact with datasets +data @filters
+x 2026-07-02 Parametric arrays in Objects: linear, circular, along sketched curve +objects @cad
+x 2026-07-02 Right-click context menu on entity rows: duplicate, mirror X/Y/Z, flip, properties, focus, delete +ui @ux
