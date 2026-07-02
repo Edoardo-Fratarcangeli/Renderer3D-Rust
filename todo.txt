@@ -6,3 +6,7 @@
 (B) Polygon Composer Fase C: dedicated vertex/edge picking (today picking is triangle→object only) +ui @picking
 (B) Polygon Composer Fase C: persistence of sketches and solids in the project file format +sketch @persistence
 (C) Unify the historical MeshData duplication: primitives::MeshData (u16 indices) vs mesh::MeshData (u32 indices) (docs/POLYGON_COMPOSER.md § Principi architetturali) +refactor @tech-debt
+x 2026-07-02 UI restructure: toolbar as Objects / Import / Data / Stream + Measure, one tool per entity type +ui @ux
+x 2026-07-02 Shared tool-window chrome + tab bar; unified entity list; properties editable post-creation (incl. label colors) +ui @ux
+x 2026-07-02 Synced selection: 3D point picking ↔ entity list ↔ data table under the list +ui @picking
+x 2026-07-02 Sketch arc shape mode (open curved polylines) +sketch @geometry
