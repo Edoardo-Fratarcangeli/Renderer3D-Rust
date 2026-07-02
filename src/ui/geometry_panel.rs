@@ -194,6 +194,9 @@ impl GeometryView {
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(t!("geometry.import_model_heading").to_string()).heading());
             ui.label(egui::RichText::new("STL · OBJ · glTF / GLB · STEP").weak());
+            // Proprietary CAD formats (DWG, SKP, .blend, SLDPRT) have no
+            // open Rust parsers; point users to their standard exports.
+            ui.label(egui::RichText::new(t!("geometry.model_formats_hint").to_string()).weak());
         });
         ui.horizontal(|ui| {
             ui.label(t!("geometry.field_model").to_string());

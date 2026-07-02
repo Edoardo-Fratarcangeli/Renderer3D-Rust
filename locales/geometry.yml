@@ -4,11 +4,17 @@ _version: 2
 
 # ── Window ───────────────────────────────────────────────────────────────────
 "geometry.window_title":
-  en: 🧊 Solids Import
-  it: 🧊 Importa solidi
-  es: 🧊 Importar sólidos
-  fr: 🧊 Import de solides
-  de: 🧊 Volumenkörper-Import
+  en: 📥 Import 3D Models
+  it: 📥 Importa modelli 3D
+  es: 📥 Importar modelos 3D
+  fr: 📥 Importer des modèles 3D
+  de: 📥 3D-Modelle importieren
+"geometry.model_formats_hint":
+  en: "From AutoCAD, SketchUp, Blender or SolidWorks: export to STL / OBJ / glTF and import here."
+  it: "Da AutoCAD, SketchUp, Blender o SolidWorks: esporta in STL / OBJ / glTF e importa qui."
+  es: "Desde AutoCAD, SketchUp, Blender o SolidWorks: exporta a STL / OBJ / glTF e impórtalo aquí."
+  fr: "Depuis AutoCAD, SketchUp, Blender ou SolidWorks : exportez en STL / OBJ / glTF puis importez ici."
+  de: "Aus AutoCAD, SketchUp, Blender oder SolidWorks: als STL / OBJ / glTF exportieren und hier importieren."
 
 # ── 3D model import ──────────────────────────────────────────────────────────
 "geometry.import_model_heading":

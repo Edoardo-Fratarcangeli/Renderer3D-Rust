@@ -290,18 +290,18 @@ _version: 2
   es: ➕ Objetos
   fr: ➕ Objets
   de: ➕ Objekte
-"toolbar.dataset":
-  en: 📊 Dataset
-  it: 📊 Dataset
-  es: 📊 Conjunto
-  fr: 📊 Données
-  de: 📊 Datensatz
-"toolbar.solids":
-  en: 🧊 Solids
-  it: 🧊 Solidi
-  es: 🧊 Sólidos
-  fr: 🧊 Solides
-  de: 🧊 Volumenkörper
+"toolbar.import":
+  en: 📥 Import
+  it: 📥 Importa
+  es: 📥 Importar
+  fr: 📥 Importer
+  de: 📥 Import
+"toolbar.data":
+  en: 🗃 Data
+  it: 🗃 Dati
+  es: 🗃 Datos
+  fr: 🗃 Données
+  de: 🗃 Daten
 "toolbar.stream":
   en: 🔌 Stream
   it: 🔌 Stream

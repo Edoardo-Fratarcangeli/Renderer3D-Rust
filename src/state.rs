@@ -1269,15 +1269,15 @@ impl State {
                                 ));
                             }
                         }
-                        if ui.button(t!("toolbar.dataset").to_string()).clicked() {
+                        if ui.button(t!("toolbar.import").to_string()).clicked() {
+                            self.geometry_view.show_window = !self.geometry_view.show_window;
+                        }
+                        if ui.button(t!("toolbar.data").to_string()).clicked() {
                             self.dataset_view.show_window = !self.dataset_view.show_window;
                         }
                         if ui.button(t!("toolbar.stream").to_string()).clicked() {
                             self.dataset_view.show_stream_window =
                                 !self.dataset_view.show_stream_window;
-                        }
-                        if ui.button(t!("toolbar.solids").to_string()).clicked() {
-                            self.geometry_view.show_window = !self.geometry_view.show_window;
                         }
                         // Neural-network / LLM import lives inside the Dataset
                         // import window (no standalone toolbar button); its
