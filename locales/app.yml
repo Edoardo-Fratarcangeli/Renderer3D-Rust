@@ -308,6 +308,12 @@ _version: 2
   es: ✏️ Boceto
   fr: ✏️ Esquisse
   de: ✏️ Skizze
+"toolbar.stream":
+  en: 🔌 Stream
+  it: 🔌 Stream
+  es: 🔌 Flujo
+  fr: 🔌 Flux
+  de: 🔌 Stream
 "toolbar.measure":
   en: 📏 Measure
   it: 📏 Misura

@@ -1276,6 +1276,10 @@ impl State {
                         if ui.button(t!("toolbar.dataset").to_string()).clicked() {
                             self.dataset_view.show_window = !self.dataset_view.show_window;
                         }
+                        if ui.button(t!("toolbar.stream").to_string()).clicked() {
+                            self.dataset_view.show_stream_window =
+                                !self.dataset_view.show_stream_window;
+                        }
                         if ui.button(t!("toolbar.solids").to_string()).clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
                         }

@@ -167,8 +167,6 @@ impl StatusMessage {
 pub enum DatasetTab {
     /// File / benchmark import.
     Import,
-    /// Runtime data streaming (TCP NDJSON / Arrow IPC).
-    Stream,
     /// Per-label visibility filters + distribution chart.
     Labels,
     /// Point size and shape policy.
@@ -179,9 +177,8 @@ pub enum DatasetTab {
 
 impl DatasetTab {
     /// All tabs in display order.
-    pub const ALL: [DatasetTab; 5] = [
+    pub const ALL: [DatasetTab; 4] = [
         DatasetTab::Import,
-        DatasetTab::Stream,
         DatasetTab::Labels,
         DatasetTab::View,
         DatasetTab::Export,
@@ -191,7 +188,6 @@ impl DatasetTab {
     pub fn title(&self) -> String {
         match self {
             DatasetTab::Import => t!("dataset.tab_import").to_string(),
-            DatasetTab::Stream => t!("dataset.tab_stream").to_string(),
             DatasetTab::Labels => t!("dataset.tab_labels").to_string(),
             DatasetTab::View => t!("dataset.tab_view").to_string(),
             DatasetTab::Export => t!("dataset.tab_export").to_string(),
@@ -200,7 +196,7 @@ impl DatasetTab {
 
     /// Whether the tab is usable before any dataset is loaded.
     pub fn needs_dataset(&self) -> bool {
-        !matches!(self, DatasetTab::Import | DatasetTab::Stream)
+        !matches!(self, DatasetTab::Import)
     }
 }
 
@@ -292,6 +288,8 @@ pub struct ExportState {
 pub struct DatasetView {
     /// Whether the window is visible.
     pub show_window: bool,
+    /// Whether the standalone Stream tool window is visible.
+    pub show_stream_window: bool,
     /// Currently selected tab.
     pub tab: DatasetTab,
     /// Import form state.
@@ -335,6 +333,7 @@ impl DatasetView {
     pub fn new() -> Self {
         Self {
             show_window: false,
+            show_stream_window: false,
             tab: DatasetTab::Import,
             import: ImportState {
                 use_pca: true,
@@ -656,19 +655,23 @@ impl DatasetView {
         result
     }
 
-    /// Poll the loader thread, draw the window, return the host action.
+    /// Poll the loader thread, draw the data and stream windows, return the
+    /// host action.
     pub fn show(&mut self, ctx: &egui::Context) -> DatasetAction {
         self.poll_worker();
         self.poll_stream();
-        if !self.show_window {
-            return DatasetAction::None;
-        }
+
         // Keep the live status dot (and counters) repainting while streaming,
         // even when the pointer is idle.
-        if self.stream.is_active() {
+        if self.stream.is_active() && (self.show_window || self.show_stream_window) {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
+        self.stream_window(ctx);
+
+        if !self.show_window {
+            return DatasetAction::None;
+        }
         // Fixed footprint: the window must not grow when a dataset is
         // loaded. Long content scrolls inside instead of widening.
         let mut show_window = self.show_window;
@@ -677,6 +680,23 @@ impl DatasetView {
             .unwrap_or(DatasetAction::None);
         self.show_window = show_window;
         action
+    }
+
+    /// The standalone Stream tool window (the panel itself carries the live
+    /// status dot: green active / blue receiving / red error).
+    fn stream_window(&mut self, ctx: &egui::Context) {
+        let mut show_stream = self.show_stream_window;
+        let action = tool_window::ToolWindow::new(t!("stream.window_title"), [430.0, 420.0])
+            .show(ctx, &mut show_stream, |ui| {
+                stream_panel::show(ui, &mut self.stream)
+            })
+            .unwrap_or(stream_panel::StreamUiAction::None);
+        self.show_stream_window = show_stream;
+        match action {
+            stream_panel::StreamUiAction::Start => self.start_stream(),
+            stream_panel::StreamUiAction::Stop => self.stop_stream(),
+            stream_panel::StreamUiAction::None => {}
+        }
     }
 
     /// Window body: tab bar, summary strip and the active tab's panel.
@@ -688,16 +708,7 @@ impl DatasetView {
             .iter()
             .map(|&tab| {
                 let enabled = !tab.needs_dataset() || self.loaded.is_some();
-                let mut item = tool_window::TabItem::new(tab, tab.title()).enabled(enabled);
-                // The Stream tab shows a live status dot (green active /
-                // blue receiving / red error) right on its label.
-                if tab == DatasetTab::Stream && self.stream.is_active() {
-                    item = item.styled(
-                        egui::RichText::new(format!("⏺ {}", tab.title()))
-                            .color(self.stream.dot_color()),
-                    );
-                }
-                item
+                tool_window::TabItem::new(tab, tab.title()).enabled(enabled)
             })
             .collect();
         tool_window::tab_bar(ui, &mut self.tab, items);
@@ -738,11 +749,6 @@ impl DatasetView {
                     self.start_import(req);
                 }
             }
-            DatasetTab::Stream => match stream_panel::show(ui, &mut self.stream) {
-                stream_panel::StreamUiAction::Start => self.start_stream(),
-                stream_panel::StreamUiAction::Stop => self.stop_stream(),
-                stream_panel::StreamUiAction::None => {}
-            },
             DatasetTab::Labels => {
                 let loaded = self.loaded.as_ref().unwrap();
                 let stats = loaded.dataset.metadata.labels.clone();
@@ -1110,7 +1116,7 @@ mod tests {
 
     #[test]
     fn tab_metadata_is_consistent() {
-        assert_eq!(DatasetTab::ALL.len(), 5);
+        assert_eq!(DatasetTab::ALL.len(), 4);
         // Titles unique and non-empty.
         for (i, a) in DatasetTab::ALL.iter().enumerate() {
             assert!(!a.title().is_empty());
@@ -1118,9 +1124,9 @@ mod tests {
                 assert_ne!(a.title(), b.title());
             }
         }
-        // Import and Stream work without data; the rest need a dataset.
+        // Import works without data; the rest need a dataset. Streaming has
+        // its own top-level tool window, not a tab here.
         assert!(!DatasetTab::Import.needs_dataset());
-        assert!(!DatasetTab::Stream.needs_dataset());
         for tab in [DatasetTab::Labels, DatasetTab::View, DatasetTab::Export] {
             assert!(tab.needs_dataset());
         }
