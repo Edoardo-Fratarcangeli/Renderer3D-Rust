@@ -939,7 +939,8 @@ impl State {
                                         now.duration_since(self.last_click_time).as_millis() < 300;
                                     self.last_click_time = now;
 
-                                    if let Some(hit_id) = self.select_object_at_ndc(x, y) {
+                                    let object_hit = self.select_object_at_ndc(x, y);
+                                    if let Some(hit_id) = object_hit {
                                         if is_double_click {
                                             // Initialize Edit from 3D Double Click
                                             self.editing_obj_id = Some(hit_id);
@@ -958,6 +959,15 @@ impl State {
                                     {
                                         let (ro, rd) = self.build_ray_ndc(x, y);
                                         self.llm_view.pick_node(ro, rd);
+                                    }
+
+                                    // Dataset point picking: highlight the row,
+                                    // select the list entry and sync the table.
+                                    if object_hit.is_none()
+                                        && self.dataset_view.loaded.is_some()
+                                    {
+                                        let (ro, rd) = self.build_ray_ndc(x, y);
+                                        self.dataset_view.pick_point(ro, rd);
                                     }
                                 }
                             }
@@ -1671,7 +1681,13 @@ impl State {
                                                 .subtitle(subtitle)
                                                 .visible(self.dataset_view.visible);
                                             spec.can_edit = true;
+                                            spec.selectable = true;
+                                            spec.selected = self.dataset_view.list_selected;
                                             match entity_list::row(ui, &spec) {
+                                                RowAction::Select { .. } => {
+                                                    self.dataset_view.list_selected =
+                                                        !self.dataset_view.list_selected;
+                                                }
                                                 RowAction::ToggleVisibility => {
                                                     let v = self.dataset_view.visible;
                                                     self.dataset_view.set_visible(!v);
@@ -1724,6 +1740,20 @@ impl State {
                                             }
                                         }
                                     });
+
+                                // Synced data table: shown while the dataset
+                                // entry is selected; clicking a 3D point
+                                // highlights + scrolls to its row here, and
+                                // clicking a row focuses the camera on it.
+                                if self.dataset_view.list_selected
+                                    && self.dataset_view.loaded.is_some()
+                                {
+                                    ui.add_space(6.0);
+                                    ui.separator();
+                                    if let Some(p) = self.dataset_view.table_section(ui) {
+                                        dataset_focus = Some(p);
+                                    }
+                                }
                             });
                     }
                 });

@@ -303,6 +303,12 @@ pub struct DatasetView {
     /// Whether the loaded dataset's point cloud is drawn (toggled from the
     /// shared object list at the bottom of the main window).
     pub visible: bool,
+    /// Whether the dataset entry is selected in the bottom entity list;
+    /// while selected, the synced data table is shown under the list.
+    pub list_selected: bool,
+    /// One-shot request to scroll the data table to the highlighted row
+    /// (set by 3D point picking).
+    pub scroll_to_highlight: bool,
 
     /// Label ids currently visible.
     pub enabled_labels: HashSet<u32>,
@@ -351,6 +357,8 @@ impl DatasetView {
             },
             loaded: None,
             visible: true,
+            list_selected: false,
+            scroll_to_highlight: false,
             enabled_labels: HashSet::new(),
             search_text: String::new(),
             search_error: None,
@@ -455,6 +463,8 @@ impl DatasetView {
         self.loaded = None;
         self.visible_rows.clear();
         self.settings.highlighted_row = None;
+        self.list_selected = false;
+        self.scroll_to_highlight = false;
         self.render_dirty = true;
     }
 
@@ -559,6 +569,80 @@ impl DatasetView {
                 ));
             }
         }
+    }
+
+    /// Ray-pick the nearest visible projected point (used by 3D clicks).
+    ///
+    /// On a hit the row is highlighted, the entity-list entry is selected and
+    /// the data table scrolls to the row — the 3D view, the list and the
+    /// table stay in sync. Returns whether something was hit.
+    pub fn pick_point(
+        &mut self,
+        ray_origin: cgmath::Vector3<f32>,
+        ray_dir: cgmath::Vector3<f32>,
+    ) -> bool {
+        use cgmath::InnerSpace;
+        if !self.visible {
+            return false;
+        }
+        let Some(loaded) = &self.loaded else {
+            return false;
+        };
+        // Inflate the pick radius so small points are still easy to click.
+        let radius = (self.settings.point_size * 1.5).max(0.05);
+        let mut best: Option<(u32, f32)> = None;
+        for &row in &self.visible_rows {
+            let p = loaded.projection.points[row as usize];
+            let v = cgmath::Vector3::new(p[0], p[1], p[2]) - ray_origin;
+            let t = v.dot(ray_dir);
+            if t <= 0.0 {
+                continue;
+            }
+            let closest = ray_origin + ray_dir * t;
+            let d = (closest - cgmath::Vector3::new(p[0], p[1], p[2])).magnitude();
+            if d <= radius && best.map_or(true, |(_, bt)| t < bt) {
+                best = Some((row, t));
+            }
+        }
+        match best {
+            Some((row, _)) => {
+                self.settings.highlighted_row = Some(row);
+                self.list_selected = true;
+                self.scroll_to_highlight = true;
+                self.render_dirty = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Search bar + synced data table for the bottom panel. Returns the
+    /// projected position to focus when the user clicks a row.
+    pub fn table_section(&mut self, ui: &mut egui::Ui) -> Option<[f32; 3]> {
+        if search_panel::show(ui, &mut self.search_text, &self.search_error) {
+            self.recompute_visible();
+        }
+        let scroll_to = if std::mem::take(&mut self.scroll_to_highlight) {
+            self.settings.highlighted_row
+        } else {
+            None
+        };
+        let Some(loaded) = &self.loaded else {
+            return None;
+        };
+        let before = self.settings.highlighted_row;
+        let focus = dataset_table::show(
+            ui,
+            &loaded.dataset,
+            &loaded.projection.points,
+            &self.visible_rows,
+            &mut self.settings.highlighted_row,
+            scroll_to,
+        );
+        if self.settings.highlighted_row != before {
+            self.render_dirty = true;
+        }
+        focus
     }
 
     /// Toggle whether the dataset's point cloud is drawn.
