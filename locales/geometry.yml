@@ -4,11 +4,17 @@ _version: 2
 
 # ── Window ───────────────────────────────────────────────────────────────────
 "geometry.window_title":
-  en: 🧊 Solids Import
-  it: 🧊 Importa solidi
-  es: 🧊 Importar sólidos
-  fr: 🧊 Import de solides
-  de: 🧊 Volumenkörper-Import
+  en: 📥 Import 3D Models
+  it: 📥 Importa modelli 3D
+  es: 📥 Importar modelos 3D
+  fr: 📥 Importer des modèles 3D
+  de: 📥 3D-Modelle importieren
+"geometry.model_formats_hint":
+  en: "From AutoCAD, SketchUp, Blender or SolidWorks: export to STL / OBJ / glTF and import here."
+  it: "Da AutoCAD, SketchUp, Blender o SolidWorks: esporta in STL / OBJ / glTF e importa qui."
+  es: "Desde AutoCAD, SketchUp, Blender o SolidWorks: exporta a STL / OBJ / glTF e impórtalo aquí."
+  fr: "Depuis AutoCAD, SketchUp, Blender ou SolidWorks : exportez en STL / OBJ / glTF puis importez ici."
+  de: "Aus AutoCAD, SketchUp, Blender oder SolidWorks: als STL / OBJ / glTF exportieren und hier importieren."
 
 # ── 3D model import ──────────────────────────────────────────────────────────
 "geometry.import_model_heading":
@@ -89,24 +95,6 @@ _version: 2
   es: "%{count} geometrías en total"
   fr: "%{count} géométries au total"
   de: "%{count} Geometrien insgesamt"
-"geometry.toggle_visibility":
-  en: Toggle layer visibility
-  it: Mostra/nascondi livello
-  es: Mostrar/ocultar capa
-  fr: Afficher/masquer la couche
-  de: Ebenensichtbarkeit umschalten
-"geometry.remove_layer":
-  en: Remove layer
-  it: Rimuovi livello
-  es: Eliminar capa
-  fr: Supprimer la couche
-  de: Ebene entfernen
-"geometry.focus_layer":
-  en: Focus camera on layer
-  it: Inquadra il livello
-  es: Enfocar la cámara en la capa
-  fr: Cadrer la caméra sur la couche
-  de: Kamera auf Ebene fokussieren
 "geometry.no_layers":
   en: No layers yet — paste data or import a file.
   it: Nessun livello — incolla dati o importa un file.

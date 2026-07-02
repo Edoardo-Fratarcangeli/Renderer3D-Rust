@@ -24,18 +24,35 @@ egui UI.
 
 ## 🚀 Features
 
-- **Measure tool** (📏 button in the toolbar): toggle it, then click two surface points (on meshes or primitives) to read the straight-line distance between them, drawn as a labelled segment in the viewport.
-- **Solids Import** (🧊 button in the toolbar):
-  - **Import 3D models**: STL, OBJ and glTF/GLB solid meshes load on a background thread and appear as selectable objects in the scene (auto-scaled and centered). STEP (`.step`/`.stp`) is recognised but not yet tessellated.
+The toolbar has four representation tools plus the measure toggle — each
+entity type has exactly one entry point, and everything lands in the shared
+entity list at the bottom of the main window:
+
+- **➕ Objects** — everything built by hand, in one tabbed window:
+  - **Primitives**: cube / sphere / plane via a form (name, transform, color, label, per-type properties). The *same form* edits any object later (double-click or ✏ in the list).
+  - **Array**: CAD-style parametric repetition of the primitive template — linear (step vector), circular (plane/center/radius/sweep, optionally oriented along the tangent) or **along the sketched curve** (arc-length resampling); one undoable action per array.
+  - **Sketch**: regular polygons, circles, circular **arcs** and custom point lists on a chosen plane → filled surfaces (closed) or polylines/ribbons (open).
+  - **Composer**: weld closed surfaces into watertight 3D solids by shared edges.
+- **📥 Import** — 3D model files:
+  - **Import 3D models**: STL, OBJ and glTF/GLB solid meshes load on a background thread and appear as selectable objects in the scene (auto-scaled and centered). STEP (`.step`/`.stp`) is recognised but not yet tessellated. From AutoCAD, SketchUp, Blender or SolidWorks: export to STL/OBJ/glTF and import here.
   - **Paste anything**: geometry DSL, XYZ point lists or JSON — auto-detected and parsed into a layer.
-  - **Import files**: JSON, XYZ and generic text/DSL files; parsing runs on a background thread. (Tabular CSV/Excel data import now lives in the Dataset window.)
-  - **Layers**: every import is a named layer with visibility toggle, camera focus (🎯), removal and a distinct default color; per-record colors/rotations/scales/labels supported everywhere.
+  - **Import files**: JSON, XYZ and generic text/DSL files; parsing runs on a background thread. (Tabular CSV/Excel data import lives in the Data window.)
+  - **Layers**: every import is a named layer with visibility toggle, camera focus (🎯), removal and a distinct default color; per-record colors/rotations/scales/labels supported everywhere. Layers also appear in the bottom entity list.
   - **Fast at scale**: records collapse into one instanced batch per shape (a million geometries ≈ 3 draw calls); buffers rebuild only when layers change; sphere batches >2000 instances switch to a low-poly LOD mesh.
   - Clear errors with line numbers (`line 2: unknown shape 'spherex'`).
-- **ML Dataset 3D Visualizer** (📊 button in the toolbar):
-  - **Polished tabbed window**: opens centered on screen, with a fixed footprint, and four tabs (Import / Labels / View / Export), a persistent dataset summary strip, colored status messages and friendly empty states. Imported datasets appear in the shared object list at the bottom of the main window (with visibility, focus and remove controls), alongside scene objects.
+- **🗃 Data** — datasets and neural networks:
+  - **Polished tabbed window**: opens centered on screen, with a fixed footprint, and four tabs (Import / Labels / View / Export), a persistent dataset summary strip, colored status messages and friendly empty states. Imported datasets appear in the shared entity list at the bottom of the main window (with visibility, focus, properties and remove controls), alongside scene objects.
   - **Multi-format import**: NPY (memory mapped), NPZ, CSV (streamed), Excel (xlsx/xls/ods, first sheet), MNIST-style IDX, Parquet (optional `parquet-support` feature), plus builtin synthetic benchmarks (blobs, spirals, swiss roll).
-  - **Runtime streaming** (📡 Stream tab): the app listens on a TCP port and ingests rows live from an external producer (Python, …) while running, with **Start/Stop** and a status dot (🟢 active / 🔵 receiving / 🔴 error). Two wire formats behind one decoder strategy: **NDJSON** (maximum compatibility, no extra deps) and **Arrow IPC stream** (optional `arrow-stream` feature, high throughput). Streamed rows flow through the same projection/filter/render pipeline as file import.
+  - **Neural networks / LLMs**: architecture presets or model files (`.gguf`/`.json`) render as 3D layer graphs, with the advanced inference/animation window one click away.
+  - **Editable label colors**: the Labels tab's swatches are color pickers; the 3D cloud and the distribution chart follow your palette live.
+  - **Spatial filter**: pick any number of scene spheres/cubes as volumes and keep only the points **inside or outside** them, combined with **OR** (union) or **AND** (intersection). The filter follows the objects live (move/resize/delete) and feeds the same pipeline as every other filter — table, chart and CSV export included.
+- **🔌 Stream** — runtime data, in its own tool window: the app listens on a TCP port and ingests rows live from an external producer (Python, …) while running, with **Start/Stop** and a status dot (🟢 active / 🔵 receiving / 🔴 error). Two wire formats behind one decoder strategy: **NDJSON** (maximum compatibility, no extra deps) and **Arrow IPC stream** (optional `arrow-stream` feature, high throughput). Streamed rows flow through the same projection/filter/render pipeline as file import.
+- **📏 Measure** — toggle it, then click two surface points (on meshes or primitives) to read the straight-line distance between them, drawn as a labelled segment in the viewport. Works on every entity type.
+- **Synced selection**: click a dataset point in the 3D view to highlight its row, select the dataset entry in the entity list and scroll the data table (shown under the list) to it; click a table row to highlight and focus the camera on that point.
+- **Context menu**: right-click any entity row for the classic actions — properties, focus, delete everywhere, plus duplicate / mirror X·Y·Z / flip 180° for scene objects (all undoable).
+
+More on the data pipeline:
+
   - **Configurable projection**: choose the method (PCA, direct columns, or **radial multidimensional** "star coordinates" on a sphere), the number of spatial dimensions (1D / 2D / 3D), and — for direct projection — which feature column feeds each axis. Reconfigure it from the View tab (with column-name dropdowns) to re-project the loaded dataset in place. Computed on a background thread. See [docs/ML_VISUALIZER.md](docs/ML_VISUALIZER.md) for the format reference and pandas export recipes.
   - **3D point cloud**: instanced rendering with deterministic per-label colors and optional per-label shapes; color **and** shape can instead encode each point's **distance from the cloud center**.
   - **Persistent caches**: metadata JSON, label index and projection cached under `.r3d_cache/`, keyed by file content fingerprint + projection config.

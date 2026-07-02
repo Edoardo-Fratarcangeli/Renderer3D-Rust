@@ -7,3 +7,4 @@
 pub mod color_mapper;
 pub mod geometry_assigner;
 pub mod point_cloud;
+pub mod spatial;

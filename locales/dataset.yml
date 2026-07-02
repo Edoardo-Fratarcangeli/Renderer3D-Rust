@@ -5,23 +5,17 @@ _version: 2
 
 # ── Window & tabs ────────────────────────────────────────────────────────────
 "dataset.window_title":
-  en: 📊 Dataset Visualizer
-  it: 📊 Visualizzatore dataset
-  es: 📊 Visualizador de conjuntos
-  fr: 📊 Visualiseur de données
-  de: 📊 Datensatz-Visualisierer
+  en: 🗃 Data
+  it: 🗃 Dati
+  es: 🗃 Datos
+  fr: 🗃 Données
+  de: 🗃 Daten
 "dataset.tab_import":
   en: 📂 Import
   it: 📂 Importa
   es: 📂 Importar
   fr: 📂 Importer
   de: 📂 Importieren
-"dataset.tab_stream":
-  en: 📡 Stream
-  it: 📡 Stream
-  es: 📡 Stream
-  fr: 📡 Flux
-  de: 📡 Stream
 "dataset.tab_labels":
   en: 🏷 Labels
   it: 🏷 Etichette
@@ -56,6 +50,48 @@ _version: 2
   de: Importiere eine Datei oder ein Benchmark über den Tab Importieren.
 
 # ── Labels tab ───────────────────────────────────────────────────────────────
+"dataset.spatial_heading":
+  en: Spatial filter
+  it: Filtro spaziale
+  es: Filtro espacial
+  fr: Filtre spatial
+  de: Räumlicher Filter
+"dataset.spatial_hint":
+  en: Pick any number of scene spheres/cubes as volumes and keep only the points inside or outside them.
+  it: Scegli quante sfere/cubi della scena vuoi come volumi e mostra solo i punti interni o esterni.
+  es: Elige cuantas esferas/cubos de la escena quieras como volúmenes y muestra solo los puntos internos o externos.
+  fr: Choisissez autant de sphères/cubes de la scène que voulu comme volumes et gardez seulement les points intérieurs ou extérieurs.
+  de: Wähle beliebig viele Kugeln/Würfel der Szene als Volumen und behalte nur die Punkte innen oder außen.
+"dataset.spatial_any":
+  en: At least one (OR)
+  it: Almeno uno (O)
+  es: Al menos uno (O)
+  fr: Au moins un (OU)
+  de: Mindestens eins (ODER)
+"dataset.spatial_all":
+  en: All (AND)
+  it: Tutti (E)
+  es: Todos (Y)
+  fr: Tous (ET)
+  de: Alle (UND)
+"dataset.spatial_inside":
+  en: Inside
+  it: Interni
+  es: Internos
+  fr: Intérieurs
+  de: Innen
+"dataset.spatial_outside":
+  en: Outside
+  it: Esterni
+  es: Externos
+  fr: Extérieurs
+  de: Außen
+"dataset.spatial_no_volumes":
+  en: Create a sphere or cube in the Objects window to use it as a filter volume.
+  it: Crea una sfera o un cubo nella finestra Oggetti per usarlo come volume di filtro.
+  es: Crea una esfera o un cubo en la ventana Objetos para usarlo como volumen de filtro.
+  fr: Créez une sphère ou un cube dans la fenêtre Objets pour l'utiliser comme volume de filtre.
+  de: Erstelle eine Kugel oder einen Würfel im Objekte-Fenster, um sie als Filtervolumen zu nutzen.
 "dataset.distribution":
   en: Distribution
   it: Distribuzione

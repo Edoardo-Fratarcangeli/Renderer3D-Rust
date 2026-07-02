@@ -11,7 +11,7 @@
 //! ### Tabs
 //!  - **Model** — import .gguf/.json, layer inspector, prompt injection.
 //!  - **Ollama** — browse locally-installed Ollama models, load graph,
-//!                 run streaming inference with live token display.
+//!    run streaming inference with live token display.
 //!
 //! ### Shader convention
 //! `InstanceRaw::color.a` encodes glow state:
@@ -55,6 +55,13 @@ pub enum LlmAction {
     None,
     FocusGraph([f32; 3]),
 }
+
+/// Channel receiving a loaded network graph (+ optional tokenizer) from a
+/// background worker (file import and Ollama /api/show share it).
+type GraphWorkerRx = mpsc::Receiver<Result<(NetworkGraph, Option<Tokenizer>), String>>;
+
+/// Per-layer digest for the inspector list: (name, kind, node count, color).
+type LayerSummary = (String, LayerKind, usize, (f32, f32, f32));
 
 // ─── Render data ─────────────────────────────────────────────────────────────
 
@@ -100,7 +107,7 @@ pub struct LlmView {
     animation_active: bool,
 
     // File import worker
-    worker: Option<mpsc::Receiver<Result<(NetworkGraph, Option<Tokenizer>), String>>>,
+    worker: Option<GraphWorkerRx>,
 
     // ── Ollama ──────────────────────────────────────────────────────────────
     active_tab:    LlmTab,
@@ -111,7 +118,7 @@ pub struct LlmView {
     /// Worker loading the Ollama model list.
     ollama_list_rx: Option<mpsc::Receiver<Result<Vec<OllamaModel>, String>>>,
     /// Worker loading an Ollama model graph via /api/show.
-    ollama_graph_rx: Option<mpsc::Receiver<Result<(NetworkGraph, Option<Tokenizer>), String>>>,
+    ollama_graph_rx: Option<GraphWorkerRx>,
 
     // ── Inference (Ollama streaming) ─────────────────────────────────────────
     inference_text:   String,
@@ -499,7 +506,7 @@ impl LlmView {
         self.training_step += 1;
         let t = self.training_step as f32;
         // Exponential decay + small stochastic noise.
-        let noise = ((t * 2.718_281 * 0.37).sin().powi(2)) * 0.12;
+        let noise = ((t * std::f32::consts::E * 0.37).sin().powi(2)) * 0.12;
         let loss = 3.5 * (-0.07 * t).exp() + noise + 0.05;
         self.loss_history.push(loss);
         if self.loss_history.len() > 60 {
@@ -645,7 +652,7 @@ impl LlmView {
                 let disc = b * b - 4.0 * c_term;
                 if disc >= 0.0 {
                     let t = (-b - disc.sqrt()) * 0.5;
-                    if t > 0.0 && best.map_or(true, |(_, bt)| t < bt) {
+                    if t > 0.0 && best.is_none_or(|(_, bt)| t < bt) {
                         best = Some(((li, ni), t));
                     }
                 }
@@ -800,30 +807,24 @@ impl LlmView {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
-        let mut action = LlmAction::None;
-        let mut open   = true;
-        let center     = ctx.screen_rect().center();
-
-        egui::Window::new(t!("llm.window_title").to_string())
-            .open(&mut open)
-            .fixed_size([520.0, 600.0])
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(center)
-            .show(ctx, |ui| {
-                action = self.window_body(ui);
-            });
-
-        if !open { self.show_window = false; }
+        let mut show_window = self.show_window;
+        let action = super::tool_window::ToolWindow::fixed(t!("llm.window_title"), [520.0, 600.0])
+            .show(ctx, &mut show_window, |ui| self.window_body(ui))
+            .unwrap_or(LlmAction::None);
+        self.show_window = show_window;
         action
     }
 
     fn window_body(&mut self, ui: &mut egui::Ui) -> LlmAction {
         // ── Tab bar ────────────────────────────────────────────────────────
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.active_tab, LlmTab::Model,  t!("llm.tab_model").to_string());
-            ui.selectable_value(&mut self.active_tab, LlmTab::Ollama, t!("llm.tab_ollama").to_string());
-        });
-        ui.separator();
+        super::tool_window::tab_bar(
+            ui,
+            &mut self.active_tab,
+            vec![
+                super::tool_window::TabItem::new(LlmTab::Model, t!("llm.tab_model")),
+                super::tool_window::TabItem::new(LlmTab::Ollama, t!("llm.tab_ollama")),
+            ],
+        );
 
         let action = match self.active_tab {
             LlmTab::Model  => self.tab_model(ui),
@@ -902,7 +903,7 @@ impl LlmView {
             );
 
             // Collect layer data to avoid borrow conflicts with self.activation inside egui closure.
-            let layer_summaries: Vec<(String, LayerKind, usize, (f32, f32, f32))> = graph
+            let layer_summaries: Vec<LayerSummary> = graph
                 .layers
                 .iter()
                 .map(|l| (l.name.clone(), l.kind, l.nodes.len(), layer_stats(l)))
@@ -1019,11 +1020,15 @@ impl LlmView {
                 if ui.checkbox(&mut self.compact_view, t!("llm.compact_view").to_string()).changed() {
                     self.mark_dirty();
                 }
-                if self.compact_view {
-                    if ui.add(egui::Slider::new(&mut self.compact_stride, 2..=8usize)
-                        .text(t!("llm.compact_stride").to_string())).changed() {
-                        self.mark_dirty();
-                    }
+                if self.compact_view
+                    && ui
+                        .add(
+                            egui::Slider::new(&mut self.compact_stride, 2..=8usize)
+                                .text(t!("llm.compact_stride").to_string()),
+                        )
+                        .changed()
+                {
+                    self.mark_dirty();
                 }
             });
         });

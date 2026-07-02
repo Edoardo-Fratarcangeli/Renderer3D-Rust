@@ -10,7 +10,7 @@
 //! headless by the tests below. The host (`State`) drains
 //! [`SketchView::take_requests`] each frame and performs the GPU upload.
 
-use crate::sketch::{Plane, Profile, Sketch, Vec2, DEFAULT_TOLERANCE};
+use crate::sketch::{Plane, Profile, Segment, Sketch, Vec2, DEFAULT_TOLERANCE};
 
 use super::StatusMessage;
 
@@ -41,6 +41,8 @@ pub enum ShapeMode {
     Polygon,
     /// Curved circle (built from arcs).
     Circle,
+    /// Open circular arc (rendered as a curved polyline).
+    Arc,
     /// Custom point list (closed surface or open polyline).
     Custom,
 }
@@ -66,13 +68,15 @@ pub enum SketchRequest {
     },
 }
 
-/// Root state of the sketch / composer window.
+/// State of the sketch / composer tool (hosted by the Objects window).
 pub struct SketchView {
-    pub show_window: bool,
     pub plane: PlaneChoice,
     pub shape: ShapeMode,
     pub n_sides: usize,
     pub radius: f32,
+    /// Arc sweep, degrees CCW from the X axis (Arc mode).
+    pub arc_start_deg: f32,
+    pub arc_end_deg: f32,
     /// Closure flag for the custom point list.
     pub closed: bool,
     /// Plane origin offset, so successive faces can be stacked into a solid.
@@ -96,11 +100,12 @@ impl Default for SketchView {
 impl SketchView {
     pub fn new() -> Self {
         Self {
-            show_window: false,
             plane: PlaneChoice::Xy,
             shape: ShapeMode::Polygon,
             n_sides: 5,
             radius: 1.0,
+            arc_start_deg: 0.0,
+            arc_end_deg: 180.0,
             closed: true,
             offset: [0.0, 0.0, 0.0],
             custom_text: String::new(),
@@ -125,6 +130,24 @@ impl SketchView {
             ShapeMode::Circle => Profile::circle(self.radius)
                 .map(|p| (p, true))
                 .map_err(|e| e.to_string()),
+            ShapeMode::Arc => {
+                let start = self.arc_start_deg.to_radians();
+                let end = self.arc_end_deg.to_radians();
+                if self.radius <= 0.0 || (end - start).abs() < 1e-3 {
+                    return Err(t!("sketch.arc_invalid").to_string());
+                }
+                let profile = Profile::new(
+                    vec![Segment::Arc {
+                        center: [0.0, 0.0],
+                        radius: self.radius,
+                        start,
+                        end,
+                    }],
+                    false,
+                );
+                profile.validate().map_err(|e| e.to_string())?;
+                Ok((profile, false))
+            }
             ShapeMode::Custom => {
                 let pts = parse_points(&self.custom_text)?;
                 Profile::from_points(&pts, self.closed)
@@ -199,26 +222,20 @@ impl SketchView {
         self.status = Some(StatusMessage::info(t!("sketch.solid_queued").to_string()));
     }
 
-    /// Poll nothing; draw the window. Returns nothing (status is internal).
-    pub fn show(&mut self, ctx: &egui::Context) {
-        if !self.show_window {
-            return;
-        }
-        let mut open = true;
-        let screen_center = ctx.screen_rect().center();
-        egui::Window::new(t!("sketch.window_title").to_string())
-            .open(&mut open)
-            .default_size([440.0, 520.0])
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(screen_center)
-            .resizable(true)
-            .show(ctx, |ui| self.contents(ui));
-        if !open {
-            self.show_window = false;
-        }
+    /// World-space polyline of the *current* form (plane, offset, shape) and
+    /// whether it is closed — used by the Array tab to repeat objects along
+    /// the sketched curve without creating a surface.
+    pub fn current_world_polyline(&self) -> Result<(Vec<[f32; 3]>, bool), String> {
+        let (profile, closed) = self.build_profile()?;
+        let sketch = Sketch::new(self.plane.plane(self.offset), profile);
+        let loop3 = sketch
+            .world_polyline(DEFAULT_TOLERANCE)
+            .map_err(|e| e.to_string())?;
+        Ok((loop3, closed))
     }
 
-    fn contents(&mut self, ui: &mut egui::Ui) {
+    /// Sketch form: plane, shape, "create surface" + status line.
+    pub fn sketch_section(&mut self, ui: &mut egui::Ui) {
         // --- Plane ---
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(t!("sketch.plane_heading").to_string()).heading());
@@ -257,6 +274,11 @@ impl SketchView {
             );
             ui.selectable_value(
                 &mut self.shape,
+                ShapeMode::Arc,
+                t!("sketch.shape_arc").to_string(),
+            );
+            ui.selectable_value(
+                &mut self.shape,
                 ShapeMode::Custom,
                 t!("sketch.shape_custom").to_string(),
             );
@@ -277,6 +299,26 @@ impl SketchView {
                 ui.horizontal(|ui| {
                     ui.label(t!("sketch.radius").to_string());
                     ui.add(egui::Slider::new(&mut self.radius, 0.1..=10.0));
+                });
+            }
+            ShapeMode::Arc => {
+                ui.horizontal(|ui| {
+                    ui.label(t!("sketch.radius").to_string());
+                    ui.add(egui::Slider::new(&mut self.radius, 0.1..=10.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t!("sketch.arc_angles").to_string());
+                    ui.add(
+                        egui::DragValue::new(&mut self.arc_start_deg)
+                            .speed(1.0)
+                            .suffix("°"),
+                    );
+                    ui.label("→");
+                    ui.add(
+                        egui::DragValue::new(&mut self.arc_end_deg)
+                            .speed(1.0)
+                            .suffix("°"),
+                    );
                 });
             }
             ShapeMode::Custom => {
@@ -302,14 +344,15 @@ impl SketchView {
             ui.add_space(4.0);
             ui.vertical_centered(|ui| status.show(ui));
         }
+    }
 
-        // --- Composer ---
-        ui.add_space(8.0);
-        ui.separator();
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(t!("sketch.composer_heading").to_string()).heading());
-            ui.label(egui::RichText::new(t!("sketch.composer_hint").to_string()).weak());
-        });
+    /// Solid composer: available faces, selection and "compose solid".
+    pub fn composer_section(&mut self, ui: &mut egui::Ui) {
+        super::tool_window::section_heading(
+            ui,
+            t!("sketch.composer_heading"),
+            Some(t!("sketch.composer_hint").to_string()),
+        );
 
         if self.surfaces.is_empty() {
             ui.add_space(8.0);
@@ -356,6 +399,11 @@ impl SketchView {
                     self.compose_selected();
                 }
             });
+        }
+
+        if let Some(status) = &self.status {
+            ui.add_space(4.0);
+            ui.vertical_centered(|ui| status.show(ui));
         }
     }
 }
@@ -407,6 +455,28 @@ mod tests {
         assert!(matches!(reqs[0], SketchRequest::Surface { .. }));
         // Draining clears the queue.
         assert!(view.take_requests().is_empty());
+    }
+
+    #[test]
+    fn arc_produces_an_open_curved_polyline() {
+        let mut view = SketchView::new();
+        view.shape = ShapeMode::Arc;
+        view.radius = 2.0;
+        view.arc_start_deg = 0.0;
+        view.arc_end_deg = 90.0;
+        view.create_surface();
+        // Open profile: a stroke request is queued, no composer face stored.
+        let reqs = view.take_requests();
+        assert_eq!(reqs.len(), 1);
+        assert!(view.surfaces.is_empty());
+        // Degenerate sweep is rejected with an error status.
+        view.arc_end_deg = view.arc_start_deg;
+        view.create_surface();
+        assert!(view.take_requests().is_empty());
+        assert!(matches!(
+            view.status.as_ref().unwrap().kind,
+            super::super::StatusKind::Error
+        ));
     }
 
     #[test]

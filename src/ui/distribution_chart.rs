@@ -6,7 +6,20 @@
 use std::collections::HashSet;
 
 use crate::dataset::metadata::LabelStat;
-use super::label_filter::swatch_color;
+use crate::visualization::color_mapper::color_for_label;
+
+/// Effective label color (user override or palette) as an egui color.
+fn bar_color(label: u32, colors: &[[f32; 3]]) -> egui::Color32 {
+    let c = colors
+        .get(label as usize)
+        .copied()
+        .unwrap_or_else(|| color_for_label(label));
+    egui::Color32::from_rgb(
+        (c[0] * 255.0) as u8,
+        (c[1] * 255.0) as u8,
+        (c[2] * 255.0) as u8,
+    )
+}
 
 /// Percentage of `count` over the total of all labels (0 when empty).
 pub fn percentage(count: usize, labels: &[LabelStat]) -> f32 {
@@ -18,8 +31,9 @@ pub fn percentage(count: usize, labels: &[LabelStat]) -> f32 {
     }
 }
 
-/// Draw the chart.
-pub fn show(ui: &mut egui::Ui, labels: &[LabelStat], enabled: &HashSet<u32>) {
+/// Draw the chart. `colors` carries the user-edited label colors (may be
+/// shorter than `labels`; missing entries use the default palette).
+pub fn show(ui: &mut egui::Ui, labels: &[LabelStat], enabled: &HashSet<u32>, colors: &[[f32; 3]]) {
     let max_count = labels.iter().map(|l| l.count).max().unwrap_or(1).max(1);
     let bar_h = 16.0;
     let label_w = 110.0;
@@ -32,7 +46,7 @@ pub fn show(ui: &mut egui::Ui, labels: &[LabelStat], enabled: &HashSet<u32>) {
         let painter = ui.painter_at(rect);
         let on = enabled.contains(&(id as u32));
         let color = if on {
-            swatch_color(id as u32)
+            bar_color(id as u32, colors)
         } else {
             egui::Color32::from_gray(80)
         };

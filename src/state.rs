@@ -141,8 +141,8 @@ pub struct State {
     pub editing_obj_id: Option<usize>,
     pub editing_obj_draft: Option<SceneObject>,
 
-    // Draft state for new object creation
-    pub draft_object: Option<SceneObject>,
+    // Objects window (primitive creation + sketch + composer)
+    pub objects_view: crate::ui::objects_panel::ObjectsView,
 
     // Clipboard
     pub clipboard: Vec<SceneObject>,
@@ -159,7 +159,6 @@ pub struct State {
 
     // Universal geometry import (layers of instanced shapes)
     pub geometry_view: crate::ui::geometry_panel::GeometryView,
-    pub sketch_view: crate::ui::sketch_panel::SketchView,
     geometry_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
 
     // LLM / SLM parameter visualizer
@@ -217,17 +216,6 @@ fn color_edit_button(ui: &mut egui::Ui, label: &str, rgb: &mut [f32; 3]) -> bool
         rgb[2] = srgba.b() as f32 / 255.0;
     }
     changed
-}
-
-/// Small transparent icon button used by every row of the bottom object list
-/// (scene objects, imported datasets, …) so they share one look and one
-/// implementation instead of repeating the `Button`/`RichText` boilerplate.
-fn list_icon_button(ui: &mut egui::Ui, icon: &str, color: egui::Color32, hover: &str) -> bool {
-    ui.add(
-        egui::Button::new(egui::RichText::new(icon).color(color)).fill(egui::Color32::TRANSPARENT),
-    )
-    .on_hover_text(hover)
-    .clicked()
 }
 
 impl State {
@@ -569,7 +557,7 @@ impl State {
             ),
             editing_obj_id: None,
             editing_obj_draft: None,
-            draft_object: None,
+            objects_view: crate::ui::objects_panel::ObjectsView::new(),
             clipboard: Vec::new(),
             mouse_pos: [0.0, 0.0],
             measure_mode: false,
@@ -582,7 +570,6 @@ impl State {
             dataset_view: crate::ui::DatasetView::new(),
             dataset_point_batches: Vec::new(),
             geometry_view: crate::ui::geometry_panel::GeometryView::new(),
-            sketch_view: crate::ui::sketch_panel::SketchView::new(),
             geometry_batches: Vec::new(),
             custom_meshes: std::collections::HashMap::new(),
             mesh_worker: None,
@@ -729,12 +716,12 @@ impl State {
             Ok(mesh) => {
                 let tri = mesh.triangle_count();
                 self.insert_custom_mesh(mesh, label, false);
-                self.sketch_view.status = Some(crate::ui::StatusMessage::success(
+                self.objects_view.sketch.status = Some(crate::ui::StatusMessage::success(
                     t!("sketch.surface_created", count = tri).to_string(),
                 ));
             }
             Err(e) => {
-                self.sketch_view.status = Some(crate::ui::StatusMessage::error(
+                self.objects_view.sketch.status = Some(crate::ui::StatusMessage::error(
                     t!("sketch.surface_failed", msg = e.to_string()).to_string(),
                 ));
             }
@@ -746,14 +733,14 @@ impl State {
     pub fn add_solid(&mut self, loops: &[Vec<[f32; 3]>], label: String) {
         let (mesh, closed) = crate::brep::compose(loops);
         if mesh.indices.is_empty() {
-            self.sketch_view.status = Some(crate::ui::StatusMessage::error(
+            self.objects_view.sketch.status = Some(crate::ui::StatusMessage::error(
                 t!("sketch.solid_failed").to_string(),
             ));
             return;
         }
         let tri = mesh.triangle_count();
         self.insert_custom_mesh(mesh, label, false);
-        self.sketch_view.status = Some(if closed {
+        self.objects_view.sketch.status = Some(if closed {
             crate::ui::StatusMessage::success(t!("sketch.solid_created", count = tri).to_string())
         } else {
             crate::ui::StatusMessage::info(t!("sketch.solid_open", count = tri).to_string())
@@ -882,17 +869,13 @@ impl State {
                         return true;
                     }
                     "n" | "N" if !is_ctrl => {
-                        if self.draft_object.is_none() {
-                            let id = self.next_id;
-                            let default_obj = SceneObject::new(
-                                id,
-                                format!("Object {}", id),
-                                [0.0, 0.0, 0.0],
-                                GeometryType::Cube,
-                            );
-                            self.draft_object = Some(default_obj);
-                            self.should_focus_name = true;
-                        }
+                        let id = self.next_id;
+                        self.objects_view.open_primitive(SceneObject::new(
+                            id,
+                            format!("Object {}", id),
+                            [0.0, 0.0, 0.0],
+                            GeometryType::Cube,
+                        ));
                         return true;
                     }
                     _ => {}
@@ -956,7 +939,8 @@ impl State {
                                         now.duration_since(self.last_click_time).as_millis() < 300;
                                     self.last_click_time = now;
 
-                                    if let Some(hit_id) = self.select_object_at_ndc(x, y) {
+                                    let object_hit = self.select_object_at_ndc(x, y);
+                                    if let Some(hit_id) = object_hit {
                                         if is_double_click {
                                             // Initialize Edit from 3D Double Click
                                             self.editing_obj_id = Some(hit_id);
@@ -975,6 +959,15 @@ impl State {
                                     {
                                         let (ro, rd) = self.build_ray_ndc(x, y);
                                         self.llm_view.pick_node(ro, rd);
+                                    }
+
+                                    // Dataset point picking: highlight the row,
+                                    // select the list entry and sync the table.
+                                    if object_hit.is_none()
+                                        && self.dataset_view.loaded.is_some()
+                                    {
+                                        let (ro, rd) = self.build_ray_ndc(x, y);
+                                        self.dataset_view.pick_point(ro, rd);
                                     }
                                 }
                             }
@@ -1238,11 +1231,15 @@ impl State {
         let mut action_focus_selected = false;
         let mut action_save_settings  = false;
         let mut action_rebuild_grids  = false;
-        let mut create_object = None;
+        let mut created_objects: Vec<SceneObject> = Vec::new();
 
         let mut action_edit_obj_id = None;
         let mut action_close_editor = false;
         let mut action_delete_obj_id = None;
+        // Context-menu actions on scene-object rows.
+        let mut action_duplicate_obj_id: Option<usize> = None;
+        let mut action_mirror_obj: Option<(usize, crate::ui::entity_list::MirrorAxis)> = None;
+        let mut action_flip_obj_id: Option<usize> = None;
         let mut action_confirm_edit = false;
         let mut dataset_action = crate::ui::DatasetAction::None;
         let mut geometry_focus: Option<[f32; 3]> = None;
@@ -1262,25 +1259,28 @@ impl State {
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button(t!("toolbar.object").to_string()).clicked() {
-                            let id = self.next_id;
-                            let default_obj = SceneObject::new(
-                                id,
-                                format!("Object {}", id),
-                                [0.0, 0.0, 0.0],
-                                GeometryType::Cube,
-                            );
-                            self.draft_object = Some(default_obj);
-                            self.should_focus_name = true;
+                        if ui.button(t!("toolbar.objects").to_string()).clicked() {
+                            if self.objects_view.show_window {
+                                self.objects_view.show_window = false;
+                            } else {
+                                let id = self.next_id;
+                                self.objects_view.open_primitive(SceneObject::new(
+                                    id,
+                                    format!("Object {}", id),
+                                    [0.0, 0.0, 0.0],
+                                    GeometryType::Cube,
+                                ));
+                            }
                         }
-                        if ui.button(t!("toolbar.dataset").to_string()).clicked() {
-                            self.dataset_view.show_window = !self.dataset_view.show_window;
-                        }
-                        if ui.button(t!("toolbar.solids").to_string()).clicked() {
+                        if ui.button(t!("toolbar.import").to_string()).clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
                         }
-                        if ui.button(t!("toolbar.sketch").to_string()).clicked() {
-                            self.sketch_view.show_window = !self.sketch_view.show_window;
+                        if ui.button(t!("toolbar.data").to_string()).clicked() {
+                            self.dataset_view.show_window = !self.dataset_view.show_window;
+                        }
+                        if ui.button(t!("toolbar.stream").to_string()).clicked() {
+                            self.dataset_view.show_stream_window =
+                                !self.dataset_view.show_stream_window;
                         }
                         // Neural-network / LLM import lives inside the Dataset
                         // import window (no standalone toolbar button); its
@@ -1334,6 +1334,42 @@ impl State {
                     });
             }
 
+            // Spatial dataset filter: offer scene spheres/cubes as volumes
+            // and resolve the selected one's transform every frame, so the
+            // filter follows the object live (move/resize/delete included).
+            {
+                use crate::visualization::spatial::{FilterVolume, VolumeShape};
+                self.dataset_view.scene_volumes = self
+                    .objects
+                    .iter()
+                    .filter(|o| {
+                        matches!(o.geometry_type, GeometryType::Sphere | GeometryType::Cube)
+                    })
+                    .map(|o| (o.id, o.label.clone()))
+                    .collect();
+                let resolve = |id: usize| {
+                    self.objects.iter().find(|o| o.id == id).and_then(|o| {
+                        let shape = match o.geometry_type {
+                            GeometryType::Sphere => VolumeShape::Sphere,
+                            GeometryType::Cube => VolumeShape::Cube,
+                            _ => return None,
+                        };
+                        FilterVolume::new(shape, o.instance.to_model_matrix())
+                    })
+                };
+                // Drop picks that no longer qualify (deleted or type changed),
+                // then resolve the survivors in a stable (id) order.
+                self.dataset_view
+                    .spatial_objects
+                    .retain(|&id| resolve(id).is_some());
+                let mut ids: Vec<usize> =
+                    self.dataset_view.spatial_objects.iter().copied().collect();
+                ids.sort_unstable();
+                let volumes: Vec<FilterVolume> =
+                    ids.into_iter().filter_map(resolve).collect();
+                self.dataset_view.sync_spatial(volumes);
+            }
+
             // Dataset visualizer window (import, table, filters, search, export)
             dataset_action = self.dataset_view.show(ctx);
 
@@ -1367,8 +1403,19 @@ impl State {
 
             // Geometry import window (paste / files / layers)
             geometry_focus = self.geometry_view.show(ctx);
-            // Sketch & solid composer window
-            self.sketch_view.show(ctx);
+            // Objects window (primitive creation + sketch + composer).
+            // Seed a fresh primitive draft whenever the tab asks for one.
+            if self.objects_view.needs_draft() {
+                let id = self.next_id;
+                self.objects_view.draft = Some(SceneObject::new(
+                    id,
+                    format!("Object {}", id),
+                    [0.0, 0.0, 0.0],
+                    GeometryType::Cube,
+                ));
+            }
+            self.objects_view.show(ctx);
+            created_objects.extend(self.objects_view.take_created());
             // LLM / SLM parameter visualizer window
             llm_action = self.llm_view.show(ctx);
 
@@ -1577,668 +1624,207 @@ impl State {
                                     .max_height(250.0)
                                     .show(ui, |ui| {
                                         ui.spacing_mut().item_spacing.y = 2.0;
+                                        use crate::ui::entity_list::{self, EntityRow, RowAction};
+
+                                        // --- Scene objects (hand-built + imported meshes) ---
                                         let mut select_exclusive_id = None;
                                         for obj in self.objects.iter_mut() {
-                                            ui.horizontal(|ui| {
-                                                // Unique Name (Selectable)
-                                                let response = ui.selectable_label(
-                                                    obj.selected,
-                                                    egui::RichText::new(&obj.label)
-                                                        .strong()
-                                                        .size(14.0),
-                                                );
-                                                if response.clicked() {
-                                                    let modifiers = ui.ctx().input(|i| i.modifiers);
-                                                    if modifiers.ctrl
-                                                        || modifiers.shift
-                                                        || modifiers.mac_cmd
-                                                    {
-                                                        obj.selected = !obj.selected;
-                                                    } else {
-                                                        select_exclusive_id = Some(obj.id);
-                                                    }
+                                            let editing = action_edit_obj_id == Some(obj.id)
+                                                || self.editing_obj_id == Some(obj.id);
+                                            let spec = EntityRow {
+                                                icon: None,
+                                                title: &obj.label,
+                                                subtitle: None,
+                                                selected: obj.selected,
+                                                selectable: true,
+                                                visible: Some(obj.visible),
+                                                show_label: Some(obj.show_label),
+                                                can_edit: true,
+                                                editing,
+                                                can_focus: false,
+                                                can_delete: true,
+                                                cad_actions: true,
+                                            };
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::Select { exclusive: true } => {
+                                                    select_exclusive_id = Some(obj.id);
                                                 }
-                                                if response.double_clicked() {
+                                                RowAction::Select { exclusive: false } => {
+                                                    obj.selected = !obj.selected;
+                                                }
+                                                RowAction::Open | RowAction::Edit => {
                                                     action_edit_obj_id = Some(obj.id);
+                                                    self.editing_obj_draft = Some(obj.clone());
+                                                    self.should_focus_name = true;
                                                 }
-
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(
-                                                        egui::Align::Center,
-                                                    ),
-                                                    |ui| {
-                                                        // Edit / delete / label / visibility icons
-                                                        // share the same look via `list_icon_button`.
-                                                        let is_editing = action_edit_obj_id
-                                                            == Some(obj.id)
-                                                            || self.editing_obj_id == Some(obj.id);
-                                                        let edit_color = if is_editing {
-                                                            egui::Color32::from_rgb(0, 150, 255)
-                                                        } else {
-                                                            ui.visuals().text_color()
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "✏",
-                                                            edit_color,
-                                                            &t!("list.edit"),
-                                                        ) {
-                                                            action_edit_obj_id = Some(obj.id);
-                                                            self.editing_obj_draft =
-                                                                Some(obj.clone());
-                                                            self.should_focus_name = true;
-                                                        }
-
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🗑",
-                                                            egui::Color32::from_rgb(255, 100, 100),
-                                                            &t!("list.delete"),
-                                                        ) {
-                                                            action_delete_obj_id = Some(obj.id);
-                                                        }
-
-                                                        let label_color = if obj.show_label {
-                                                            egui::Color32::from_rgb(0, 200, 255)
-                                                        } else {
-                                                            egui::Color32::from_rgb(150, 150, 150)
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🏷",
-                                                            label_color,
-                                                            &t!("list.toggle_label"),
-                                                        ) {
-                                                            obj.show_label = !obj.show_label;
-                                                        }
-
-                                                        // Visibility (opposite colors when hidden).
-                                                        let (vis_icon, vis_color) = if obj.visible {
-                                                            (
-                                                                "👁",
-                                                                egui::Color32::from_rgb(
-                                                                    100, 255, 100,
-                                                                ),
-                                                            )
-                                                        } else {
-                                                            (
-                                                                "🕶",
-                                                                egui::Color32::from_rgb(
-                                                                    255, 100, 100,
-                                                                ),
-                                                            )
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            vis_icon,
-                                                            vis_color,
-                                                            &t!("list.visibility"),
-                                                        ) {
-                                                            obj.visible = !obj.visible;
-                                                        }
-                                                    },
-                                                );
-                                            });
+                                                RowAction::ToggleLabel => {
+                                                    obj.show_label = !obj.show_label;
+                                                }
+                                                RowAction::ToggleVisibility => {
+                                                    obj.visible = !obj.visible;
+                                                }
+                                                RowAction::Delete => {
+                                                    action_delete_obj_id = Some(obj.id);
+                                                }
+                                                RowAction::Duplicate => {
+                                                    action_duplicate_obj_id = Some(obj.id);
+                                                }
+                                                RowAction::Mirror(axis) => {
+                                                    action_mirror_obj = Some((obj.id, axis));
+                                                }
+                                                RowAction::Flip => {
+                                                    action_flip_obj_id = Some(obj.id);
+                                                }
+                                                _ => {}
+                                            }
                                         }
-
                                         if let Some(id) = select_exclusive_id {
                                             for obj in &mut self.objects {
                                                 obj.selected = obj.id == id;
                                             }
                                         }
 
-                                        // --- Imported dataset ---
-                                        // The dataset visualizer no longer owns
-                                        // an "Explore" list; its imported data
-                                        // lives here, in the same list as every
-                                        // other object.
-                                        let dataset_entry =
-                                            self.dataset_view.loaded.as_ref().map(|l| {
-                                                (
-                                                    l.dataset.metadata.name.clone(),
-                                                    l.dataset.n_rows(),
-                                                )
-                                            });
-                                        if let Some((name, n_rows)) = dataset_entry {
-                                            let visible = self.dataset_view.visible;
-                                            let centroid = self.dataset_view.centroid();
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    egui::RichText::new(format!("📊 {}", name))
-                                                        .strong()
-                                                        .size(14.0),
-                                                );
-                                                ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "({} {})",
-                                                        n_rows,
-                                                        t!("list.rows")
-                                                    ))
-                                                    .weak(),
-                                                );
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(
-                                                        egui::Align::Center,
-                                                    ),
-                                                    |ui| {
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🗑",
-                                                            egui::Color32::from_rgb(255, 100, 100),
-                                                            &t!("list.remove_dataset"),
-                                                        ) {
-                                                            remove_dataset = true;
-                                                        }
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🎯",
-                                                            ui.visuals().text_color(),
-                                                            &t!("list.focus_dataset"),
-                                                        ) {
-                                                            dataset_focus = centroid;
-                                                        }
-                                                        let (vis_icon, vis_color) = if visible {
-                                                            (
-                                                                "👁",
-                                                                egui::Color32::from_rgb(
-                                                                    100, 255, 100,
-                                                                ),
-                                                            )
-                                                        } else {
-                                                            (
-                                                                "🕶",
-                                                                egui::Color32::from_rgb(
-                                                                    255, 100, 100,
-                                                                ),
-                                                            )
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            vis_icon,
-                                                            vis_color,
-                                                            &t!("list.visibility"),
-                                                        ) {
-                                                            self.dataset_view.set_visible(!visible);
-                                                        }
-                                                    },
-                                                );
-                                            });
+                                        // --- Imported geometry layers ---
+                                        let mut layer_action = None;
+                                        for (i, layer) in
+                                            self.geometry_view.layers.iter().enumerate()
+                                        {
+                                            let subtitle = format!("({})", layer.len());
+                                            let mut spec = EntityRow::entry("🧊", &layer.name)
+                                                .subtitle(subtitle)
+                                                .visible(layer.visible);
+                                            spec.can_edit = true;
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::None => {}
+                                                action => layer_action = Some((i, action)),
+                                            }
+                                        }
+                                        if let Some((i, action)) = layer_action {
+                                            match action {
+                                                RowAction::ToggleVisibility => {
+                                                    self.geometry_view.toggle_layer_visibility(i);
+                                                }
+                                                RowAction::Delete => {
+                                                    self.geometry_view.remove_layer_at(i);
+                                                }
+                                                RowAction::Focus => {
+                                                    geometry_focus =
+                                                        self.geometry_view.layers[i].centroid();
+                                                }
+                                                RowAction::Edit | RowAction::Open => {
+                                                    self.geometry_view.show_window = true;
+                                                }
+                                                _ => {}
+                                            }
                                         }
 
-                                        // --- LLM / SLM graph ---
-                                        if let Some(graph) = &self.llm_view.graph {
-                                            let llm_name = graph.name.clone();
-                                            let n_layers = graph.layers.len();
-                                            let n_nodes  = graph.node_count();
-                                            let llm_vis  = self.llm_view.visible;
-                                            let llm_cen  = self.llm_view.centroid();
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    egui::RichText::new(format!("🧠 {llm_name}"))
-                                                        .strong()
-                                                        .size(14.0),
-                                                );
-                                                ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "({n_layers} {} · {n_nodes} {})",
-                                                        t!("llm.layers"),
-                                                        t!("llm.nodes"),
-                                                    ))
-                                                    .weak(),
-                                                );
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(egui::Align::Center),
-                                                    |ui| {
-                                                        if list_icon_button(
-                                                            ui,
-                                                            "🗑",
-                                                            egui::Color32::from_rgb(255, 100, 100),
-                                                            &t!("list.remove_llm"),
-                                                        ) {
-                                                            remove_llm = true;
-                                                        }
-                                                        if let Some(c) = llm_cen {
-                                                            if list_icon_button(
-                                                                ui,
-                                                                "🎯",
-                                                                ui.visuals().text_color(),
-                                                                &t!("list.focus_llm"),
-                                                            ) {
-                                                                llm_focus = Some(c);
-                                                            }
-                                                        }
-                                                        let (vis_icon, vis_color) = if llm_vis {
-                                                            ("👁", egui::Color32::from_rgb(100, 255, 100))
-                                                        } else {
-                                                            ("🕶", egui::Color32::from_rgb(255, 100, 100))
-                                                        };
-                                                        if list_icon_button(
-                                                            ui,
-                                                            vis_icon,
-                                                            vis_color,
-                                                            &t!("list.visibility"),
-                                                        ) {
-                                                            self.llm_view.set_visible(!llm_vis);
-                                                        }
-                                                    },
-                                                );
-                                            });
+                                        // --- Imported dataset (single live entry) ---
+                                        let dataset_info = self.dataset_view.loaded.as_ref().map(
+                                            |l| (l.dataset.metadata.name.clone(), l.dataset.n_rows()),
+                                        );
+                                        if let Some((name, n_rows)) = dataset_info {
+                                            let subtitle =
+                                                format!("({} {})", n_rows, t!("list.rows"));
+                                            let mut spec = EntityRow::entry("📊", &name)
+                                                .subtitle(subtitle)
+                                                .visible(self.dataset_view.visible);
+                                            spec.can_edit = true;
+                                            spec.selectable = true;
+                                            spec.selected = self.dataset_view.list_selected;
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::Select { .. } => {
+                                                    self.dataset_view.list_selected =
+                                                        !self.dataset_view.list_selected;
+                                                }
+                                                RowAction::ToggleVisibility => {
+                                                    let v = self.dataset_view.visible;
+                                                    self.dataset_view.set_visible(!v);
+                                                }
+                                                RowAction::Delete => remove_dataset = true,
+                                                RowAction::Focus => {
+                                                    dataset_focus = self.dataset_view.centroid();
+                                                }
+                                                RowAction::Edit | RowAction::Open => {
+                                                    // Properties of the data: the same View tab
+                                                    // used at import time (size, shape, colors,
+                                                    // projection).
+                                                    self.dataset_view.show_window = true;
+                                                    self.dataset_view.tab =
+                                                        crate::ui::DatasetTab::View;
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+
+                                        // --- LLM / neural network graph ---
+                                        let llm_info = self.llm_view.graph.as_ref().map(|g| {
+                                            (g.name.clone(), g.layers.len(), g.node_count())
+                                        });
+                                        if let Some((name, n_layers, n_nodes)) = llm_info {
+                                            let subtitle = format!(
+                                                "({} {} · {} {})",
+                                                n_layers,
+                                                t!("llm.layers"),
+                                                n_nodes,
+                                                t!("llm.nodes"),
+                                            );
+                                            let mut spec = EntityRow::entry("🧠", &name)
+                                                .subtitle(subtitle)
+                                                .visible(self.llm_view.visible);
+                                            spec.can_edit = true;
+                                            match entity_list::row(ui, &spec) {
+                                                RowAction::ToggleVisibility => {
+                                                    let v = self.llm_view.visible;
+                                                    self.llm_view.set_visible(!v);
+                                                }
+                                                RowAction::Delete => remove_llm = true,
+                                                RowAction::Focus => {
+                                                    llm_focus = self.llm_view.centroid();
+                                                }
+                                                RowAction::Edit | RowAction::Open => {
+                                                    self.llm_view.show_window = true;
+                                                }
+                                                _ => {}
+                                            }
                                         }
                                     });
+
+                                // Synced data table: shown while the dataset
+                                // entry is selected; clicking a 3D point
+                                // highlights + scrolls to its row here, and
+                                // clicking a row focuses the camera on it.
+                                if self.dataset_view.list_selected
+                                    && self.dataset_view.loaded.is_some()
+                                {
+                                    ui.add_space(6.0);
+                                    ui.separator();
+                                    if let Some(p) = self.dataset_view.table_section(ui) {
+                                        dataset_focus = Some(p);
+                                    }
+                                }
                             });
                     }
                 });
             self.bottom_panel_expanded = panel_expanded;
 
-            // Draft Create Object Window
-            if let Some(mut draft) = self.draft_object.take() {
-                let mut open = true;
-                let mut action_discard = false;
-                let mut action_confirm = false;
-                egui::Window::new(t!("add.window_title").to_string())
-                    .open(&mut open)
-                    .resizable(true)
-                    .show(ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(t!("common.name").to_string());
-                            let res = ui.text_edit_singleline(&mut draft.label);
-                            if self.should_focus_name {
-                                res.request_focus();
-                                self.should_focus_name = false;
-                            }
-                        });
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            ui.label(t!("common.type").to_string());
-                            let type_label = match draft.geometry_type {
-                                GeometryType::Cube => t!("shape.cube").to_string(),
-                                GeometryType::Sphere => t!("shape.sphere").to_string(),
-                                GeometryType::Plane => t!("shape.plane").to_string(),
-                                _ => format!("{:?}", draft.geometry_type),
-                            };
-                            egui::ComboBox::from_id_source("draft_type_combo")
-                                .selected_text(type_label)
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut draft.geometry_type,
-                                        GeometryType::Cube,
-                                        t!("shape.cube").to_string(),
-                                    );
-                                    ui.selectable_value(
-                                        &mut draft.geometry_type,
-                                        GeometryType::Sphere,
-                                        t!("shape.sphere").to_string(),
-                                    );
-                                    ui.selectable_value(
-                                        &mut draft.geometry_type,
-                                        GeometryType::Plane,
-                                        t!("shape.plane").to_string(),
-                                    );
-                                });
-                        });
-
-                        ui.heading(t!("add.transform").to_string());
-                        ui.horizontal(|ui| {
-                            ui.label(t!("common.position").to_string());
-                            ui.add(egui::DragValue::new(&mut draft.instance.position.x).speed(0.1));
-                            ui.add(egui::DragValue::new(&mut draft.instance.position.y).speed(0.1));
-                            ui.add(egui::DragValue::new(&mut draft.instance.position.z).speed(0.1));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(t!("common.rotation").to_string());
-                            let mut changed = false;
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut draft.rotation_euler[0])
-                                        .speed(1.0)
-                                        .suffix("°"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut draft.rotation_euler[1])
-                                        .speed(1.0)
-                                        .suffix("°"),
-                                )
-                                .changed();
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut draft.rotation_euler[2])
-                                        .speed(1.0)
-                                        .suffix("°"),
-                                )
-                                .changed();
-                            if changed {
-                                draft.update_rotation();
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(t!("common.scale").to_string());
-                            ui.add(
-                                egui::DragValue::new(&mut draft.instance.scale.x)
-                                    .speed(0.01)
-                                    .max_decimals(2),
-                            );
-                            ui.add(
-                                egui::DragValue::new(&mut draft.instance.scale.y)
-                                    .speed(0.01)
-                                    .max_decimals(2),
-                            );
-                            ui.add(
-                                egui::DragValue::new(&mut draft.instance.scale.z)
-                                    .speed(0.01)
-                                    .max_decimals(2),
-                            );
-                        });
-
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            ui.label(t!("common.color").to_string());
-                            ui.color_edit_button_rgb(&mut draft.color);
-                        });
-                        ui.checkbox(&mut draft.show_label, t!("add.show_label").to_string());
-
-                        ui.separator();
-                        ui.heading(t!("add.geometry_props").to_string());
-                        match draft.geometry_type {
-                            GeometryType::Cube => {
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("add.side_length").to_string());
-                                    if ui
-                                        .add(egui::DragValue::new(&mut draft.cube_side).speed(0.1))
-                                        .changed()
-                                    {
-                                        let s = draft.cube_side;
-                                        draft.instance.scale = cgmath::Vector3::new(s, s, s);
-                                    }
-                                });
-                            }
-                            GeometryType::Sphere => {
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("add.radius").to_string());
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut draft.sphere_radius)
-                                                .speed(0.1),
-                                        )
-                                        .changed()
-                                    {
-                                        let s = draft.sphere_radius * 2.0; // Mesh is radius 0.5, so scale=2*radius
-                                        draft.instance.scale = cgmath::Vector3::new(s, s, s);
-                                    }
-                                });
-                            }
-                            GeometryType::Plane => {
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("add.surface_area").to_string());
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut draft.plane_surface)
-                                                .speed(0.1)
-                                                .range(0.1..=100.0),
-                                        )
-                                        .changed()
-                                    {
-                                        let s = draft.plane_surface.sqrt();
-                                        draft.instance.scale = cgmath::Vector3::new(s, 1.0, s);
-                                    }
-                                });
-                                ui.checkbox(
-                                    &mut draft.show_normal,
-                                    t!("add.show_normal").to_string(),
-                                );
-                            }
-                            _ => {}
-                        }
-
-                        ui.separator();
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_sized(
-                                    [80.0, 24.0],
-                                    egui::Button::new(t!("common.cancel").to_string()),
-                                )
-                                .clicked()
-                                || ui.input(|i| i.key_pressed(egui::Key::Escape))
-                            {
-                                action_discard = true;
-                            }
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui
-                                        .add_sized(
-                                            [80.0, 24.0],
-                                            egui::Button::new(t!("common.add").to_string()),
-                                        )
-                                        .clicked()
-                                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                    {
-                                        action_confirm = true;
-                                    }
-                                },
-                            );
-                        });
-                    });
-
-                if action_discard {
-                    open = false;
-                }
-                if action_confirm {
-                    create_object = Some(draft.clone());
-                    open = false;
-                }
-
-                if open {
-                    self.draft_object = Some(draft); // Put it back if still open
-                }
-            }
-
-            // Editor Popup Window
+            // Editor popup window — the same shared form as creation
+            // (see `ui::object_form`): editing offers everything creation does.
             if self.editing_obj_id.is_some() {
-                let mut open = true;
                 if let Some(mut obj) = self.editing_obj_draft.take() {
-                    egui::Window::new(t!("props.window_title").to_string())
-                        .open(&mut open)
-                        .resizable(true)
-                        .show(ctx, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(t!("common.name").to_string());
-                                let res = ui.text_edit_singleline(&mut obj.label);
-                                if self.should_focus_name {
-                                    res.request_focus();
-                                    self.should_focus_name = false;
-                                }
-                            });
-                            ui.separator();
-                            ui.horizontal(|ui| {
-                                ui.label(t!("common.type").to_string());
-                                let type_label = match obj.geometry_type {
-                                    GeometryType::Cube => t!("shape.cube").to_string(),
-                                    GeometryType::Sphere => t!("shape.sphere").to_string(),
-                                    GeometryType::Plane => t!("shape.plane").to_string(),
-                                    _ => format!("{:?}", obj.geometry_type),
-                                };
-                                egui::ComboBox::from_id_source(format!("type_combo_{}", obj.id))
-                                    .selected_text(type_label)
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut obj.geometry_type,
-                                            GeometryType::Cube,
-                                            t!("shape.cube").to_string(),
-                                        );
-                                        ui.selectable_value(
-                                            &mut obj.geometry_type,
-                                            GeometryType::Sphere,
-                                            t!("shape.sphere").to_string(),
-                                        );
-                                        ui.selectable_value(
-                                            &mut obj.geometry_type,
-                                            GeometryType::Plane,
-                                            t!("shape.plane").to_string(),
-                                        );
-                                    });
-                            });
-
-                            ui.heading(t!("add.transform").to_string());
-                            ui.horizontal(|ui| {
-                                ui.label(t!("common.position").to_string());
-                                ui.add(
-                                    egui::DragValue::new(&mut obj.instance.position.x).speed(0.1),
-                                );
-                                ui.add(
-                                    egui::DragValue::new(&mut obj.instance.position.y).speed(0.1),
-                                );
-                                ui.add(
-                                    egui::DragValue::new(&mut obj.instance.position.z).speed(0.1),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(t!("common.rotation").to_string());
-                                let mut changed = false;
-                                changed |= ui
-                                    .add(
-                                        egui::DragValue::new(&mut obj.rotation_euler[0])
-                                            .speed(1.0)
-                                            .suffix("°"),
-                                    )
-                                    .changed();
-                                changed |= ui
-                                    .add(
-                                        egui::DragValue::new(&mut obj.rotation_euler[1])
-                                            .speed(1.0)
-                                            .suffix("°"),
-                                    )
-                                    .changed();
-                                changed |= ui
-                                    .add(
-                                        egui::DragValue::new(&mut obj.rotation_euler[2])
-                                            .speed(1.0)
-                                            .suffix("°"),
-                                    )
-                                    .changed();
-                                if changed {
-                                    obj.update_rotation();
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(t!("common.scale").to_string());
-                                ui.add(
-                                    egui::DragValue::new(&mut obj.instance.scale.x)
-                                        .speed(0.01)
-                                        .max_decimals(2),
-                                );
-                                ui.add(
-                                    egui::DragValue::new(&mut obj.instance.scale.y)
-                                        .speed(0.01)
-                                        .max_decimals(2),
-                                );
-                                ui.add(
-                                    egui::DragValue::new(&mut obj.instance.scale.z)
-                                        .speed(0.01)
-                                        .max_decimals(2),
-                                );
-                            });
-
-                            ui.separator();
-                            ui.horizontal(|ui| {
-                                ui.label(t!("common.color").to_string());
-                                ui.color_edit_button_rgb(&mut obj.color);
-                            });
-                            ui.checkbox(&mut obj.show_label, t!("add.show_label").to_string());
-
-                            ui.separator();
-                            ui.heading(t!("add.geometry_props").to_string());
-                            match obj.geometry_type {
-                                GeometryType::Cube => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(t!("add.side_length").to_string());
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut obj.cube_side).speed(0.1),
-                                            )
-                                            .changed()
-                                        {
-                                            let s = obj.cube_side;
-                                            obj.instance.scale = cgmath::Vector3::new(s, s, s);
-                                        }
-                                    });
-                                }
-                                GeometryType::Sphere => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(t!("add.radius").to_string());
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut obj.sphere_radius)
-                                                    .speed(0.1),
-                                            )
-                                            .changed()
-                                        {
-                                            let s = obj.sphere_radius * 2.0;
-                                            obj.instance.scale = cgmath::Vector3::new(s, s, s);
-                                        }
-                                    });
-                                }
-                                GeometryType::Plane => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(t!("add.surface_area").to_string());
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut obj.plane_surface)
-                                                    .speed(0.1)
-                                                    .range(0.1..=100.0),
-                                            )
-                                            .changed()
-                                        {
-                                            let s = obj.plane_surface.sqrt();
-                                            obj.instance.scale = cgmath::Vector3::new(s, 1.0, s);
-                                        }
-                                    });
-                                    ui.checkbox(
-                                        &mut obj.show_normal,
-                                        t!("add.show_normal").to_string(),
-                                    );
-                                }
-                                _ => {}
-                            }
-
-                            ui.separator();
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .add_sized(
-                                        [80.0, 24.0],
-                                        egui::Button::new(t!("common.cancel").to_string()),
-                                    )
-                                    .clicked()
-                                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                {
-                                    action_close_editor = true;
-                                }
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui
-                                            .add_sized(
-                                                [80.0, 24.0],
-                                                egui::Button::new(t!("common.confirm").to_string()),
-                                            )
-                                            .clicked()
-                                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                        {
-                                            action_confirm_edit = true;
-                                        }
-                                    },
-                                );
-                            });
-                        });
-
-                    if open {
-                        self.editing_obj_draft = Some(obj);
+                    use crate::ui::object_form::{self, ObjectFormAction, ObjectFormMode};
+                    match object_form::window(
+                        ctx,
+                        &mut obj,
+                        &mut self.should_focus_name,
+                        ObjectFormMode::Edit,
+                    ) {
+                        ObjectFormAction::Confirm => {
+                            self.editing_obj_draft = Some(obj);
+                            action_confirm_edit = true;
+                        }
+                        ObjectFormAction::Cancel => action_close_editor = true,
+                        ObjectFormAction::None => self.editing_obj_draft = Some(obj),
                     }
-                }
-                if !open {
-                    action_close_editor = true;
                 }
             }
 
@@ -2331,9 +1917,23 @@ impl State {
         });
 
         // Apply deferred actions
-        if let Some(obj) = create_object {
-            self.objects.push(obj);
-            self.next_id += 1;
+        // Add the objects created this frame (single primitive or a whole
+        // parametric array): the host owns id assignment, and the batch is
+        // undoable as one action.
+        if !created_objects.is_empty() {
+            let mut undo_cmds = Vec::with_capacity(created_objects.len());
+            for mut obj in created_objects {
+                obj.id = self.next_id;
+                self.next_id += 1;
+                undo_cmds.push(UndoCommand::Add(obj.clone()));
+                self.objects.push(obj);
+            }
+            let cmd = if undo_cmds.len() == 1 {
+                undo_cmds.pop().unwrap()
+            } else {
+                UndoCommand::MultiAction(undo_cmds)
+            };
+            self.push_undo(cmd);
         }
 
         if action_reset_view {
@@ -2389,7 +1989,7 @@ impl State {
         }
 
         // Build any surfaces / solids requested from the Sketch window.
-        for request in self.sketch_view.take_requests() {
+        for request in self.objects_view.sketch.take_requests() {
             match request {
                 crate::ui::sketch_panel::SketchRequest::Surface { sketch, label } => {
                     self.add_sketch_surface(&sketch, label);
@@ -2490,6 +2090,59 @@ impl State {
                 }
             }
             self.editing_obj_id = None;
+        }
+
+        // Context-menu: duplicate in place (same semantics as Ctrl+D).
+        if let Some(id) = action_duplicate_obj_id {
+            if let Some(obj) = self.objects.iter().find(|o| o.id == id) {
+                let mut copy = obj.clone();
+                copy.id = self.next_id;
+                self.next_id += 1;
+                self.push_undo(UndoCommand::Add(copy.clone()));
+                self.objects.push(copy);
+            }
+        }
+
+        // Context-menu: add a duplicate mirrored across the world plane
+        // orthogonal to the chosen axis (position component negated, the
+        // other two Euler components flipped).
+        if let Some((id, axis)) = action_mirror_obj {
+            use crate::ui::entity_list::MirrorAxis;
+            if let Some(obj) = self.objects.iter().find(|o| o.id == id) {
+                let mut copy = obj.clone();
+                copy.id = self.next_id;
+                self.next_id += 1;
+                let a = match axis {
+                    MirrorAxis::X => 0,
+                    MirrorAxis::Y => 1,
+                    MirrorAxis::Z => 2,
+                };
+                copy.instance.position[a] = -copy.instance.position[a];
+                for e in 0..3 {
+                    if e != a {
+                        copy.rotation_euler[e] = -copy.rotation_euler[e];
+                    }
+                }
+                copy.update_rotation();
+                self.push_undo(UndoCommand::Add(copy.clone()));
+                self.objects.push(copy);
+            }
+        }
+
+        // Context-menu: flip 180° around the vertical (Z) axis, in place and
+        // undoable as an edit.
+        if let Some(id) = action_flip_obj_id {
+            if let Some(obj) = self.objects.iter_mut().find(|o| o.id == id) {
+                let old = obj.clone();
+                let z = &mut obj.rotation_euler[2];
+                *z += 180.0;
+                if *z > 180.0 {
+                    *z -= 360.0;
+                }
+                obj.update_rotation();
+                let new = obj.clone();
+                self.push_undo(UndoCommand::Edit { old, new });
+            }
         }
 
         if let Some(id_to_delete) = action_delete_obj_id {

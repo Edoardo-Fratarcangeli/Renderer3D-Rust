@@ -27,13 +27,15 @@ pub fn row_text(dataset: &Dataset, row: u32, n_cols: usize, truncated: bool) -> 
 }
 
 /// Draw the table; returns the projected position to focus when a row is
-/// clicked (and toggles `highlighted`).
+/// clicked (and toggles `highlighted`). `scroll_to` scrolls the viewport so
+/// that row is visible (used when a point is picked in the 3D view).
 pub fn show(
     ui: &mut egui::Ui,
     dataset: &Dataset,
     points: &[[f32; 3]],
     visible_rows: &[u32],
     highlighted: &mut Option<u32>,
+    scroll_to: Option<u32>,
 ) -> Option<[f32; 3]> {
     let n_cols = dataset.n_cols().min(MAX_TABLE_COLS);
     let truncated = dataset.n_cols() > MAX_TABLE_COLS;
@@ -60,10 +62,17 @@ pub fn show(
     ui.separator();
 
     let stripe = ui.visuals().faint_bg_color;
-    egui::ScrollArea::vertical()
+    let mut scroll = egui::ScrollArea::vertical()
         .max_height(260.0)
-        .auto_shrink([false, true])
-        .show_rows(ui, ROW_HEIGHT, visible_rows.len(), |ui, range| {
+        .auto_shrink([false, true]);
+    // One-shot scroll so the picked 3D point's row is on screen.
+    if let Some(row) = scroll_to {
+        if let Ok(vi) = visible_rows.binary_search(&row) {
+            let offset = (vi as f32 * ROW_HEIGHT - 100.0).max(0.0);
+            scroll = scroll.vertical_scroll_offset(offset);
+        }
+    }
+    scroll.show_rows(ui, ROW_HEIGHT, visible_rows.len(), |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for vi in range {
                 let row = visible_rows[vi];

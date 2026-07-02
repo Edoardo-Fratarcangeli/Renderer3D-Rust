@@ -284,30 +284,30 @@ _version: 2
   de: Bestätigen
 
 # ── Toolbar ──────────────────────────────────────────────────────────────────
-"toolbar.object":
-  en: ➕ Object
-  it: ➕ Oggetto
-  es: ➕ Objeto
-  fr: ➕ Objet
-  de: ➕ Objekt
-"toolbar.dataset":
-  en: 📊 Dataset
-  it: 📊 Dataset
-  es: 📊 Conjunto
-  fr: 📊 Données
-  de: 📊 Datensatz
-"toolbar.solids":
-  en: 🧊 Solids
-  it: 🧊 Solidi
-  es: 🧊 Sólidos
-  fr: 🧊 Solides
-  de: 🧊 Volumenkörper
-"toolbar.sketch":
-  en: ✏️ Sketch
-  it: ✏️ Schizzo
-  es: ✏️ Boceto
-  fr: ✏️ Esquisse
-  de: ✏️ Skizze
+"toolbar.objects":
+  en: ➕ Objects
+  it: ➕ Oggetti
+  es: ➕ Objetos
+  fr: ➕ Objets
+  de: ➕ Objekte
+"toolbar.import":
+  en: 📥 Import
+  it: 📥 Importa
+  es: 📥 Importar
+  fr: 📥 Importer
+  de: 📥 Import
+"toolbar.data":
+  en: 🗃 Data
+  it: 🗃 Dati
+  es: 🗃 Datos
+  fr: 🗃 Données
+  de: 🗃 Daten
+"toolbar.stream":
+  en: 🔌 Stream
+  it: 🔌 Stream
+  es: 🔌 Flujo
+  fr: 🔌 Flux
+  de: 🔌 Stream
 "toolbar.measure":
   en: 📏 Measure
   it: 📏 Misura
@@ -320,6 +320,118 @@ _version: 2
   es: Haz clic en dos puntos de la superficie para medir la distancia
   fr: Cliquez sur deux points de la surface pour mesurer la distance
   de: Klicke zwei Oberflächenpunkte an, um die Distanz zu messen
+
+# ── Objects window ───────────────────────────────────────────────────────────
+"objects.window_title":
+  en: ➕ Objects
+  it: ➕ Oggetti
+  es: ➕ Objetos
+  fr: ➕ Objets
+  de: ➕ Objekte
+"objects.tab_primitive":
+  en: ⬜ Primitives
+  it: ⬜ Primitive
+  es: ⬜ Primitivas
+  fr: ⬜ Primitives
+  de: ⬜ Primitive
+"objects.tab_array":
+  en: 🔁 Array
+  it: 🔁 Ripetizione
+  es: 🔁 Repetición
+  fr: 🔁 Répétition
+  de: 🔁 Anordnung
+"objects.tab_sketch":
+  en: ✏️ Sketch
+  it: ✏️ Schizzo
+  es: ✏️ Boceto
+  fr: ✏️ Esquisse
+  de: ✏️ Skizze
+"objects.tab_composer":
+  en: 🧩 Composer
+  it: 🧩 Compositore
+  es: 🧩 Compositor
+  fr: 🧩 Compositeur
+  de: 🧩 Kompositor
+
+# ── Array (parametric repetition) ───────────────────────────────────────────
+"objects.array_heading":
+  en: Parametric repetition
+  it: Ripetizione parametrica
+  es: Repetición paramétrica
+  fr: Répétition paramétrique
+  de: Parametrische Anordnung
+"objects.array_hint":
+  en: "Repeats the primitive configured in the Primitives tab (template: %{template})."
+  it: "Ripete la primitiva configurata nel tab Primitive (modello: %{template})."
+  es: "Repite la primitiva configurada en la pestaña Primitivas (plantilla: %{template})."
+  fr: "Répète la primitive configurée dans l'onglet Primitives (modèle : %{template})."
+  de: "Wiederholt die im Primitive-Tab konfigurierte Primitive (Vorlage: %{template})."
+"objects.array_linear":
+  en: Linear
+  it: Lineare
+  es: Lineal
+  fr: Linéaire
+  de: Linear
+"objects.array_circular":
+  en: Circular
+  it: Circolare
+  es: Circular
+  fr: Circulaire
+  de: Kreisförmig
+"objects.array_path":
+  en: Along curve
+  it: Su curva
+  es: Sobre curva
+  fr: Sur courbe
+  de: Entlang Kurve
+"objects.array_count":
+  en: "Count:"
+  it: "Numero:"
+  es: "Cantidad:"
+  fr: "Nombre :"
+  de: "Anzahl:"
+"objects.array_step":
+  en: "Step:"
+  it: "Passo:"
+  es: "Paso:"
+  fr: "Pas :"
+  de: "Schritt:"
+"objects.array_center":
+  en: "Center:"
+  it: "Centro:"
+  es: "Centro:"
+  fr: "Centre :"
+  de: "Zentrum:"
+"objects.array_orient":
+  en: Orient along the pattern
+  it: Orienta lungo il percorso
+  es: Orientar a lo largo del patrón
+  fr: Orienter le long du motif
+  de: Entlang des Musters ausrichten
+"objects.array_path_hint":
+  en: The curve is the one configured in the Sketch tab (plane, offset, shape).
+  it: La curva è quella configurata nel tab Schizzo (piano, offset, forma).
+  es: La curva es la configurada en la pestaña Boceto (plano, offset, forma).
+  fr: La courbe est celle configurée dans l'onglet Esquisse (plan, décalage, forme).
+  de: Die Kurve ist die im Skizze-Tab konfigurierte (Ebene, Versatz, Form).
+"objects.array_create":
+  en: Create %{count} objects
+  it: Crea %{count} oggetti
+  es: Crear %{count} objetos
+  fr: Créer %{count} objets
+  de: "%{count} Objekte erstellen"
+"objects.array_created":
+  en: "%{count} objects queued"
+  it: "%{count} oggetti in coda"
+  es: "%{count} objetos en cola"
+  fr: "%{count} objets en file"
+  de: "%{count} Objekte eingereiht"
+"objects.array_path_invalid":
+  en: the sketched curve is degenerate (needs at least two distinct points)
+  it: la curva dello schizzo è degenere (servono almeno due punti distinti)
+  es: la curva del boceto es degenerada (se necesitan al menos dos puntos distintos)
+  fr: la courbe esquissée est dégénérée (au moins deux points distincts requis)
+  de: die skizzierte Kurve ist degeneriert (mindestens zwei verschiedene Punkte nötig)
 
 # ── Measure HUD ──────────────────────────────────────────────────────────────
 "measure.first_point":
@@ -374,18 +486,36 @@ _version: 2
   es: Visibilidad
   fr: Visibilité
   de: Sichtbarkeit
-"list.remove_dataset":
-  en: Remove dataset
-  it: Rimuovi dataset
-  es: Eliminar conjunto de datos
-  fr: Supprimer le jeu de données
-  de: Datensatz entfernen
-"list.focus_dataset":
-  en: Focus camera on dataset
-  it: Inquadra il dataset
-  es: Enfocar la cámara en el conjunto
-  fr: Cadrer la caméra sur le jeu de données
-  de: Kamera auf Datensatz fokussieren
+"list.focus":
+  en: Focus the camera on this entity
+  it: Inquadra questa entità
+  es: Enfocar esta entidad
+  fr: Cadrer cette entité
+  de: Kamera auf dieses Element richten
+"menu.focus":
+  en: Focus
+  it: Inquadra
+  es: Enfocar
+  fr: Cadrer
+  de: Fokussieren
+"menu.duplicate":
+  en: Duplicate
+  it: Duplica
+  es: Duplicar
+  fr: Dupliquer
+  de: Duplizieren
+"menu.mirror":
+  en: Mirror
+  it: Specchia
+  es: Reflejar
+  fr: Miroir
+  de: Spiegeln
+"menu.flip":
+  en: Flip 180°
+  it: Inverti 180°
+  es: Invertir 180°
+  fr: Retourner 180°
+  de: Umdrehen 180°
 "list.rows":
   en: rows
   it: righe

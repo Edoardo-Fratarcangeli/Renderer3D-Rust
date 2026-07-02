@@ -66,7 +66,8 @@ fn dataset_table_renders_and_row_text_is_consistent() {
     let visible: Vec<u32> = (0..loaded.dataset.n_rows() as u32).collect();
     let mut highlighted = None;
 
-    // The table renders without panicking over the full visible set.
+    // The table renders without panicking over the full visible set,
+    // including the scroll-to-row path used by 3D point picking.
     let _ = run(&ctx, |ui| {
         table_show(
             ui,
@@ -74,6 +75,7 @@ fn dataset_table_renders_and_row_text_is_consistent() {
             &loaded.projection.points,
             &visible,
             &mut highlighted,
+            Some(1),
         )
     });
 

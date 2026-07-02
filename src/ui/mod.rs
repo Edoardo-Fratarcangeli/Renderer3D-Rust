@@ -20,8 +20,11 @@
 //! follows the same architecture (worker thread + dirty flag).
 
 pub mod dataset_table;
+pub mod entity_list;
 pub mod llm_panel;
 pub mod distribution_chart;
+pub mod object_form;
+pub mod objects_panel;
 pub mod export_panel;
 pub mod geometry_panel;
 pub mod import_dialog;
@@ -29,6 +32,7 @@ pub mod label_filter;
 pub mod search_panel;
 pub mod sketch_panel;
 pub mod stream_panel;
+pub mod tool_window;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -41,6 +45,7 @@ use crate::dataset::{builtin, loader, Dataset, DatasetIndex};
 use crate::llm::catalog::NetArch;
 use crate::llm::network::NodeStyle;
 use crate::visualization::point_cloud::{self, PointCloudSettings};
+use crate::visualization::spatial::{self, FilterVolume, SpatialCombine, SpatialMode};
 
 /// Directory holding metadata / index / projection caches.
 pub const CACHE_DIR: &str = ".r3d_cache";
@@ -165,8 +170,6 @@ impl StatusMessage {
 pub enum DatasetTab {
     /// File / benchmark import.
     Import,
-    /// Runtime data streaming (TCP NDJSON / Arrow IPC).
-    Stream,
     /// Per-label visibility filters + distribution chart.
     Labels,
     /// Point size and shape policy.
@@ -177,9 +180,8 @@ pub enum DatasetTab {
 
 impl DatasetTab {
     /// All tabs in display order.
-    pub const ALL: [DatasetTab; 5] = [
+    pub const ALL: [DatasetTab; 4] = [
         DatasetTab::Import,
-        DatasetTab::Stream,
         DatasetTab::Labels,
         DatasetTab::View,
         DatasetTab::Export,
@@ -189,7 +191,6 @@ impl DatasetTab {
     pub fn title(&self) -> String {
         match self {
             DatasetTab::Import => t!("dataset.tab_import").to_string(),
-            DatasetTab::Stream => t!("dataset.tab_stream").to_string(),
             DatasetTab::Labels => t!("dataset.tab_labels").to_string(),
             DatasetTab::View => t!("dataset.tab_view").to_string(),
             DatasetTab::Export => t!("dataset.tab_export").to_string(),
@@ -198,7 +199,7 @@ impl DatasetTab {
 
     /// Whether the tab is usable before any dataset is loaded.
     pub fn needs_dataset(&self) -> bool {
-        !matches!(self, DatasetTab::Import | DatasetTab::Stream)
+        !matches!(self, DatasetTab::Import)
     }
 }
 
@@ -290,6 +291,8 @@ pub struct ExportState {
 pub struct DatasetView {
     /// Whether the window is visible.
     pub show_window: bool,
+    /// Whether the standalone Stream tool window is visible.
+    pub show_stream_window: bool,
     /// Currently selected tab.
     pub tab: DatasetTab,
     /// Import form state.
@@ -301,6 +304,25 @@ pub struct DatasetView {
     /// Whether the loaded dataset's point cloud is drawn (toggled from the
     /// shared object list at the bottom of the main window).
     pub visible: bool,
+    /// Whether the dataset entry is selected in the bottom entity list;
+    /// while selected, the synced data table is shown under the list.
+    pub list_selected: bool,
+    /// One-shot request to scroll the data table to the highlighted row
+    /// (set by 3D point picking).
+    pub scroll_to_highlight: bool,
+
+    /// Scene objects used as spatial filter volumes (sphere/cube ids).
+    pub spatial_objects: HashSet<usize>,
+    /// Keep points inside or outside the combined volume.
+    pub spatial_mode: SpatialMode,
+    /// Union (any) or intersection (all) of the selected volumes.
+    pub spatial_combine: SpatialCombine,
+    /// Candidate volumes for the picker: (object id, label). Refreshed by
+    /// the host every frame from the scene.
+    pub scene_volumes: Vec<(usize, String)>,
+    /// Resolved world-space volumes of [`Self::spatial_objects`], synced by
+    /// the host so the filter follows the objects when they move.
+    spatial_volumes: Vec<FilterVolume>,
 
     /// Label ids currently visible.
     pub enabled_labels: HashSet<u32>,
@@ -333,6 +355,7 @@ impl DatasetView {
     pub fn new() -> Self {
         Self {
             show_window: false,
+            show_stream_window: false,
             tab: DatasetTab::Import,
             import: ImportState {
                 use_pca: true,
@@ -348,6 +371,13 @@ impl DatasetView {
             },
             loaded: None,
             visible: true,
+            list_selected: false,
+            scroll_to_highlight: false,
+            spatial_objects: HashSet::new(),
+            spatial_mode: SpatialMode::default(),
+            spatial_combine: SpatialCombine::default(),
+            scene_volumes: Vec::new(),
+            spatial_volumes: Vec::new(),
             enabled_labels: HashSet::new(),
             search_text: String::new(),
             search_error: None,
@@ -394,6 +424,9 @@ impl DatasetView {
         self.search_text.clear();
         self.search_error = None;
         self.settings.highlighted_row = None;
+        // Fresh dataset, fresh editable color table (palette defaults).
+        self.settings.label_colors =
+            crate::visualization::color_mapper::palette(loaded.dataset.label_names.len());
         self.visible = true;
         self.loaded = Some(loaded);
         self.recompute_visible();
@@ -449,6 +482,8 @@ impl DatasetView {
         self.loaded = None;
         self.visible_rows.clear();
         self.settings.highlighted_row = None;
+        self.list_selected = false;
+        self.scroll_to_highlight = false;
         self.render_dirty = true;
     }
 
@@ -555,6 +590,90 @@ impl DatasetView {
         }
     }
 
+    /// Host-side sync of the resolved spatial filter volumes. Re-filters
+    /// when a volume actually changed (object picked, moved, resized or
+    /// deleted), so the interaction is live while staying cheap.
+    pub fn sync_spatial(&mut self, volumes: Vec<FilterVolume>) {
+        if self.spatial_volumes != volumes {
+            self.spatial_volumes = volumes;
+            self.recompute_visible();
+        }
+    }
+
+    /// Ray-pick the nearest visible projected point (used by 3D clicks).
+    ///
+    /// On a hit the row is highlighted, the entity-list entry is selected and
+    /// the data table scrolls to the row — the 3D view, the list and the
+    /// table stay in sync. Returns whether something was hit.
+    pub fn pick_point(
+        &mut self,
+        ray_origin: cgmath::Vector3<f32>,
+        ray_dir: cgmath::Vector3<f32>,
+    ) -> bool {
+        use cgmath::InnerSpace;
+        if !self.visible {
+            return false;
+        }
+        let Some(loaded) = &self.loaded else {
+            return false;
+        };
+        // Inflate the pick radius so small points are still easy to click.
+        let radius = (self.settings.point_size * 1.5).max(0.05);
+        let mut best: Option<(u32, f32)> = None;
+        for &row in &self.visible_rows {
+            let p = loaded.projection.points[row as usize];
+            let v = cgmath::Vector3::new(p[0], p[1], p[2]) - ray_origin;
+            let t = v.dot(ray_dir);
+            if t <= 0.0 {
+                continue;
+            }
+            let closest = ray_origin + ray_dir * t;
+            let d = (closest - cgmath::Vector3::new(p[0], p[1], p[2])).magnitude();
+            if d <= radius && best.is_none_or(|(_, bt)| t < bt) {
+                best = Some((row, t));
+            }
+        }
+        match best {
+            Some((row, _)) => {
+                self.settings.highlighted_row = Some(row);
+                self.list_selected = true;
+                self.scroll_to_highlight = true;
+                self.render_dirty = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Search bar + synced data table for the bottom panel. Returns the
+    /// projected position to focus when the user clicks a row.
+    pub fn table_section(&mut self, ui: &mut egui::Ui) -> Option<[f32; 3]> {
+        if search_panel::show(ui, &mut self.search_text, &self.search_error) {
+            self.recompute_visible();
+        }
+        let scroll_to = if std::mem::take(&mut self.scroll_to_highlight) {
+            self.settings.highlighted_row
+        } else {
+            None
+        };
+        let Some(loaded) = &self.loaded else {
+            return None;
+        };
+        let before = self.settings.highlighted_row;
+        let focus = dataset_table::show(
+            ui,
+            &loaded.dataset,
+            &loaded.projection.points,
+            &self.visible_rows,
+            &mut self.settings.highlighted_row,
+            scroll_to,
+        );
+        if self.settings.highlighted_row != before {
+            self.render_dirty = true;
+        }
+        focus
+    }
+
     /// Toggle whether the dataset's point cloud is drawn.
     pub fn set_visible(&mut self, visible: bool) {
         if self.visible != visible {
@@ -585,6 +704,14 @@ impl DatasetView {
             query,
         };
         self.visible_rows = apply_filter(&loaded.dataset, &loaded.index, &spec);
+        // Spatial filter: keep rows inside/outside the combined scene volumes.
+        if !self.spatial_volumes.is_empty() {
+            let points = &loaded.projection.points;
+            let (mode, combine) = (self.spatial_mode, self.spatial_combine);
+            self.visible_rows.retain(|&row| {
+                spatial::keeps(&self.spatial_volumes, points[row as usize], mode, combine)
+            });
+        }
         // Drop the highlight if it was filtered out.
         if let Some(h) = self.settings.highlighted_row {
             if self.visible_rows.binary_search(&h).is_err() {
@@ -654,37 +781,48 @@ impl DatasetView {
         result
     }
 
-    /// Poll the loader thread, draw the window, return the host action.
+    /// Poll the loader thread, draw the data and stream windows, return the
+    /// host action.
     pub fn show(&mut self, ctx: &egui::Context) -> DatasetAction {
         self.poll_worker();
         self.poll_stream();
-        if !self.show_window {
-            return DatasetAction::None;
-        }
+
         // Keep the live status dot (and counters) repainting while streaming,
         // even when the pointer is idle.
-        if self.stream.is_active() {
+        if self.stream.is_active() && (self.show_window || self.show_stream_window) {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
-        let mut action = DatasetAction::None;
-        let mut open = true;
-        let screen_center = ctx.screen_rect().center();
-        egui::Window::new(t!("dataset.window_title").to_string())
-            .open(&mut open)
-            // Fixed footprint: the window must not grow when a dataset is
-            // loaded. Long content scrolls inside instead of widening.
-            .fixed_size([540.0, 520.0])
-            // Spawn centered on screen; remains draggable afterwards.
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(screen_center)
-            .show(ctx, |ui| {
-                action = self.contents(ui);
-            });
-        if !open {
-            self.show_window = false;
+        self.stream_window(ctx);
+
+        if !self.show_window {
+            return DatasetAction::None;
         }
+        // Fixed footprint: the window must not grow when a dataset is
+        // loaded. Long content scrolls inside instead of widening.
+        let mut show_window = self.show_window;
+        let action = tool_window::ToolWindow::fixed(t!("dataset.window_title"), [540.0, 520.0])
+            .show(ctx, &mut show_window, |ui| self.contents(ui))
+            .unwrap_or(DatasetAction::None);
+        self.show_window = show_window;
         action
+    }
+
+    /// The standalone Stream tool window (the panel itself carries the live
+    /// status dot: green active / blue receiving / red error).
+    fn stream_window(&mut self, ctx: &egui::Context) {
+        let mut show_stream = self.show_stream_window;
+        let action = tool_window::ToolWindow::new(t!("stream.window_title"), [430.0, 420.0])
+            .show(ctx, &mut show_stream, |ui| {
+                stream_panel::show(ui, &mut self.stream)
+            })
+            .unwrap_or(stream_panel::StreamUiAction::None);
+        self.show_stream_window = show_stream;
+        match action {
+            stream_panel::StreamUiAction::Start => self.start_stream(),
+            stream_panel::StreamUiAction::Stop => self.stop_stream(),
+            stream_panel::StreamUiAction::None => {}
+        }
     }
 
     /// Window body: tab bar, summary strip and the active tab's panel.
@@ -692,32 +830,14 @@ impl DatasetView {
         let action = DatasetAction::None;
 
         // --- Tab bar (centered) ---
-        ui.vertical_centered(|ui| {
-            ui.horizontal(|ui| {
-                for tab in DatasetTab::ALL {
-                    let enabled = !tab.needs_dataset() || self.loaded.is_some();
-                    let selected = self.tab == tab;
-                    // The Stream tab shows a live status dot (green active /
-                    // blue receiving / red error) right on its label.
-                    let title = if tab == DatasetTab::Stream && self.stream.is_active() {
-                        format!("⏺ {}", tab.title())
-                    } else {
-                        tab.title()
-                    };
-                    let mut label = egui::RichText::new(title).size(14.0);
-                    if tab == DatasetTab::Stream && self.stream.is_active() {
-                        label = label.color(self.stream.dot_color());
-                    }
-                    if ui
-                        .add_enabled(enabled, egui::SelectableLabel::new(selected, label))
-                        .clicked()
-                    {
-                        self.tab = tab;
-                    }
-                }
-            });
-        });
-        ui.separator();
+        let items = DatasetTab::ALL
+            .iter()
+            .map(|&tab| {
+                let enabled = !tab.needs_dataset() || self.loaded.is_some();
+                tool_window::TabItem::new(tab, tab.title()).enabled(enabled)
+            })
+            .collect();
+        tool_window::tab_bar(ui, &mut self.tab, items);
 
         // --- Summary strip ---
         if let Some(loaded) = &self.loaded {
@@ -755,22 +875,107 @@ impl DatasetView {
                     self.start_import(req);
                 }
             }
-            DatasetTab::Stream => match stream_panel::show(ui, &mut self.stream) {
-                stream_panel::StreamUiAction::Start => self.start_stream(),
-                stream_panel::StreamUiAction::Stop => self.stop_stream(),
-                stream_panel::StreamUiAction::None => {}
-            },
             DatasetTab::Labels => {
                 let loaded = self.loaded.as_ref().unwrap();
                 let stats = loaded.dataset.metadata.labels.clone();
-                if label_filter::show(ui, &stats, &mut self.enabled_labels) {
+                if label_filter::show(
+                    ui,
+                    &stats,
+                    &mut self.enabled_labels,
+                    &mut self.settings.label_colors,
+                ) {
                     self.recompute_visible();
                 }
+                // --- Spatial filter: scene spheres/cubes as volumes ---
+                ui.add_space(8.0);
+                ui.separator();
+                tool_window::section_heading(
+                    ui,
+                    t!("dataset.spatial_heading"),
+                    Some(t!("dataset.spatial_hint").to_string()),
+                );
+                let mut spatial_changed = false;
+                if self.scene_volumes.is_empty() {
+                    ui.label(
+                        egui::RichText::new(t!("dataset.spatial_no_volumes").to_string()).weak(),
+                    );
+                } else {
+                    // Multi-select: any number of scene volumes participate.
+                    egui::ScrollArea::vertical()
+                        .id_source("spatial_volumes_scroll")
+                        .max_height(90.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for (id, name) in self.scene_volumes.clone() {
+                                let mut on = self.spatial_objects.contains(&id);
+                                if ui.checkbox(&mut on, name).changed() {
+                                    if on {
+                                        self.spatial_objects.insert(id);
+                                    } else {
+                                        self.spatial_objects.remove(&id);
+                                    }
+                                    spatial_changed = true;
+                                }
+                            }
+                        });
+                    let n_selected = self.spatial_objects.len();
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(n_selected > 0, |ui| {
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_mode,
+                                    SpatialMode::Inside,
+                                    t!("dataset.spatial_inside").to_string(),
+                                )
+                                .changed();
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_mode,
+                                    SpatialMode::Outside,
+                                    t!("dataset.spatial_outside").to_string(),
+                                )
+                                .changed();
+                        });
+                        // Union vs intersection only matters from 2 volumes up.
+                        ui.add_enabled_ui(n_selected > 1, |ui| {
+                            ui.separator();
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_combine,
+                                    SpatialCombine::Any,
+                                    t!("dataset.spatial_any").to_string(),
+                                )
+                                .changed();
+                            spatial_changed |= ui
+                                .radio_value(
+                                    &mut self.spatial_combine,
+                                    SpatialCombine::All,
+                                    t!("dataset.spatial_all").to_string(),
+                                )
+                                .changed();
+                        });
+                    });
+                }
+                if spatial_changed {
+                    // Deselecting all clears the volumes immediately; newly
+                    // picked ones are resolved by the host on the next frame
+                    // (sync_spatial), which re-filters again.
+                    if self.spatial_objects.is_empty() {
+                        self.spatial_volumes.clear();
+                    }
+                    self.recompute_visible();
+                }
+
                 ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
                     ui.label(egui::RichText::new(t!("dataset.distribution").to_string()).heading());
                 });
-                distribution_chart::show(ui, &stats, &self.enabled_labels);
+                distribution_chart::show(
+                    ui,
+                    &stats,
+                    &self.enabled_labels,
+                    &self.settings.label_colors,
+                );
             }
             DatasetTab::View => {
                 let mut changed = false;
@@ -1127,7 +1332,7 @@ mod tests {
 
     #[test]
     fn tab_metadata_is_consistent() {
-        assert_eq!(DatasetTab::ALL.len(), 5);
+        assert_eq!(DatasetTab::ALL.len(), 4);
         // Titles unique and non-empty.
         for (i, a) in DatasetTab::ALL.iter().enumerate() {
             assert!(!a.title().is_empty());
@@ -1135,9 +1340,9 @@ mod tests {
                 assert_ne!(a.title(), b.title());
             }
         }
-        // Import and Stream work without data; the rest need a dataset.
+        // Import works without data; the rest need a dataset. Streaming has
+        // its own top-level tool window, not a tab here.
         assert!(!DatasetTab::Import.needs_dataset());
-        assert!(!DatasetTab::Stream.needs_dataset());
         for tab in [DatasetTab::Labels, DatasetTab::View, DatasetTab::Export] {
             assert!(tab.needs_dataset());
         }
@@ -1169,6 +1374,77 @@ mod tests {
         assert!(view.visible_rows.is_empty());
         assert!(!view.is_loading());
         assert_eq!(view.export.path_text, "export.csv");
+    }
+
+    #[test]
+    fn spatial_volume_partitions_visible_rows() {
+        use crate::visualization::spatial::{FilterVolume, VolumeShape};
+        let loaded = prepare_dataset(
+            builtin::generate(builtin::BuiltinDataset::default_of("blobs").unwrap(), 7),
+            ProjectionMethod::Direct,
+            None,
+        )
+        .unwrap();
+        let mut view = DatasetView::new();
+        view.install(loaded);
+        let total = view.visible_rows.len();
+        assert!(total > 0);
+
+        // Data-driven volume: a sphere centered on the first point whose
+        // radius is half the distance to the farthest point, so both the
+        // inside and the outside partitions are guaranteed non-empty.
+        let (center, diameter) = {
+            let points = &view.loaded.as_ref().unwrap().projection.points;
+            let c = points[0];
+            let far = points
+                .iter()
+                .map(|p| {
+                    ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2)).sqrt()
+                })
+                .fold(0.0f32, f32::max);
+            assert!(far > 0.0, "dataset has at least two distinct points");
+            (c, far)
+        };
+        let volume = FilterVolume::new(
+            VolumeShape::Sphere,
+            cgmath::Matrix4::from_translation(center.into())
+                * cgmath::Matrix4::from_scale(diameter),
+        )
+        .unwrap();
+
+        view.spatial_mode = SpatialMode::Inside;
+        view.sync_spatial(vec![volume.clone()]);
+        let inside = view.visible_rows.len();
+
+        view.spatial_mode = SpatialMode::Outside;
+        view.recompute_visible();
+        let outside = view.visible_rows.len();
+
+        // Inside + outside partition the filtered set exactly.
+        assert_eq!(inside + outside, total);
+        assert!(inside > 0 && outside > 0, "sphere splits the blob dataset");
+
+        // With a second, disjoint far-away volume the intersection is empty
+        // while the union matches the single-sphere result.
+        let far = FilterVolume::new(
+            VolumeShape::Sphere,
+            cgmath::Matrix4::from_translation(cgmath::Vector3::new(1e6, 0.0, 0.0)),
+        )
+        .unwrap();
+        view.spatial_mode = SpatialMode::Inside;
+        view.spatial_combine = SpatialCombine::All;
+        view.sync_spatial(vec![volume.clone(), far.clone()]);
+        assert_eq!(view.visible_rows.len(), 0, "disjoint intersection is empty");
+        view.spatial_combine = SpatialCombine::Any;
+        view.recompute_visible();
+        assert_eq!(view.visible_rows.len(), inside, "union = single sphere");
+
+        // Clearing the volumes restores the full set; unchanged sync is a no-op.
+        view.sync_spatial(Vec::new());
+        assert_eq!(view.visible_rows.len(), total);
+        view.take_render_dirty();
+        view.sync_spatial(Vec::new());
+        assert!(!view.take_render_dirty(), "no-op sync must not re-filter");
     }
 
     #[test]

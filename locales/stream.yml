@@ -1,5 +1,13 @@
 _version: 2
 
+# ── Stream tool window ───────────────────────────────────────────────────────
+"stream.window_title":
+  en: 🔌 Data Stream
+  it: 🔌 Stream Dati
+  es: 🔌 Flujo de Datos
+  fr: 🔌 Flux de Données
+  de: 🔌 Datenstrom
+
 # ── Stream tab ───────────────────────────────────────────────────────────────
 "stream.heading":
   en: Runtime data stream

@@ -17,6 +17,7 @@ pub mod i18n;
 pub mod llm;
 pub mod mesh;
 pub mod model;
+pub mod pattern;
 pub mod primitives;
 pub mod scene;
 pub mod settings;
