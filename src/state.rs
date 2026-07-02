@@ -1231,7 +1231,7 @@ impl State {
         let mut action_focus_selected = false;
         let mut action_save_settings  = false;
         let mut action_rebuild_grids  = false;
-        let mut create_object = None;
+        let mut created_objects: Vec<SceneObject> = Vec::new();
 
         let mut action_edit_obj_id = None;
         let mut action_close_editor = false;
@@ -1411,9 +1411,7 @@ impl State {
                 ));
             }
             self.objects_view.show(ctx);
-            if let Some(obj) = self.objects_view.take_created() {
-                create_object = Some(obj);
-            }
+            created_objects.extend(self.objects_view.take_created());
             // LLM / SLM parameter visualizer window
             llm_action = self.llm_view.show(ctx);
 
@@ -1905,9 +1903,23 @@ impl State {
         });
 
         // Apply deferred actions
-        if let Some(obj) = create_object {
-            self.objects.push(obj);
-            self.next_id += 1;
+        // Add the objects created this frame (single primitive or a whole
+        // parametric array): the host owns id assignment, and the batch is
+        // undoable as one action.
+        if !created_objects.is_empty() {
+            let mut undo_cmds = Vec::with_capacity(created_objects.len());
+            for mut obj in created_objects {
+                obj.id = self.next_id;
+                self.next_id += 1;
+                undo_cmds.push(UndoCommand::Add(obj.clone()));
+                self.objects.push(obj);
+            }
+            let cmd = if undo_cmds.len() == 1 {
+                undo_cmds.pop().unwrap()
+            } else {
+                UndoCommand::MultiAction(undo_cmds)
+            };
+            self.push_undo(cmd);
         }
 
         if action_reset_view {

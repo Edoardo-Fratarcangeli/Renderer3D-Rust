@@ -222,6 +222,18 @@ impl SketchView {
         self.status = Some(StatusMessage::info(t!("sketch.solid_queued").to_string()));
     }
 
+    /// World-space polyline of the *current* form (plane, offset, shape) and
+    /// whether it is closed — used by the Array tab to repeat objects along
+    /// the sketched curve without creating a surface.
+    pub fn current_world_polyline(&self) -> Result<(Vec<[f32; 3]>, bool), String> {
+        let (profile, closed) = self.build_profile()?;
+        let sketch = Sketch::new(self.plane.plane(self.offset), profile);
+        let loop3 = sketch
+            .world_polyline(DEFAULT_TOLERANCE)
+            .map_err(|e| e.to_string())?;
+        Ok((loop3, closed))
+    }
+
     /// Sketch form: plane, shape, "create surface" + status line.
     pub fn sketch_section(&mut self, ui: &mut egui::Ui) {
         // --- Plane ---
