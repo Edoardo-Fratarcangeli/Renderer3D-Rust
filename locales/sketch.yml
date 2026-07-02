@@ -4,12 +4,6 @@
 _version: 2
 
 # ── Window ───────────────────────────────────────────────────────────────────
-"sketch.window_title":
-  en: ✏️ Sketch & Compose
-  it: ✏️ Schizzo e composizione
-  es: ✏️ Boceto y composición
-  fr: ✏️ Esquisse et composition
-  de: ✏️ Skizze & Komposition
 
 # ── Plane ────────────────────────────────────────────────────────────────────
 "sketch.plane_heading":

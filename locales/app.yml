@@ -284,12 +284,12 @@ _version: 2
   de: Bestätigen
 
 # ── Toolbar ──────────────────────────────────────────────────────────────────
-"toolbar.object":
-  en: ➕ Object
-  it: ➕ Oggetto
-  es: ➕ Objeto
-  fr: ➕ Objet
-  de: ➕ Objekt
+"toolbar.objects":
+  en: ➕ Objects
+  it: ➕ Oggetti
+  es: ➕ Objetos
+  fr: ➕ Objets
+  de: ➕ Objekte
 "toolbar.dataset":
   en: 📊 Dataset
   it: 📊 Dataset
@@ -302,12 +302,6 @@ _version: 2
   es: 🧊 Sólidos
   fr: 🧊 Solides
   de: 🧊 Volumenkörper
-"toolbar.sketch":
-  en: ✏️ Sketch
-  it: ✏️ Schizzo
-  es: ✏️ Boceto
-  fr: ✏️ Esquisse
-  de: ✏️ Skizze
 "toolbar.stream":
   en: 🔌 Stream
   it: 🔌 Stream
@@ -326,6 +320,32 @@ _version: 2
   es: Haz clic en dos puntos de la superficie para medir la distancia
   fr: Cliquez sur deux points de la surface pour mesurer la distance
   de: Klicke zwei Oberflächenpunkte an, um die Distanz zu messen
+
+# ── Objects window ───────────────────────────────────────────────────────────
+"objects.window_title":
+  en: ➕ Objects
+  it: ➕ Oggetti
+  es: ➕ Objetos
+  fr: ➕ Objets
+  de: ➕ Objekte
+"objects.tab_primitive":
+  en: ⬜ Primitives
+  it: ⬜ Primitive
+  es: ⬜ Primitivas
+  fr: ⬜ Primitives
+  de: ⬜ Primitive
+"objects.tab_sketch":
+  en: ✏️ Sketch
+  it: ✏️ Schizzo
+  es: ✏️ Boceto
+  fr: ✏️ Esquisse
+  de: ✏️ Skizze
+"objects.tab_composer":
+  en: 🧩 Composer
+  it: 🧩 Compositore
+  es: 🧩 Compositor
+  fr: 🧩 Compositeur
+  de: 🧩 Kompositor
 
 # ── Measure HUD ──────────────────────────────────────────────────────────────
 "measure.first_point":

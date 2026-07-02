@@ -66,9 +66,8 @@ pub enum SketchRequest {
     },
 }
 
-/// Root state of the sketch / composer window.
+/// State of the sketch / composer tool (hosted by the Objects window).
 pub struct SketchView {
-    pub show_window: bool,
     pub plane: PlaneChoice,
     pub shape: ShapeMode,
     pub n_sides: usize,
@@ -96,7 +95,6 @@ impl Default for SketchView {
 impl SketchView {
     pub fn new() -> Self {
         Self {
-            show_window: false,
             plane: PlaneChoice::Xy,
             shape: ShapeMode::Polygon,
             n_sides: 5,
@@ -199,15 +197,8 @@ impl SketchView {
         self.status = Some(StatusMessage::info(t!("sketch.solid_queued").to_string()));
     }
 
-    /// Poll nothing; draw the window. Returns nothing (status is internal).
-    pub fn show(&mut self, ctx: &egui::Context) {
-        let mut show_window = self.show_window;
-        super::tool_window::ToolWindow::new(t!("sketch.window_title"), [440.0, 520.0])
-            .show(ctx, &mut show_window, |ui| self.contents(ui));
-        self.show_window = show_window;
-    }
-
-    fn contents(&mut self, ui: &mut egui::Ui) {
+    /// Sketch form: plane, shape, "create surface" + status line.
+    pub fn sketch_section(&mut self, ui: &mut egui::Ui) {
         // --- Plane ---
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(t!("sketch.plane_heading").to_string()).heading());
@@ -291,14 +282,15 @@ impl SketchView {
             ui.add_space(4.0);
             ui.vertical_centered(|ui| status.show(ui));
         }
+    }
 
-        // --- Composer ---
-        ui.add_space(8.0);
-        ui.separator();
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(t!("sketch.composer_heading").to_string()).heading());
-            ui.label(egui::RichText::new(t!("sketch.composer_hint").to_string()).weak());
-        });
+    /// Solid composer: available faces, selection and "compose solid".
+    pub fn composer_section(&mut self, ui: &mut egui::Ui) {
+        super::tool_window::section_heading(
+            ui,
+            t!("sketch.composer_heading"),
+            Some(t!("sketch.composer_hint").to_string()),
+        );
 
         if self.surfaces.is_empty() {
             ui.add_space(8.0);
@@ -345,6 +337,11 @@ impl SketchView {
                     self.compose_selected();
                 }
             });
+        }
+
+        if let Some(status) = &self.status {
+            ui.add_space(4.0);
+            ui.vertical_centered(|ui| status.show(ui));
         }
     }
 }

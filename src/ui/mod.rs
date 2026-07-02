@@ -23,6 +23,7 @@ pub mod dataset_table;
 pub mod llm_panel;
 pub mod distribution_chart;
 pub mod object_form;
+pub mod objects_panel;
 pub mod export_panel;
 pub mod geometry_panel;
 pub mod import_dialog;

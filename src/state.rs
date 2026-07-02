@@ -141,8 +141,8 @@ pub struct State {
     pub editing_obj_id: Option<usize>,
     pub editing_obj_draft: Option<SceneObject>,
 
-    // Draft state for new object creation
-    pub draft_object: Option<SceneObject>,
+    // Objects window (primitive creation + sketch + composer)
+    pub objects_view: crate::ui::objects_panel::ObjectsView,
 
     // Clipboard
     pub clipboard: Vec<SceneObject>,
@@ -159,7 +159,6 @@ pub struct State {
 
     // Universal geometry import (layers of instanced shapes)
     pub geometry_view: crate::ui::geometry_panel::GeometryView,
-    pub sketch_view: crate::ui::sketch_panel::SketchView,
     geometry_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
 
     // LLM / SLM parameter visualizer
@@ -569,7 +568,7 @@ impl State {
             ),
             editing_obj_id: None,
             editing_obj_draft: None,
-            draft_object: None,
+            objects_view: crate::ui::objects_panel::ObjectsView::new(),
             clipboard: Vec::new(),
             mouse_pos: [0.0, 0.0],
             measure_mode: false,
@@ -582,7 +581,6 @@ impl State {
             dataset_view: crate::ui::DatasetView::new(),
             dataset_point_batches: Vec::new(),
             geometry_view: crate::ui::geometry_panel::GeometryView::new(),
-            sketch_view: crate::ui::sketch_panel::SketchView::new(),
             geometry_batches: Vec::new(),
             custom_meshes: std::collections::HashMap::new(),
             mesh_worker: None,
@@ -729,12 +727,12 @@ impl State {
             Ok(mesh) => {
                 let tri = mesh.triangle_count();
                 self.insert_custom_mesh(mesh, label, false);
-                self.sketch_view.status = Some(crate::ui::StatusMessage::success(
+                self.objects_view.sketch.status = Some(crate::ui::StatusMessage::success(
                     t!("sketch.surface_created", count = tri).to_string(),
                 ));
             }
             Err(e) => {
-                self.sketch_view.status = Some(crate::ui::StatusMessage::error(
+                self.objects_view.sketch.status = Some(crate::ui::StatusMessage::error(
                     t!("sketch.surface_failed", msg = e.to_string()).to_string(),
                 ));
             }
@@ -746,14 +744,14 @@ impl State {
     pub fn add_solid(&mut self, loops: &[Vec<[f32; 3]>], label: String) {
         let (mesh, closed) = crate::brep::compose(loops);
         if mesh.indices.is_empty() {
-            self.sketch_view.status = Some(crate::ui::StatusMessage::error(
+            self.objects_view.sketch.status = Some(crate::ui::StatusMessage::error(
                 t!("sketch.solid_failed").to_string(),
             ));
             return;
         }
         let tri = mesh.triangle_count();
         self.insert_custom_mesh(mesh, label, false);
-        self.sketch_view.status = Some(if closed {
+        self.objects_view.sketch.status = Some(if closed {
             crate::ui::StatusMessage::success(t!("sketch.solid_created", count = tri).to_string())
         } else {
             crate::ui::StatusMessage::info(t!("sketch.solid_open", count = tri).to_string())
@@ -882,17 +880,13 @@ impl State {
                         return true;
                     }
                     "n" | "N" if !is_ctrl => {
-                        if self.draft_object.is_none() {
-                            let id = self.next_id;
-                            let default_obj = SceneObject::new(
-                                id,
-                                format!("Object {}", id),
-                                [0.0, 0.0, 0.0],
-                                GeometryType::Cube,
-                            );
-                            self.draft_object = Some(default_obj);
-                            self.should_focus_name = true;
-                        }
+                        let id = self.next_id;
+                        self.objects_view.open_primitive(SceneObject::new(
+                            id,
+                            format!("Object {}", id),
+                            [0.0, 0.0, 0.0],
+                            GeometryType::Cube,
+                        ));
                         return true;
                     }
                     _ => {}
@@ -1262,16 +1256,18 @@ impl State {
                 .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button(t!("toolbar.object").to_string()).clicked() {
-                            let id = self.next_id;
-                            let default_obj = SceneObject::new(
-                                id,
-                                format!("Object {}", id),
-                                [0.0, 0.0, 0.0],
-                                GeometryType::Cube,
-                            );
-                            self.draft_object = Some(default_obj);
-                            self.should_focus_name = true;
+                        if ui.button(t!("toolbar.objects").to_string()).clicked() {
+                            if self.objects_view.show_window {
+                                self.objects_view.show_window = false;
+                            } else {
+                                let id = self.next_id;
+                                self.objects_view.open_primitive(SceneObject::new(
+                                    id,
+                                    format!("Object {}", id),
+                                    [0.0, 0.0, 0.0],
+                                    GeometryType::Cube,
+                                ));
+                            }
                         }
                         if ui.button(t!("toolbar.dataset").to_string()).clicked() {
                             self.dataset_view.show_window = !self.dataset_view.show_window;
@@ -1282,9 +1278,6 @@ impl State {
                         }
                         if ui.button(t!("toolbar.solids").to_string()).clicked() {
                             self.geometry_view.show_window = !self.geometry_view.show_window;
-                        }
-                        if ui.button(t!("toolbar.sketch").to_string()).clicked() {
-                            self.sketch_view.show_window = !self.sketch_view.show_window;
                         }
                         // Neural-network / LLM import lives inside the Dataset
                         // import window (no standalone toolbar button); its
@@ -1371,8 +1364,21 @@ impl State {
 
             // Geometry import window (paste / files / layers)
             geometry_focus = self.geometry_view.show(ctx);
-            // Sketch & solid composer window
-            self.sketch_view.show(ctx);
+            // Objects window (primitive creation + sketch + composer).
+            // Seed a fresh primitive draft whenever the tab asks for one.
+            if self.objects_view.needs_draft() {
+                let id = self.next_id;
+                self.objects_view.draft = Some(SceneObject::new(
+                    id,
+                    format!("Object {}", id),
+                    [0.0, 0.0, 0.0],
+                    GeometryType::Cube,
+                ));
+            }
+            self.objects_view.show(ctx);
+            if let Some(obj) = self.objects_view.take_created() {
+                create_object = Some(obj);
+            }
             // LLM / SLM parameter visualizer window
             llm_action = self.llm_view.show(ctx);
 
@@ -1834,21 +1840,6 @@ impl State {
                 });
             self.bottom_panel_expanded = panel_expanded;
 
-            // Draft create-object window (shared form, see `ui::object_form`).
-            if let Some(mut draft) = self.draft_object.take() {
-                use crate::ui::object_form::{self, ObjectFormAction, ObjectFormMode};
-                match object_form::window(
-                    ctx,
-                    &mut draft,
-                    &mut self.should_focus_name,
-                    ObjectFormMode::Create,
-                ) {
-                    ObjectFormAction::Confirm => create_object = Some(draft),
-                    ObjectFormAction::Cancel => {}
-                    ObjectFormAction::None => self.draft_object = Some(draft),
-                }
-            }
-
             // Editor popup window — the same shared form as creation
             // (see `ui::object_form`): editing offers everything creation does.
             if self.editing_obj_id.is_some() {
@@ -2017,7 +2008,7 @@ impl State {
         }
 
         // Build any surfaces / solids requested from the Sketch window.
-        for request in self.sketch_view.take_requests() {
+        for request in self.objects_view.sketch.take_requests() {
             match request {
                 crate::ui::sketch_panel::SketchRequest::Surface { sketch, label } => {
                     self.add_sketch_surface(&sketch, label);
