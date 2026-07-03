@@ -38,7 +38,9 @@ impl SceneObject {
             label,
             instance: Instance {
                 position: cgmath::Vector3::new(position[0], position[1], position[2]),
-                rotation: cgmath::Quaternion::zero(),
+                // Identity rotation — NOT Quaternion::zero(), which is the
+                // null quaternion and turns to NaN under normalize/slerp.
+                rotation: cgmath::Quaternion::one(),
                 scale: cgmath::Vector3::new(1.0, 1.0, 1.0),
             },
             rotation_euler: [0.0, 0.0, 0.0],

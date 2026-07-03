@@ -15,9 +15,8 @@ pub const DEFAULT_CAMERA_PITCH: f32 = 36.0;
 pub const DEFAULT_CAMERA_DIST: f32 = 21.1;
 pub const DEFAULT_CAMERA_TARGET: [f32; 3] = [3.0, 0.15, 0.5];
 
-// Zoom Limits
-pub const DEFAULT_MIN_ZOOM: f32 = 1.0;
-pub const DEFAULT_MAX_ZOOM: f32 = 1000.0;
+// Zoom limits — persisted, so the source of truth is settings.rs.
+pub use crate::settings::{DEFAULT_MAX_ZOOM, DEFAULT_MIN_ZOOM};
 
 // New Object Defaults
 pub const DEFAULT_NEW_OBJ_POS: [f32; 3] = [0.0, 0.0, 0.0];
@@ -28,18 +27,13 @@ pub const DEFAULT_SHOW_SETTINGS: bool = false;
 pub const DEFAULT_SHOW_ADD_PANEL: bool = false;
 pub const DEFAULT_BOTTOM_PANEL_EXPANDED: bool = false;
 
-// Grid Defaults
-pub const DEFAULT_SHOW_GRID_XY: bool = true;
-pub const DEFAULT_SHOW_GRID_XZ: bool = false;
-pub const DEFAULT_SHOW_GRID_YZ: bool = false;
-pub const DEFAULT_SHOW_AXES: bool = true;
-
-// Background / grid visual defaults (also used by AppSettings::default)
-pub const DEFAULT_BG_COLOR:            [f32; 3] = [0.1, 0.1, 0.1];
-pub const DEFAULT_GRID_CELL_SIZE:      f32      = 1.0;
-pub const DEFAULT_GRID_MAX_EXTENT:     f32      = 10.0;
-pub const DEFAULT_GRID_LINE_THICKNESS: f32      = 0.02;
-pub const DEFAULT_GRID_COLOR:          [f32; 3] = [0.4, 0.4, 0.4];
+// Persisted visual defaults — the single source of truth lives in
+// `settings.rs` (AppSettings); re-exported here for UI code and tests.
+pub use crate::settings::{
+    DEFAULT_BG_COLOR, DEFAULT_GRID_CELL_SIZE, DEFAULT_GRID_COLOR, DEFAULT_GRID_LINE_THICKNESS,
+    DEFAULT_GRID_MAX_EXTENT, DEFAULT_SHOW_AXES, DEFAULT_SHOW_GRID_XY, DEFAULT_SHOW_GRID_XZ,
+    DEFAULT_SHOW_GRID_YZ,
+};
 
 pub struct MeshBuffers {
     pub vertex_buffer: wgpu::Buffer,
@@ -87,6 +81,10 @@ pub struct State {
 
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
+
+    /// Full-screen Depth32Float view, created once and rebuilt only on
+    /// resize — never per frame.
+    depth_view: wgpu::TextureView,
 
     pub camera: Camera,
 
@@ -178,6 +176,29 @@ pub struct State {
 pub const LOD_SPHERE_THRESHOLD: u32 = 2000;
 
 /// Upload a CPU mesh to the GPU as a [`MeshBuffers`] pair (16-bit indices).
+/// Build the full-screen depth buffer view for the current surface size.
+/// Called once at startup and again on every resize.
+fn create_depth_view(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+) -> wgpu::TextureView {
+    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+        size: wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        label: Some("Depth Texture"),
+        view_formats: &[],
+    });
+    depth_texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 fn make_mesh_buffers(device: &wgpu::Device, data: primitives::MeshData) -> MeshBuffers {
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label:    Some("Vertex Buffer"),
@@ -219,7 +240,9 @@ fn color_edit_button(ui: &mut egui::Ui, label: &str, rgb: &mut [f32; 3]) -> bool
 }
 
 impl State {
-    pub async fn new(window: Window) -> Self {
+    pub async fn new(window: Window) -> anyhow::Result<Self> {
+        use anyhow::Context as _;
+
         let window = std::sync::Arc::new(window);
         let size = window.inner_size();
 
@@ -228,7 +251,9 @@ impl State {
             ..Default::default()
         });
 
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = instance
+            .create_surface(window.clone())
+            .context("failed to create a rendering surface for the window")?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -237,7 +262,10 @@ impl State {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .context(
+                "no compatible GPU adapter found — check that the graphics \
+                 drivers are installed (or try WGPU_BACKEND=gl)",
+            )?;
 
         let (device, queue) = adapter
             .request_device(
@@ -249,7 +277,7 @@ impl State {
                 None,
             )
             .await
-            .unwrap();
+            .context("the GPU adapter refused a device with default limits")?;
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -264,8 +292,11 @@ impl State {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
-            alpha_mode: surface_caps.alpha_modes[0],
+            // AutoVsync guarantees a vsynced mode (Fifo fallback) on every
+            // driver; present_modes[0] could be Immediate/Mailbox and spin
+            // the GPU at 100%.
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
@@ -501,13 +532,16 @@ impl State {
             1,
         );
 
-        Self {
+        let depth_view = create_depth_view(&device, &config);
+
+        Ok(Self {
             window,
             surface,
             device,
             queue,
             config,
             size,
+            depth_view,
             render_pipeline,
             line_pipeline,
             grid_pipeline,
@@ -577,7 +611,7 @@ impl State {
             llm_view: crate::ui::llm_panel::LlmView::new(),
             llm_node_batch: None,
             llm_edge_buf: None,
-        }
+        })
     }
 
     /// Spawn a worker thread that loads a 3D model file off the UI thread.
@@ -779,6 +813,7 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_view = create_depth_view(&self.device, &self.config);
             self.camera.aspect = self.config.width as f32 / self.config.height as f32;
         }
     }
@@ -1101,7 +1136,7 @@ impl State {
                 let world_dir = (model * local_dir.extend(0.0)).truncate();
                 let world_t = t * world_dir.magnitude();
 
-                if closest_hit.is_none() || world_t < closest_hit.as_ref().unwrap().1 {
+                if closest_hit.is_none_or(|(_, best_t)| world_t < best_t) {
                     closest_hit = Some((obj.id, world_t));
                 }
             }
@@ -1169,7 +1204,6 @@ impl State {
             primitives::create_grid(cs, ext, t, col, 0));
         self.grid_yz_mesh = make_mesh_buffers(&self.device,
             primitives::create_grid(cs, ext, t, col, 2));
-        self.save_settings();
     }
 
     /// Snapshot all visual settings to the OS config directory.
@@ -1200,22 +1234,6 @@ impl State {
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            size: wgpu::Extent3d {
-                width: self.config.width,
-                height: self.config.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            label: Some("Depth Texture"),
-            view_formats: &[],
-        });
-        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self
             .device
@@ -1483,28 +1501,41 @@ impl State {
                     if vis_changed { action_save_settings = true; }
 
                     ui.add_space(4.0);
+                    // Rebuild the grid meshes live while a slider is dragged
+                    // (visual feedback), but only write settings to disk when
+                    // the drag ends — not once per frame.
                     let mut grid_dirty = false;
+                    let mut grid_save  = false;
 
-                    grid_dirty |= ui.add(
+                    let r = ui.add(
                         egui::Slider::new(&mut self.grid_cell_size, 0.2..=10.0)
                             .text(t!("settings.grid_cell_size").to_string())
                             .logarithmic(true),
-                    ).changed();
+                    );
+                    grid_dirty |= r.changed();
+                    grid_save  |= r.drag_stopped() || (r.changed() && !r.dragged());
 
-                    grid_dirty |= ui.add(
+                    let r = ui.add(
                         egui::Slider::new(&mut self.grid_max_extent, 2.0..=50.0)
                             .text(t!("settings.grid_max_extent").to_string()),
-                    ).changed();
+                    );
+                    grid_dirty |= r.changed();
+                    grid_save  |= r.drag_stopped() || (r.changed() && !r.dragged());
 
-                    grid_dirty |= ui.add(
+                    let r = ui.add(
                         egui::Slider::new(&mut self.grid_line_thickness, 0.005..=0.3)
                             .text(t!("settings.grid_line_thickness").to_string())
                             .logarithmic(true),
-                    ).changed();
+                    );
+                    grid_dirty |= r.changed();
+                    grid_save  |= r.drag_stopped() || (r.changed() && !r.dragged());
 
-                    grid_dirty |= color_edit_button(ui, &t!("settings.grid_color"), &mut self.grid_color);
+                    let color_changed = color_edit_button(ui, &t!("settings.grid_color"), &mut self.grid_color);
+                    grid_dirty |= color_changed;
+                    grid_save  |= color_changed;
 
                     if grid_dirty { action_rebuild_grids = true; }
+                    if grid_save  { action_save_settings = true; }
                 });
 
             // Gear Button
@@ -1954,8 +1985,9 @@ impl State {
         }
 
         if action_rebuild_grids {
-            self.rebuild_grids(); // also calls save_settings internally
-        } else if action_save_settings {
+            self.rebuild_grids();
+        }
+        if action_save_settings {
             self.save_settings();
         }
 
@@ -2299,7 +2331,7 @@ impl State {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_view,
+                    view: &self.depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,

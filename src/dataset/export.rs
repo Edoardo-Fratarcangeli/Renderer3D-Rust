@@ -19,8 +19,15 @@ pub fn export_csv(dataset: &Dataset, rows: &[u32], path: &Path) -> Result<usize>
     let file = std::fs::File::create(path)?;
     let mut w = std::io::BufWriter::new(file);
 
-    // Header
-    let mut header = dataset.metadata.column_names.join(",");
+    // Header — column names come from imported files, so they need the
+    // same escaping as any other untrusted cell.
+    let mut header = dataset
+        .metadata
+        .column_names
+        .iter()
+        .map(|c| escape_csv(c))
+        .collect::<Vec<_>>()
+        .join(",");
     header.push_str(",label\n");
     w.write_all(header.as_bytes())?;
 
@@ -59,10 +66,23 @@ fn format_f32(v: f32) -> String {
 }
 
 fn escape_csv(s: &str) -> String {
-    if s.contains([',', '"', '\n']) {
-        format!("\"{}\"", s.replace('"', "\"\""))
+    // Formula-injection guard (CWE-1236): cells starting with = + - @ TAB CR
+    // are evaluated as formulas by Excel/LibreOffice. Labels and column
+    // names come from untrusted sources (imported files, the TCP stream),
+    // so neutralise them with the standard leading-apostrophe convention.
+    let needs_guard = s
+        .chars()
+        .next()
+        .is_some_and(|c| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r'));
+    let guarded = if needs_guard {
+        format!("'{}", s)
     } else {
         s.to_string()
+    };
+    if needs_guard || guarded.contains([',', '"', '\n']) {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded
     }
 }
 
@@ -87,5 +107,18 @@ mod tests {
         assert_eq!(escape_csv("with,comma"), "\"with,comma\"");
         assert_eq!(escape_csv("with\"quote"), "\"with\"\"quote\"");
         assert_eq!(escape_csv("multi\nline"), "\"multi\nline\"");
+    }
+
+    #[test]
+    fn csv_formula_injection_is_neutralised() {
+        assert_eq!(escape_csv("=1+1"), "\"'=1+1\"");
+        assert_eq!(escape_csv("=HYPERLINK(\"http://evil\")"),
+                   "\"'=HYPERLINK(\"\"http://evil\"\")\"");
+        assert_eq!(escape_csv("+sum"), "\"'+sum\"");
+        assert_eq!(escape_csv("-neg"), "\"'-neg\"");
+        assert_eq!(escape_csv("@cmd"), "\"'@cmd\"");
+        assert_eq!(escape_csv("\tindent"), "\"'\tindent\"");
+        // Non-leading special chars are untouched.
+        assert_eq!(escape_csv("a=b"), "a=b");
     }
 }

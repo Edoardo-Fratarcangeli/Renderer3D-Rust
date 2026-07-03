@@ -8,18 +8,33 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
+// Single source of truth for every persisted visual default. `state.rs`
+// re-exports these so UI code and tests read the same values.
 
-fn default_bg_color()          -> [f32; 3] { [0.1, 0.1, 0.1] }
-fn default_grid_cell_size()    -> f32       { 1.0 }
-fn default_grid_max_extent()   -> f32       { 10.0 }
-fn default_grid_thickness()    -> f32       { 0.02 }
-fn default_grid_color()        -> [f32; 3] { [0.4, 0.4, 0.4] }
-fn default_show_grid_xy()      -> bool      { true }
-fn default_show_grid_xz()      -> bool      { false }
-fn default_show_grid_yz()      -> bool      { false }
-fn default_show_axes()         -> bool      { true }
-fn default_min_zoom()          -> f32       { 1.0 }
-fn default_max_zoom()          -> f32       { 1000.0 }
+pub const DEFAULT_BG_COLOR:            [f32; 3] = [0.1, 0.1, 0.1];
+pub const DEFAULT_GRID_CELL_SIZE:      f32      = 1.0;
+pub const DEFAULT_GRID_MAX_EXTENT:     f32      = 10.0;
+pub const DEFAULT_GRID_LINE_THICKNESS: f32      = 0.02;
+pub const DEFAULT_GRID_COLOR:          [f32; 3] = [0.4, 0.4, 0.4];
+pub const DEFAULT_SHOW_GRID_XY:        bool     = true;
+pub const DEFAULT_SHOW_GRID_XZ:        bool     = false;
+pub const DEFAULT_SHOW_GRID_YZ:        bool     = false;
+pub const DEFAULT_SHOW_AXES:           bool     = true;
+pub const DEFAULT_MIN_ZOOM:            f32      = 1.0;
+pub const DEFAULT_MAX_ZOOM:            f32      = 1000.0;
+
+// serde `default = "…"` attributes require functions, so these just forward.
+fn default_bg_color()          -> [f32; 3] { DEFAULT_BG_COLOR }
+fn default_grid_cell_size()    -> f32       { DEFAULT_GRID_CELL_SIZE }
+fn default_grid_max_extent()   -> f32       { DEFAULT_GRID_MAX_EXTENT }
+fn default_grid_thickness()    -> f32       { DEFAULT_GRID_LINE_THICKNESS }
+fn default_grid_color()        -> [f32; 3] { DEFAULT_GRID_COLOR }
+fn default_show_grid_xy()      -> bool      { DEFAULT_SHOW_GRID_XY }
+fn default_show_grid_xz()      -> bool      { DEFAULT_SHOW_GRID_XZ }
+fn default_show_grid_yz()      -> bool      { DEFAULT_SHOW_GRID_YZ }
+fn default_show_axes()         -> bool      { DEFAULT_SHOW_AXES }
+fn default_min_zoom()          -> f32       { DEFAULT_MIN_ZOOM }
+fn default_max_zoom()          -> f32       { DEFAULT_MAX_ZOOM }
 
 // ── Structs ───────────────────────────────────────────────────────────────────
 

@@ -45,6 +45,12 @@ _version: 2
   es: Dirección de escucha
   fr: Adresse d'écoute
   de: Lausch-Adresse
+"stream.non_loopback_warning":
+  en: "⚠ Non-loopback address: anyone on the network can send data (no authentication)"
+  it: "⚠ Indirizzo non loopback: chiunque sulla rete può inviare dati (nessuna autenticazione)"
+  es: "⚠ Dirección no loopback: cualquiera en la red puede enviar datos (sin autenticación)"
+  fr: "⚠ Adresse non loopback : n'importe qui sur le réseau peut envoyer des données (pas d'authentification)"
+  de: "⚠ Nicht-Loopback-Adresse: jeder im Netzwerk kann Daten senden (keine Authentifizierung)"
 "stream.max_rows":
   en: Max rows (rolling)
   it: Righe max (scorrevoli)

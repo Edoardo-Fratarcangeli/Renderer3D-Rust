@@ -211,10 +211,18 @@ pub fn from_gguf(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Downsample weights to ≤ MAX_NODES_PER_LAYER and normalise to [0, 1].
+/// Samples on evenly spaced fractional indices so the picks are distributed
+/// across the whole slice (a floor()ed integer stride would only cover the
+/// head when the length is not a multiple of the cap).
 fn capped_nodes(weights: &[f32]) -> Vec<Node> {
     let n = weights.len().min(MAX_NODES_PER_LAYER);
-    let stride = (weights.len() / n).max(1);
-    let sampled: Vec<f32> = weights.iter().step_by(stride).take(n).map(|&w| w.abs()).collect();
+    if n == 0 {
+        return Vec::new();
+    }
+    let step = weights.len() as f64 / n as f64;
+    let sampled: Vec<f32> = (0..n)
+        .map(|i| weights[((i as f64 * step) as usize).min(weights.len() - 1)].abs())
+        .collect();
     let max = sampled.iter().cloned().fold(0.0f32, f32::max).max(1e-8);
     sampled
         .into_iter()
@@ -235,11 +243,14 @@ impl<'a> GgufReader<'a> {
     }
 
     fn read_bytes(&mut self, n: usize) -> Result<&'a [u8]> {
-        if self.pos + n > self.data.len() {
+        // `n` comes from the file (e.g. a u64 string length): `pos + n` can
+        // wrap and slip past a naive `>` check, panicking on the slice below.
+        let end = self.pos.checked_add(n).filter(|&e| e <= self.data.len());
+        let Some(end) = end else {
             bail!("Unexpected end of GGUF data at offset {} (needed {n} bytes)", self.pos);
-        }
-        let s = &self.data[self.pos..self.pos + n];
-        self.pos += n;
+        };
+        let s = &self.data[self.pos..end];
+        self.pos = end;
         Ok(s)
     }
 
@@ -385,5 +396,17 @@ mod tests {
     fn gguf_wrong_magic_is_rejected() {
         let bad = [0u8; 32];
         assert!(from_gguf(&bad).is_err());
+    }
+
+    #[test]
+    fn gguf_reader_rejects_wrapping_lengths() {
+        // A declared length near usize::MAX would wrap `pos + n` and slip
+        // past a naive bounds check, panicking on the slice.
+        let data = [1u8, 2, 3, 4];
+        let mut r = GgufReader::new(&data);
+        r.pos = 2;
+        assert!(r.read_bytes(usize::MAX - 1).is_err());
+        // Normal reads still work.
+        assert_eq!(r.read_bytes(2).unwrap(), &[3, 4]);
     }
 }

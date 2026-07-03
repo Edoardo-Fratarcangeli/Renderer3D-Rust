@@ -45,6 +45,12 @@ use super::{Dataset, DatasetError, FeatureSource, Result};
 /// How long the accept loop sleeps between polls while waiting for a peer.
 const ACCEPT_POLL: Duration = Duration::from_millis(20);
 
+/// Maximum feature columns accepted from a stream. The first batch fixes
+/// `n_cols` for the whole session, so an hostile first row with millions of
+/// columns would otherwise pin an enormous rolling buffer (`max_rows` bounds
+/// rows, not bytes). Matches the PCA `MAX_DIMS` order of magnitude.
+pub const MAX_COLS: usize = 4096;
+
 /// Wire format of the incoming stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamFormat {
@@ -205,6 +211,12 @@ impl StreamBuffer {
     pub fn push_batch(&mut self, batch: &RowBatch) -> Result<()> {
         if batch.n_rows() == 0 {
             return Ok(());
+        }
+        if batch.n_cols > MAX_COLS {
+            return Err(DatasetError::Format(format!(
+                "stream row has {} columns (max {})",
+                batch.n_cols, MAX_COLS
+            )));
         }
         if self.n_cols == 0 {
             self.n_cols = batch.n_cols;
@@ -622,6 +634,17 @@ mod tests {
         let err = buf.push_batch(&RowBatch {
             n_cols: 3,
             rows: vec![1.0, 2.0, 3.0],
+            labels: vec![],
+        });
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn buffer_rejects_excessive_columns() {
+        let mut buf = StreamBuffer::new(10);
+        let err = buf.push_batch(&RowBatch {
+            n_cols: MAX_COLS + 1,
+            rows: vec![0.0; MAX_COLS + 1],
             labels: vec![],
         });
         assert!(err.is_err());

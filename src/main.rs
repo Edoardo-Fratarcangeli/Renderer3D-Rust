@@ -42,21 +42,25 @@ fn load_icon() -> winit::window::Icon {
     winit::window::Icon::from_rgba(rgba_data, width, height).expect("Failed to create winit icon")
 }
 
-pub async fn run() {
+pub async fn run() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+
     logger::init(logger::LogLevel::Info);
     rendering_3d::i18n::init();
     rendering_3d::updater::check_in_background();
     log_info!("Application starting...");
 
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new().context("failed to create the event loop")?;
     let window = WindowBuilder::new()
         .with_title("Rust 3D Renderer")
         .with_window_icon(Some(load_icon()))
         .with_inner_size(winit::dpi::LogicalSize::new(1200.0, 800.0))
         .build(&event_loop)
-        .unwrap();
+        .context("failed to create the application window")?;
 
-    let mut state = State::new(window).await;
+    let mut state = State::new(window)
+        .await
+        .context("GPU initialization failed")?;
 
     _ = event_loop.run(move |event, elwt| {
         match event {
@@ -136,8 +140,15 @@ pub async fn run() {
             _ => {}
         }
     });
+    Ok(())
 }
 
 fn main() {
-    pollster::block_on(run());
+    if let Err(e) = pollster::block_on(run()) {
+        // A missing GPU / broken driver must produce a readable message,
+        // not a bare panic backtrace.
+        rendering_3d::log_critical!("startup failed: {e:#}");
+        eprintln!("Error: {e:#}");
+        std::process::exit(1);
+    }
 }

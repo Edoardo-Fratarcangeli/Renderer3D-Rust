@@ -86,6 +86,20 @@ impl StreamState {
     }
 }
 
+/// Whether a bind address only accepts local peers (loopback IP or
+/// `localhost`). Unparseable hosts count as non-loopback so the warning
+/// stays on the safe side.
+pub fn is_loopback_addr(addr: &str) -> bool {
+    let host = addr.rsplit_once(':').map_or(addr, |(h, _)| h);
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 /// What the Stream tab asks the view to do this frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StreamUiAction {
@@ -135,6 +149,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut StreamState) -> StreamUiAction {
                         .hint_text("127.0.0.1:8765"),
                 );
                 ui.end_row();
+
+                // The listener accepts anyone without authentication: warn
+                // as soon as the bind address is reachable from the network.
+                if !is_loopback_addr(&state.addr) {
+                    ui.label("");
+                    ui.colored_label(
+                        egui::Color32::from_rgb(230, 160, 30),
+                        t!("stream.non_loopback_warning").to_string(),
+                    );
+                    ui.end_row();
+                }
 
                 ui.label(t!("stream.max_rows").to_string());
                 ui.add(egui::DragValue::new(&mut state.max_rows).range(100..=5_000_000));
@@ -218,6 +243,16 @@ mod tests {
         assert_eq!(s.format, StreamFormat::Ndjson);
         assert!(s.use_radial);
         assert_eq!(s.dot_color(), egui::Color32::from_gray(110));
+    }
+
+    #[test]
+    fn loopback_detection() {
+        assert!(is_loopback_addr("127.0.0.1:8765"));
+        assert!(is_loopback_addr("localhost:9000"));
+        assert!(is_loopback_addr("[::1]:8765"));
+        assert!(!is_loopback_addr("0.0.0.0:8765"));
+        assert!(!is_loopback_addr("192.168.1.5:8765"));
+        assert!(!is_loopback_addr("garbage"));
     }
 
     #[test]
