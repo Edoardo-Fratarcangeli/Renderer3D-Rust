@@ -699,7 +699,7 @@ fn finish_table_dataset(
     label_strs: Vec<String>,
 ) -> Result<Dataset> {
     let n_cols = feature_idx.len();
-    let n_rows = if n_cols == 0 { 0 } else { data.len() / n_cols };
+    let n_rows = data.len().checked_div(n_cols).unwrap_or(0);
 
     let (labels, label_names, label_column) = if let Some(li) = label_idx {
         let (labels, names) = labels_from_strings(&label_strs);

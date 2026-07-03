@@ -153,11 +153,7 @@ pub struct RowBatch {
 
 impl RowBatch {
     pub fn n_rows(&self) -> usize {
-        if self.n_cols == 0 {
-            0
-        } else {
-            self.rows.len() / self.n_cols
-        }
+        self.rows.len().checked_div(self.n_cols).unwrap_or(0)
     }
 }
 
@@ -199,11 +195,7 @@ impl StreamBuffer {
     }
 
     pub fn n_rows(&self) -> usize {
-        if self.n_cols == 0 {
-            0
-        } else {
-            self.data.len() / self.n_cols
-        }
+        self.data.len().checked_div(self.n_cols).unwrap_or(0)
     }
 
     /// Append a decoded batch, enforcing a constant column count and the
