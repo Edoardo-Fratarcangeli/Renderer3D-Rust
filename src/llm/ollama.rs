@@ -29,6 +29,11 @@ pub const OLLAMA_HOST: &str = "127.0.0.1:11434";
 const READ_TIMEOUT:  Duration = Duration::from_secs(120);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
+// The peer is only *nominally* Ollama: if the daemon is not running, any
+// local process can squat port 11434, so sizes read off the wire are capped.
+const MAX_CHUNK_BYTES: usize = 16 * 1024 * 1024;
+const MAX_BODY_BYTES:  usize = 64 * 1024 * 1024;
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -161,17 +166,24 @@ fn http_post(path: &str, body: &str) -> Result<String> {
 fn drain_response<R: Read + BufRead>(mut reader: R) -> Result<String> {
     let (status, is_chunked) = parse_headers(&mut reader)?;
     if status != 200 {
-        let mut err = String::new();
-        reader.read_to_string(&mut err)?;
+        let err = read_capped_string(&mut reader)?;
         bail!("Ollama HTTP {status}: {}", err.chars().take(300).collect::<String>());
     }
     if is_chunked {
         read_chunked(&mut reader)
     } else {
-        let mut body = String::new();
-        reader.read_to_string(&mut body)?;
-        Ok(body)
+        read_capped_string(&mut reader)
     }
+}
+
+/// `read_to_string` bounded by [`MAX_BODY_BYTES`] (bodies come off the wire).
+fn read_capped_string<R: Read>(reader: &mut R) -> Result<String> {
+    let mut body = String::new();
+    reader.take(MAX_BODY_BYTES as u64 + 1).read_to_string(&mut body)?;
+    if body.len() > MAX_BODY_BYTES {
+        bail!("HTTP response body exceeds the {MAX_BODY_BYTES} byte cap");
+    }
+    Ok(body)
 }
 
 /// Returns (HTTP status code, is_chunked).
@@ -193,19 +205,50 @@ fn parse_headers<R: BufRead>(reader: &mut R) -> Result<(u16, bool)> {
     Ok((status, chunked))
 }
 
+/// Parse one chunked-encoding size line. Malformed hex is an ERROR — the old
+/// lenient `unwrap_or(0)` treated it as end-of-stream, silently truncating
+/// the data. Sizes above [`MAX_CHUNK_BYTES`] are rejected before allocating.
+fn parse_chunk_size(sz_line: &str) -> Result<usize> {
+    let hex = sz_line.trim().split(';').next().unwrap_or("").trim();
+    if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("malformed HTTP chunk size line: {:?}", sz_line.trim());
+    }
+    let size = usize::from_str_radix(hex, 16)
+        .with_context(|| format!("HTTP chunk size out of range: {hex:?}"))?;
+    if size > MAX_CHUNK_BYTES {
+        bail!("HTTP chunk of {size} bytes exceeds the {MAX_CHUNK_BYTES} byte cap");
+    }
+    Ok(size)
+}
+
+/// Append one chunk body to `out`, reading in fixed 16 KiB blocks so the
+/// declared size is never allocated upfront; consumes the trailing CRLF.
+fn read_chunk_into<R: BufRead>(reader: &mut R, size: usize, out: &mut Vec<u8>) -> Result<()> {
+    const BLOCK: usize = 16 * 1024;
+    let mut block = [0u8; BLOCK];
+    let mut remaining = size;
+    while remaining > 0 {
+        let n = remaining.min(BLOCK);
+        reader.read_exact(&mut block[..n])?;
+        out.extend_from_slice(&block[..n]);
+        remaining -= n;
+    }
+    let mut crlf = [0u8; 2];
+    let _ = reader.read_exact(&mut crlf);
+    Ok(())
+}
+
 fn read_chunked<R: BufRead>(reader: &mut R) -> Result<String> {
     let mut buf: Vec<u8> = Vec::new();
     loop {
         let mut sz_line = String::new();
         reader.read_line(&mut sz_line)?;
-        let hex = sz_line.trim().split(';').next().unwrap_or("0");
-        let chunk_size = usize::from_str_radix(hex, 16).unwrap_or(0);
+        let chunk_size = parse_chunk_size(&sz_line)?;
         if chunk_size == 0 { break; }
-        let mut chunk = vec![0u8; chunk_size];
-        reader.read_exact(&mut chunk)?;
-        buf.extend_from_slice(&chunk);
-        let mut crlf = [0u8; 2];
-        let _ = reader.read_exact(&mut crlf);
+        if buf.len() + chunk_size > MAX_BODY_BYTES {
+            bail!("HTTP response body exceeds the {MAX_BODY_BYTES} byte cap");
+        }
+        read_chunk_into(reader, chunk_size, &mut buf)?;
     }
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
@@ -235,8 +278,7 @@ fn do_inference(
     let mut reader = BufReader::new(stream);
     let (status, is_chunked) = parse_headers(&mut reader)?;
     if status != 200 {
-        let mut err = String::new();
-        reader.read_to_string(&mut err)?;
+        let err = read_capped_string(&mut reader)?;
         bail!("Ollama /api/generate HTTP {status}: {}",
               err.chars().take(300).collect::<String>());
     }
@@ -256,6 +298,9 @@ fn stream_plain_ndjson<R: BufRead>(
     loop {
         line.clear();
         if reader.read_line(&mut line)? == 0 { break; }
+        if line.len() > MAX_CHUNK_BYTES {
+            bail!("NDJSON line exceeds the {MAX_CHUNK_BYTES} byte cap");
+        }
         dispatch_ndjson(line.trim(), tx);
     }
     Ok(())
@@ -269,13 +314,13 @@ fn stream_chunked_ndjson<R: BufRead>(
     loop {
         let mut sz_line = String::new();
         reader.read_line(&mut sz_line)?;
-        let hex = sz_line.trim().split(';').next().unwrap_or("0");
-        let chunk_size = usize::from_str_radix(hex, 16).unwrap_or(0);
+        let chunk_size = parse_chunk_size(&sz_line)?;
         if chunk_size == 0 { break; }
-        let mut chunk = vec![0u8; chunk_size];
-        reader.read_exact(&mut chunk)?;
-        let mut crlf = [0u8; 2];
-        let _ = reader.read_exact(&mut crlf);
+        let mut chunk = Vec::new();
+        read_chunk_into(reader, chunk_size, &mut chunk)?;
+        if carry.len() + chunk.len() > MAX_BODY_BYTES {
+            bail!("NDJSON carry buffer exceeds the {MAX_BODY_BYTES} byte cap");
+        }
 
         let text = String::from_utf8_lossy(&chunk);
         // Prepend any partial JSON fragment from the previous chunk.
@@ -309,5 +354,36 @@ fn dispatch_ndjson(s: &str, tx: &mpsc::Sender<OllamaEvent>) {
         if obj["done"].as_bool() == Some(true) {
             let _ = tx.send(OllamaEvent::Done);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_size_parses_valid_hex_and_extensions() {
+        assert_eq!(parse_chunk_size("1a\r\n").unwrap(), 0x1a);
+        assert_eq!(parse_chunk_size("0\r\n").unwrap(), 0);
+        assert_eq!(parse_chunk_size("ff;ext=1\r\n").unwrap(), 0xff);
+    }
+
+    #[test]
+    fn chunk_size_rejects_malformed_and_oversized() {
+        // Malformed hex must be an error, not a silent end-of-stream.
+        assert!(parse_chunk_size("zz\r\n").is_err());
+        assert!(parse_chunk_size("\r\n").is_err());
+        // A fake server declaring a 4 GiB chunk must not cause an allocation.
+        assert!(parse_chunk_size("FFFFFFFF\r\n").is_err());
+    }
+
+    #[test]
+    fn chunked_body_is_reassembled_and_capped() {
+        let wire = b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n";
+        let body = read_chunked(&mut std::io::Cursor::new(&wire[..])).unwrap();
+        assert_eq!(body, "hello world");
+
+        let evil = b"FFFFFFFF\r\n";
+        assert!(read_chunked(&mut std::io::Cursor::new(&evil[..])).is_err());
     }
 }

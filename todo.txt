@@ -13,11 +13,10 @@ x 2026-07-02 Sketch arc shape mode (open curved polylines) +sketch @geometry
 x 2026-07-02 N-volume spatial filter (AND/OR) — scene spheres/cubes interact with datasets +data @filters
 x 2026-07-02 Parametric arrays in Objects: linear, circular, along sketched curve +objects @cad
 x 2026-07-02 Right-click context menu on entity rows: duplicate, mirror X/Y/Z, flip, properties, focus, delete +ui @ux
-
-
-
-
-
+x 2026-07-03 Fase 1 completa: clippy sbloccato, id draft univoci, undo su creazione, depth texture riusata, AutoVsync, header CSV escapato, quaternione identità +fix @bugs
+x 2026-07-03 Fase 2 completa: cap stream NDJSON (linea/colonne) + warning bind non-loopback, guardie zip-bomb NPZ, checked_extent su shape NPY/NPZ/IDX, cap client Ollama, anti formula-injection CSV, GGUF read_bytes senza overflow, log dir assoluta +security @robustness
+x 2026-07-03 Fase 4 parziale: debounce salvataggio settings sugli slider griglia, logger bufferizzato con flush su warning+, avvio con errori anyhow leggibili +perf @quality
+x 2026-07-03 Fase 3.8 default unificati in settings.rs; 5.2 workflow CI (clippy -D warnings + test, Linux+Windows); 5.4 pulizie (capped_nodes stride uniforme, resolve_columns condiviso CSV/Excel); 5.5 limiti documentati +hygiene @quality
 
 
 
@@ -25,221 +24,96 @@ x 2026-07-02 Right-click context menu on entity rows: duplicate, mirror X/Y/Z, f
 ================================================================================
  TODO — Renderer3D-Rust
  Generato dall'analisi del codebase del 2026-07-01 (~18.000 righe analizzate)
+ Aggiornato il 2026-07-03: verifica voce per voce contro il codice reale.
 ================================================================================
 
 Legenda:
   [ ] = da fare    [x] = fatto    [~] = in corso
   Stima: S = ore, M = 1-2 giorni, L = piu' giorni (incrementale)
 
-Ordine consigliato: FASE 1 -> FASE 2 -> FASE 3 -> FASE 4.
-Le fasi 1 e 2 sono fix puntuali a basso rischio; la fase 3 e' refactoring
-incrementale; la fase 4 e' igiene/qualita' continua.
+Ordine consigliato per il lavoro rimanente: FASE 3 (3.0 -> 3.7) poi 4.1/4.2,
+infine 5.1/5.3. Le fasi 1 e 2 sono COMPLETE; della 4 restano i punti legati
+al refactoring; della 5 restano i18n del pannello LLM e l'upgrade dello stack.
 
 
 ================================================================================
- FASE 1 — FIX IMMEDIATI (bug reali, poche ore totali)
+ FASE 1 — FIX IMMEDIATI                                    ✅ COMPLETATA
 ================================================================================
 
-[ ] 1.1  Sbloccare cargo clippy (errore correctness)                    [S]
-     File:     src/ui/llm_panel.rs:502
-     Problema: `(t * 2.718_281 * 0.37)` scatta il lint `approx_constant`
-               (deny di default perche' gruppo correctness): qualsiasi CI
-               con clippy fallisce. Il valore e' solo un moltiplicatore di
-               rumore per la curva di training simulata.
-     Fix:      Sostituire la costante con un valore non ambiguo
-               (es. 2.7213) oppure usare std::f32::consts::E se l'intento
-               era davvero il numero di Eulero.
-     Verifica: `cargo clippy --all-targets` esce con exit code 0.
+[x] 1.1  Sbloccare cargo clippy (errore correctness)
+     Risolto (commit e187ae7): zero warning clippy su tutto il workspace;
+     la CI (5.2) ora fa rispettare -D warnings.
 
-[ ] 1.2  ID duplicati: il draft non riserva next_id                     [S]
-     File:     src/state.rs:1266 (toolbar "Object"), src/state.rs:884
-               (tasto N), src/state.rs:2334 (conferma draft)
-     Problema: il draft cattura `next_id` SENZA incrementarlo; l'incremento
-               avviene solo alla conferma. Se mentre la finestra e' aperta
-               si esegue Ctrl+V / Ctrl+D / import mesh (tutte azioni che
-               consumano next_id), la conferma crea DUE oggetti con lo
-               stesso id. Un undo su uno dei due li elimina ENTRAMBI
-               (apply_undo_command usa retain su id).
-     Fix:      Incrementare `next_id` nel momento in cui il draft viene
-               creato (sia dal bottone che dal tasto N). In alternativa:
-               assegnare l'id solo alla conferma.
-     Verifica: aprire draft -> Ctrl+V -> confermare -> gli id sono univoci;
-               undo rimuove un solo oggetto.
+[x] 1.2  ID duplicati: il draft non riserva next_id
+     Risolto dal refactoring UI: gli oggetti creati passano per
+     `created_objects` e l'id viene assegnato SOLO alla conferma
+     (src/state.rs, blocco "Apply deferred actions"), quindi nessuna
+     azione concorrente puo' rubare l'id del draft.
 
-[ ] 1.3  Creazione oggetto non annullabile (undo mancante)              [S]
-     File:     src/state.rs:2334-2337
-     Problema: alla conferma del draft si fa solo `objects.push(obj)`,
-               senza `push_undo(UndoCommand::Add(...))`. E' l'unica
-               operazione di scena non annullabile (paste, duplicate,
-               delete, edit e import mesh lo sono tutte).
-     Fix:      push_undo(UndoCommand::Add(obj.clone())) prima della push.
-               Valutare anche: deselezionare gli altri oggetti e
-               selezionare il nuovo (coerenza con l'import mesh).
-     Verifica: creare oggetto -> Ctrl+Z lo rimuove -> Ctrl+Y lo ripristina.
+[x] 1.3  Creazione oggetto non annullabile (undo mancante)
+     Risolto insieme a 1.2: ogni oggetto confermato genera
+     UndoCommand::Add (o MultiAction per gli array parametrici).
 
-[ ] 1.4  Depth texture ricreata a ogni frame                            [S]
-     File:     src/state.rs:1211-1225
-     Problema: `render()` crea una texture Depth32Float full-screen a ogni
-               frame (allocazione GPU continua, aggravata dal redraw loop).
-     Fix:      Creare depth texture + view in `State::new()`, tenerle come
-               campi, ricrearle SOLO in `resize()`.
-     Verifica: l'app renderizza identica; profiler GPU senza allocazioni
-               per frame.
+[x] 1.4  Depth texture ricreata a ogni frame
+     Risolto: `depth_view` e' un campo di State, creato in new() tramite
+     create_depth_view() e ricreato solo in resize().
 
-[ ] 1.5  Vsync non garantito (present_mode arbitrario)                  [S]
-     File:     src/state.rs:279
-     Problema: `present_mode: surface_caps.present_modes[0]` — l'ordine
-               dell'array dipende dal driver: su alcuni sistemi seleziona
-               Immediate/Mailbox -> GPU al 100% (vedi anche 3.1).
-     Fix:      Usare esplicitamente `wgpu::PresentMode::AutoVsync`
-               (fallback garantito su Fifo). Stessa cosa per alpha_mode se
-               si vuole determinismo (`CompositeAlphaMode::Auto`).
-     Verifica: GPU usage in idle crolla su monitor 60Hz.
+[x] 1.5  Vsync non garantito (present_mode arbitrario)
+     Risolto: PresentMode::AutoVsync + CompositeAlphaMode::Auto espliciti.
 
-[ ] 1.6  Header CSV export senza escaping                               [S]
-     File:     src/dataset/export.rs:23-25
-     Problema: `column_names.join(",")` non passa da escape_csv: un nome
-               colonna contenente virgola/virgolette (arriva da file
-               importati) produce un header malformato e rompe il
-               round-trip import<->export garantito dai test.
-     Fix:      header = column_names.iter().map(escape_csv).join(",").
-     Verifica: aggiungere un test con colonna `foo,bar` e `foo"bar`.
+[x] 1.6  Header CSV export senza escaping
+     Risolto: i nomi colonna passano da escape_csv come le celle
+     (src/dataset/export.rs), test inclusi.
 
-[ ] 1.7  Rotazione iniziale con quaternione degenere                    [S]
-     File:     src/scene.rs:41
-     Problema: `Quaternion::zero()` e' il quaternione nullo, non
-               l'identita'. Funziona per un dettaglio della formula di
-               conversione cgmath, ma e' fragile (qualsiasi normalize o
-               slerp futuro produce NaN).
-     Fix:      `Quaternion::one()` (identita').
-     Verifica: test esistenti `update_rotation_identity_for_zero_euler`
-               ancora verdi; nessun cambiamento visivo.
+[x] 1.7  Rotazione iniziale con quaternione degenere
+     Risolto: Quaternion::one() (identita') in SceneObject::new.
 
 
 ================================================================================
- FASE 2 — SICUREZZA / ROBUSTEZZA INPUT NON FIDATI (1-2 giorni)
+ FASE 2 — SICUREZZA / ROBUSTEZZA INPUT NON FIDATI          ✅ COMPLETATA
 ================================================================================
- Contesto: l'app apre una porta TCP, parla con Ollama via HTTP artigianale
- e parsa formati binari arbitrari (NPY/NPZ/GGUF/STL/...). Nessun problema
- di memory-safety, ma diversi vettori DoS (OOM/panic) e una injection.
 
-[ ] 2.1  Stream TCP: cap su linea e colonne (DoS OOM)                   [M]
-     File:     src/dataset/stream/ndjson.rs:74 (buffer di linea),
-               src/dataset/stream/mod.rs:205-242 (push_batch)
-     Problema: (a) il buffer di linea NDJSON cresce senza limite se non
-               arriva mai '\n' (bytes infiniti -> OOM);
-               (b) `max_rows` limita le RIGHE ma non i BYTE: una prima riga
-               con milioni di colonne fissa n_cols enorme e il rolling
-               buffer puo' crescere fino a OOM;
-               (c) il listener accetta chiunque senza autenticazione e
-               l'indirizzo e' configurabile (anche 0.0.0.0).
-     Fix:      - MAX_LINE_BYTES (es. 1 MiB): se superato, errore di formato
-                 e chiusura della connessione;
-               - MAX_COLS (es. 4096, coerente con MAX_DIMS del PCA):
-                 rifiutare batch oltre soglia;
-               - warning in UI quando il bind address non e' loopback
-                 (o default forzato a 127.0.0.1 con opt-in esplicito).
-     Verifica: test unitario: stream senza newline da 2 MiB -> Err;
-               riga con 10^6 colonne -> Err; nessun OOM.
+[x] 2.1  Stream TCP: cap su linea e colonne (DoS OOM)
+     Risolto: MAX_LINE_BYTES (1 MiB) nel decoder NDJSON, MAX_COLS (4096)
+     in StreamBuffer::push_batch, warning UI arancione quando il bind
+     address non e' loopback (is_loopback_addr, 5 lingue). Test inclusi.
 
-[ ] 2.2  NPZ: zip-bomb / preallocazione attaccante-controllata          [M]
-     File:     src/dataset/loader.rs:395-405 (read_entry),
-               src/dataset/loader.rs:414-417 (loop di decodifica)
-     Problema: (a) `Vec::with_capacity(entry.size())` prealloca in base
-               alla dimensione DICHIARATA nello zip (attaccante-
-               controllata); `read_to_end` non ha tetto sul decompresso
-               -> zip-bomb;
-               (b) manca il bounds-check prima del loop di decodifica:
-               shape dichiarata > payload reale -> panic nel worker;
-               `Vec::with_capacity(n_rows * n_cols)` con shape enorme ->
-               abort per allocazione fallita (crash del processo intero).
-     Fix:      - cap sul decompresso (es. 2 GiB configurabile), leggere a
-                 chunk verificando il totale;
-               - prima del loop: verificare
-                 feat_raw.len() >= data_offset + n_rows*n_cols*es
-                 (con checked_mul, vedi 2.3) e restituire
-                 DatasetError::Format in caso contrario;
-               - with_capacity solo dopo la validazione.
-     Verifica: test con NPZ artefatto (shape 10x10, payload 4 byte) ->
-               Err pulito, niente panic.
+[x] 2.2  NPZ: zip-bomb / preallocazione attaccante-controllata
+     Risolto: cap 2 GiB sul decompresso per entry (take + verifica),
+     preallocazione limitata a 64 MiB, bounds-check con checked_extent
+     PRIMA di ogni allocazione. Test: NPZ shape 10x10 con payload 4 byte
+     -> Err pulito.
 
-[ ] 2.3  Overflow aritmetici su shape NPY/IDX ostili                    [S]
-     File:     src/dataset/loader.rs:226 (load_npy),
-               src/dataset/loader.rs:288-293 (decode_npy_as_f32),
-               src/dataset/loader.rs:684-712 (load_idx)
-     Problema: `data_offset + n_rows * n_cols * elem.size()` in release
-               WRAPPA con shape tipo (2^62, 8): il check passa e il panic
-               arriva dopo, su Dataset::row — che gira sul THREAD UI ->
-               crash dell'app con un .npy artefatto.
-     Fix:      usare checked_mul/checked_add e mappare l'overflow su
-               DatasetError::Format("shape overflow"). Punto unico
-               consigliato: fn checked_extent(offset, rows, cols, es)
-               -> Result<usize> riusata da npy/npz/idx.
-     Verifica: test parse con shape (usize::MAX/2, 8) -> Err, no panic.
+[x] 2.3  Overflow aritmetici su shape NPY/IDX ostili
+     Risolto: fn checked_extent(offset, rows, cols, es) riusata da
+     npy/npz/idx + prodotto shape con checked_mul in shape_to_2d e
+     decode_npy_as_f32. Test con shape (usize::MAX/2, 8) -> Err.
 
-[ ] 2.4  Client Ollama: cap su chunk/body + niente troncamenti muti     [M]
-     File:     src/llm/ollama.rs:196-211 (read_chunked),
-               src/llm/ollama.rs:264-299 (stream_chunked_ndjson),
-               src/llm/ollama.rs:161-175 (drain_response)
-     Problema: (a) `vec![0u8; chunk_size]` con chunk_size letto DAL FILO
-               senza cap: se Ollama non gira, qualunque processo locale
-               puo' squattare la porta 11434 e dichiarare chunk da 4 GiB
-               -> OOM;
-               (b) `usize::from_str_radix(hex,16).unwrap_or(0)` tratta un
-               chunk-size malformato come fine stream -> TRONCAMENTO
-               SILENZIOSO dei dati;
-               (c) read_to_string del body senza limite.
-     Fix:      - MAX_CHUNK (es. 16 MiB) e MAX_BODY (es. 64 MiB): oltre ->
-                 bail! con messaggio chiaro;
-               - chunk-size non esadecimale -> errore, non 0;
-               - leggere i chunk a blocchi (riusare CHUNK=16k) invece di
-                 allocare l'intero chunk in una volta.
-     Nota:     valutare in alternativa la dipendenza `ureq` (sincrona,
-               leggera, senza async runtime): elimina ~150 righe di HTTP
-               artigianale e le due duplicazioni interne
-               (read_chunked vs stream_chunked_ndjson,
-                http_post vs do_inference). Decidere prima di implementare
-               i cap a mano.
-     Verifica: server fake che dichiara chunk 0xFFFFFFFF -> errore pulito.
+[x] 2.4  Client Ollama: cap su chunk/body + niente troncamenti muti
+     Risolto a mano (senza dipendenza ureq): MAX_CHUNK 16 MiB /
+     MAX_BODY 64 MiB, parse_chunk_size che RIFIUTA l'esadecimale
+     malformato (prima: troncamento silenzioso), lettura chunk a blocchi
+     da 16k senza allocare la size dichiarata, read_to_string con take.
+     Test: chunk dichiarato 0xFFFFFFFF -> errore pulito.
 
-[ ] 2.5  CSV formula injection nell'export                              [S]
-     File:     src/dataset/export.rs:61-67 (escape_csv)
-     Problema: le celle che iniziano con = + - @ TAB CR vengono
-               interpretate come formule da Excel/LibreOffice. Le label
-               arrivano da fonti non fidate (file importati o dal socket
-               TCP 2.1): label `=HYPERLINK(...)` esportata e aperta in
-               Excel esegue la formula (CWE-1236).
-     Fix:      in escape_csv, se il primo char e' uno di [=+-@\t\r],
-               prefissare un apostrofo `'` (convenzione standard) e
-               quotare. Applicarlo a label E nomi colonna (vedi 1.6).
-     Verifica: test: label "=1+1" esportata -> cella "'=1+1".
+[x] 2.5  CSV formula injection nell'export
+     Risolto: escape_csv prefissa l'apostrofo alle celle che iniziano
+     con = + - @ TAB CR e le quota (CWE-1236); applicato a label E nomi
+     colonna. Test: "=1+1" -> "'=1+1".
 
-[ ] 2.6  GGUF reader: overflow su read_bytes                            [S]
-     File:     src/llm/loader.rs:238 (read_bytes),
-               src/llm/loader.rs:275-279 (read_string)
-     Problema: `self.pos + n > self.data.len()` puo' wrappare quando n e'
-               enorme (len stringa letta dal file, u64 castato a usize)
-               -> il check passa -> panic su slice out of bounds
-               (DoS con .gguf artefatto).
-     Fix:      `self.pos.checked_add(n).map_or(true, |e| e > len)` ->
-               bail!. Gia' presente il cap 131072 sugli array: OK, e' il
-               modello da seguire.
-     Verifica: gguf con stringa dichiarata u64::MAX -> Err, no panic.
+[x] 2.6  GGUF reader: overflow su read_bytes
+     Risolto: pos.checked_add(n) al posto di `pos + n > len`. Test con
+     lunghezza vicina a usize::MAX incluso.
 
-[ ] 2.7  Log directory relativa alla CWD                                [S]
-     File:     src/logger.rs:30, src/logger.rs:43
-     Problema: "logs/" e' relativo alla directory corrente: lanciata da
-               un'altra cartella l'app scrive log altrove (o fallisce in
-               directory read-only, es. Program Files).
-     Fix:      usare dirs::data_local_dir()/rendering3d/logs (stessa
-               convenzione di settings.rs), risolto una volta in init().
-     Collegato a: 4.4 (riscrittura logger).
+[x] 2.7  Log directory relativa alla CWD
+     Risolto insieme a 4.4: dirs::data_local_dir()/rendering3d/logs,
+     risolta una volta in init().
 
 
 ================================================================================
  FASE 3 — REFACTORING ARCHITETTURALE (incrementale, ordine consigliato)
 ================================================================================
- Obiettivo: smontare il god-object State (2808 righe) rispettando SRP,
+ Obiettivo: smontare il god-object State (~2500 righe) rispettando SRP,
  eliminare le duplicazioni. Ogni passo e' autonomo e lascia i test verdi.
 
 [ ] 3.0  Prerequisito: dirty-flag di scena                              [S]
@@ -249,38 +123,27 @@ incrementale; la fase 4 e' igiene/qualita' continua.
                riuso buffer). Nessun comportamento cambia: e' solo
                strumentazione.
 
-[ ] 3.1  Estrarre il form oggetto duplicato (~200 righe x2)             [S]
-     File:     src/state.rs:1834-2036 (finestra "crea"),
-               src/state.rs:2039-2243 (finestra "modifica")
-     Problema: lo stesso identico form (nome/tipo/position/rotation/scale/
-               colore/proprieta' geometriche) e' copiato due volte, con
-               micro-divergenze accidentali gia' presenti.
-     Fix:      nuovo src/ui/object_form.rs:
-                 pub enum FormAction { None, Confirm, Cancel }
-                 pub fn object_form(ui, obj: &mut SceneObject,
-                                    focus_name: &mut bool) -> FormAction
-               Le due finestre diventano ~20 righe l'una.
-     Verifica: tests/ui/* verdi; comportamento identico a mano.
+[x] 3.1  Estrarre il form oggetto duplicato (~200 righe x2)
+     Risolto (commit 13761df): src/ui/object_form.rs condiviso dalle
+     finestre di creazione e modifica.
 
-[ ] 3.2  Generalizzare il polling dei worker (duplicato ~6x)            [S]
-     File:     src/state.rs:619 (poll_mesh_worker),
-               src/ui/llm_panel.rs:258,294,333 (x3),
-               src/ui/geometry_panel.rs (~135),
-               src/ui/mod.rs (~1003)
+[ ] 3.2  Generalizzare il polling dei worker (duplicato ~7x)            [S]
+     File:     src/state.rs (poll_mesh_worker),
+               src/ui/llm_panel.rs:267,303,342,418 (x4),
+               src/ui/geometry_panel.rs:171, src/ui/mod.rs:1153
      Problema: la stessa state-machine try_recv a 4 rami
                (Ok(Ok)/Ok(Err)/Empty/Disconnected) e' copiata ovunque.
-     Fix:      nuovo src/util.rs o src/task.rs:
+     Fix:      nuovo tipo in src/util.rs o src/task.rs:
                  pub struct BackgroundTask<T>(Option<Receiver<Result<T,String>>>);
                  impl: spawn(f: FnOnce()->Result<T,String>) -> Self
                        poll(&mut self) -> TaskPoll<T>
                          (Pending / Done(T) / Failed(String) / Idle)
-               Sostituire i 6 siti.
+               Sostituire i 7 siti.
      Verifica: import mesh/dataset/gguf/ollama funzionano come prima,
                incluso il caso "worker died".
 
 [ ] 3.3  Unificare il ray-picking                                       [S]
-     File:     src/state.rs:1049-1077 (raycast_world),
-               src/state.rs:1079-1135 (select_object_at_ndc),
+     File:     src/state.rs (raycast_world + select_object_at_ndc),
                src/mesh.rs:104 (ray_hit)
      Problema: (a) i due metodi duplicano lo stesso loop oggetti ->
                spazio locale -> intersezione;
@@ -296,9 +159,8 @@ incrementale; la fase 4 e' igiene/qualita' continua.
                hit/miss con mesh traslata/scalata.
 
 [ ] 3.4  OrbitCameraController: camera in un posto solo                 [M]
-     File:     src/main.rs:67-101 (orbit+pan math nel event loop!),
-               src/state.rs:98-102,1137-1155 (yaw/pitch/dist + update),
-               src/state.rs:991-1011 (zoom), src/camera.rs
+     File:     src/main.rs (orbit+pan math nel event loop!),
+               src/state.rs (yaw/pitch/dist + update + zoom), src/camera.rs
      Problema: la logica orbitale e' spalmata su 3 file; la conversione
                sferica yaw/pitch->vettore e' DUPLICATA tra main.rs (pan)
                e state.update(). main.rs non dovrebbe contenere math.
@@ -318,33 +180,28 @@ incrementale; la fase 4 e' igiene/qualita' continua.
      File:     src/state.rs (tutto il blocco wgpu)
      Cosa:     nuovo src/renderer.rs che possiede:
                surface, device, queue, config, pipelines (3), depth
-               texture (da 1.4), uniform buffer/bind group, mesh
+               view (fatto in 1.4), uniform buffer/bind group, mesh
                primitive (MeshBuffers), sphere_lod, egui_renderer.
                API: new(window), resize(size), begin_frame(),
                render_scene(&RenderInputs), present().
                RenderInputs = viste in prestito su objects/batches/
                custom_meshes/flag griglie.
                Include `fn mesh_for(geo, count) -> &MeshBuffers` che
-               incapsula il match GeometryType+LOD oggi TRIPLICATO
-               (state.rs:2706, 2739, 2781).
+               incapsula il match GeometryType+LOD oggi TRIPLICATO.
      Verifica: compila, render identico, state.rs scende sotto ~1500
                righe.
 
 [ ] 3.6  Spaccare State: estrarre la UI principale                      [L]
-     File:     src/state.rs:1256-2331 (closure egui in render())
+     File:     src/state.rs (closure egui in render())
      Cosa:     nuovo src/ui/main_ui.rs con:
-               - toolbar (Object/Dataset/Solids/Sketch/Measure)
+               - toolbar (in parte gia' estratta: objects_panel,
+                 tool_window, entity_list, stream_panel sono moduli)
                - settings window -> src/ui/settings_panel.rs
-               - object list bottom panel -> src/ui/object_list.rs
-                 (unificare le TRE copie del blocco icone
-                  visibilita'/focus/delete per oggetti, dataset e LLM
-                  in un piccolo widget riusabile)
                - label 3D + overlay misurazione
-               Le finestre draft/edit usano object_form (3.1).
                Comunicazione con lo stato: struct UiActions (il pattern
                "deferred actions" gia' in uso, reso esplicito).
-               Spostare qui color_edit_button e list_icon_button
-               (state.rs:198-231) che sono widget UI.
+               Spostare color_edit_button e list_icon_button che sono
+               widget UI.
      Verifica: tests/ui/* verdi; state.rs ~600-800 righe (solo:
                orchestrazione input, scena, undo, worker).
 
@@ -354,25 +211,20 @@ incrementale; la fase 4 e' igiene/qualita' continua.
      Cosa:     nuovo src/editor.rs (o estendere scene.rs):
                SceneEditor { objects, next_id, clipboard, undo, redo }
                con add/delete/duplicate/paste/select/undo/redo che
-               incapsulano il push_undo (impossibile dimenticarlo di
-               nuovo, vedi 1.3). undo_stack: VecDeque (remove(0) e'
-               O(n), state.rs:767).
+               incapsulano il push_undo. undo_stack: VecDeque (remove(0)
+               e' O(n)).
                Qui va anche la GC dei custom_meshes orfani: quando un
                UndoCommand::Add/Delete esce dalla history (cap 100) o
                il redo_stack viene svuotato, liberare le entry di
                custom_meshes non piu' raggiungibili (oggi la memoria
-               GPU cresce per sempre, state.rs:2495-2503).
+               GPU cresce per sempre).
      Verifica: tests/scene/undo_redo.rs e logic_tests.rs verdi + nuovo
                test: delete -> 100 azioni -> la mesh GPU e' liberata.
 
-[ ] 3.8  Unificare i default duplicati                                  [S]
-     File:     src/state.rs:38-42 (DEFAULT_BG_COLOR, DEFAULT_GRID_*,
-               zoom), src/settings.rs:12-22 (default_*())
-     Problema: due fonti di verita' per gli stessi valori: se ne cambi
-               una l'altra resta.
-     Fix:      AppSettings::default() e' l'unica fonte; le costanti in
-               state.rs si riducono a quelle non persistite (camera).
-     Verifica: tests/scene/defaults.rs e tests/camera/defaults.rs verdi.
+[x] 3.8  Unificare i default duplicati
+     Risolto: settings.rs e' l'unica fonte (const pubbliche +
+     forwarder serde); state.rs le ri-esporta per UI e test. Le
+     costanti solo-runtime (camera, pannelli) restano in state.rs.
 
 
 ================================================================================
@@ -380,7 +232,7 @@ incrementale; la fase 4 e' igiene/qualita' continua.
 ================================================================================
 
 [ ] 4.1  Riusare i buffer di istanza per frame                          [M]
-     File:     src/state.rs:2533-2629
+     File:     src/state.rs (blocco batch in render)
      Problema: single_instance_buffer, gli instance buffer per tipo
                (Cube/Sphere/Plane), quelli per mesh importate e le frecce
                normali vengono ricreati con create_buffer_init OGNI
@@ -396,10 +248,10 @@ incrementale; la fase 4 e' igiene/qualita' continua.
      Verifica: nessuna allocazione GPU per frame a scena ferma.
 
 [ ] 4.2  Redraw on demand invece del loop continuo                      [M]
-     File:     src/main.rs:133-135 (AboutToWait -> request_redraw)
+     File:     src/main.rs (AboutToWait -> request_redraw)
      Problema: ridisegno al massimo frame-rate anche in idle: CPU/GPU
                sprecate su un'app CAD-like (mitigato ma non risolto
-               da 1.5).
+               da 1.5, che ora garantisce almeno il vsync).
      Fix:      ridisegnare quando: input consumato, scene_dirty,
                animazione LLM attiva (llm_panel usa gia'
                request_repaint_after(16ms)), stream attivo, worker in
@@ -408,41 +260,23 @@ incrementale; la fase 4 e' igiene/qualita' continua.
                full_output.repaint_delay.
      Verifica: idle -> ~0% GPU; animazioni e streaming ancora fluidi.
 
-[ ] 4.3  Debounce salvataggio settings + rebuild griglie               [S]
-     File:     src/state.rs:1166-1180 (rebuild_grids -> save_settings),
-               src/state.rs:1441-1460 (slider grid_dirty)
-     Problema: trascinare uno slider della griglia ricostruisce 3 mesh
-               GPU E scrive il JSON su disco A OGNI FRAME.
-     Fix:      rebuild live va bene (feedback visivo), ma save su
-               drag_stopped() degli slider (egui Response) o con un
-               timer da 500ms dall'ultima modifica.
-     Verifica: drag fluido; una sola write su disco a fine drag.
+[x] 4.3  Debounce salvataggio settings + rebuild griglie
+     Risolto: rebuild delle mesh griglia live durante il drag (feedback
+     visivo), ma save_settings solo su drag_stopped() degli slider
+     (o su modifica non-drag); rebuild_grids non salva piu' su disco.
 
-[ ] 4.4  Logger bufferizzato                                            [S]
-     File:     src/logger.rs:37-71
-     Problema: OGNI riga di log apre/chiude il file in append + print!
-               non bufferizzato, sotto mutex globale. Costoso nei loop.
-     Fix:      static WRITER: Mutex<Option<BufWriter<File>>> inizializzato
-               in init() (path assoluto, vedi 2.7); flush su
-               Warning/Error/Critical, e' sufficiente. Sostituire
-               .lock().unwrap() con .lock().unwrap_or_else(|p|
-               p.into_inner()) per non propagare poisoning.
-     Alternativa consigliata a medio termine: crate `log` + `env_logger`
-               (o `tracing`), tenendo i macro log_* come facade.
-     Verifica: test logger esistenti verdi; log presenti dopo crash
-               simulato (flush su error).
+[x] 4.4  Logger bufferizzato
+     Risolto: static WRITER: Mutex<Option<BufWriter<File>>> aperto una
+     volta in init() (path assoluto da 2.7), flush automatico su
+     Warning/Error/Critical, lock con recupero dal poisoning
+     (unwrap_or_else(|p| p.into_inner())).
+     Alternativa a medio termine ancora valida: crate `log`/`tracing`
+     tenendo i macro log_* come facade.
 
-[ ] 4.5  Avvio senza panic muti                                         [S]
-     File:     src/state.rs:243-264 (unwrap su surface/adapter/device),
-               src/main.rs:51-57 (unwrap event loop/window)
-     Problema: GPU assente/driver rotto = panic senza messaggio utile.
-               anyhow e' gia' in Cargo.toml e non viene usato qui.
-     Fix:      State::new -> anyhow::Result<Self> con .context() parlanti
-               ("nessun adapter GPU compatibile trovato..."); main
-               logga log_critical + messagebox/eprintln e esce con
-               codice != 0.
-     Verifica: forzare WGPU_BACKEND=vulkan su macchina senza vulkan ->
-               messaggio chiaro, niente backtrace.
+[x] 4.5  Avvio senza panic muti
+     Risolto: State::new -> anyhow::Result con .context() parlanti
+     ("no compatible GPU adapter found...", suggerimento WGPU_BACKEND);
+     main logga log_critical + eprintln ed esce con codice 1.
 
 
 ================================================================================
@@ -456,17 +290,18 @@ incrementale; la fase 4 e' igiene/qualita' continua.
                src/llm/ollama.rs (messaggi di errore utente-visibili)
      Problema: tutto il resto dell'app usa t!() con 5 lingue; questo
                pannello e' solo inglese.
-     Fix:      estrarre le stringhe in locales/app.yml (chiavi llm.*)
+     Fix:      estrarre le stringhe in locales/ (chiavi llm.*)
                e sostituire con t!(). Occhio alle stringhe con
                interpolazione ({n} modelli).
 
-[ ] 5.2  CI: clippy + fmt + test                                        [S]
-     File:     .github/workflows/ (da creare o estendere)
-     Cosa:     job con: cargo fmt --check, cargo clippy --all-targets
-               -- -D warnings (dopo 1.1 e la pulizia dei 6 warning:
-               complex types in llm_panel.rs:103,114,905 -> type alias;
-               if collassabile :1022; doc indent :14; map_or :648),
-               cargo test. Windows runner (winres in build.rs).
+[x] 5.2  CI: clippy + test
+     Risolto: .github/workflows/ci.yml — cargo clippy --all-targets
+     -- -D warnings + cargo test su Linux e Windows (winres in
+     build.rs coperto dal runner Windows).
+     NOTA: cargo fmt --check e' stato lasciato fuori deliberatamente:
+     il codebase usa allineamenti manuali (~300 hunk di drift rustfmt).
+     Se si vuole fmt in CI serve prima un commit di riformattazione
+     completa (decisione di stile da prendere a parte).
 
 [ ] 5.3  Aggiornamento stack grafico                                    [L]
      File:     Cargo.toml
@@ -480,26 +315,22 @@ incrementale; la fase 4 e' igiene/qualita' continua.
      Nota:     valutare anche `zip` 2.x -> verificare advisory RUSTSEC
                periodicamente (cargo audit in CI).
 
-[ ] 5.4  Widget/stile: pulizia residua                                  [S]
-     - src/state.rs:1111: closest_hit.as_ref().unwrap().1 -> pattern
-       matching (sparisce con 3.3).
-     - src/llm/loader.rs:214-223 (capped_nodes): con len non multiplo di
-       MAX_NODES_PER_LAYER campiona i primi N invece di distribuire
-       uniformemente (stride arrotondato per difetto). Usare stride
-       ceiling o campionamento su indici f64.
-     - src/dataset/loader.rs: load_csv e load_excel duplicano il blocco
-       label_idx/feature_idx (righe 488-506 vs 574-590) -> estrarre
-       fn resolve_columns(headers, opts) -> (label_idx, feature_idx).
+[x] 5.4  Widget/stile: pulizia residua
+     - closest_hit: pattern matching (is_none_or) al posto di unwrap. ✔
+     - capped_nodes: campionamento su indici frazionari uniformi al
+       posto dello stride floor()ato che copriva solo la testa. ✔
+     - load_csv/load_excel: blocco label_idx/feature_idx estratto in
+       fn resolve_columns(headers, opts) condivisa. ✔
      - Vertex color hardcoded bianco per mesh importate: OK by design,
-       documentato. Nessuna azione.
+       documentato. Nessuna azione. ✔
 
-[ ] 5.5  Documentazione operativa                                       [S]
-     - README/CLAUDE.md: documentare i formati supportati, il protocollo
-       NDJSON dello stream (con esempio Python), i limiti introdotti in
-       fase 2 (MAX_LINE_BYTES, MAX_COLS, cap NPZ), e la matrice
-       feature-flag (parquet-support, arrow-stream).
-     - scripts/: gen-update-key.sh e' citato in updater.rs — verificare
-       che esista e sia documentato nel flusso di release.
+[x] 5.5  Documentazione operativa
+     - docs/ML_VISUALIZER.md: tabella rischi/mitigazioni aggiornata con
+       i limiti della fase 2 (MAX_LINE_BYTES, MAX_COLS, cap NPZ, cap
+       client Ollama); protocollo NDJSON con esempio Python gia'
+       documentato (§ Producer examples). ✔
+     - scripts/gen-update-key.sh: esiste ed e' documentato in
+       docs/PACKAGING.md (§ Auto-update). ✔
 
 
 ================================================================================
@@ -511,8 +342,10 @@ incrementale; la fase 4 e' igiene/qualita' continua.
    mantenere questa proprieta'.
  - pattern gia' corretti da estendere, non reinventare:
    take_render_dirty (dirty-flag), deferred actions, cap difensivi
-   (MAX_NODES_PER_LAYER, MAX_DIMS, MAX_RENDER_POINTS, cap array GGUF).
+   (MAX_NODES_PER_LAYER, MAX_DIMS, MAX_RENDER_POINTS, cap array GGUF,
+   e da fase 2: MAX_LINE_BYTES, MAX_COLS, MAX_NPZ_ENTRY_BYTES,
+   MAX_CHUNK_BYTES/MAX_BODY_BYTES, checked_extent).
  - updater firmato e inerte senza chiave: non toccare il design.
 
- Stima complessiva: fase 1 ~ mezza giornata; fase 2 ~ 2 giorni;
- fase 3 ~ 1-2 settimane incrementali; fasi 4-5 in coda o intercalate.
+ Lavoro rimanente: fase 3 (3.0, 3.2-3.7) ~ 1-2 settimane incrementali;
+ 4.1/4.2 dopo 3.0/3.5; 5.1 e 5.3 in coda o intercalate.

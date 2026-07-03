@@ -17,6 +17,13 @@ use super::{
     metadata::DatasetMetadata, Dataset, DatasetError, ElemType, FeatureSource, Result,
 };
 
+/// Zip-bomb guard: hard cap on the decompressed size of a single NPZ entry.
+const MAX_NPZ_ENTRY_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+
+/// Never preallocate more than this from the (attacker-controlled) size an
+/// NPZ entry declares; larger buffers grow organically while decompressing.
+const NPZ_PREALLOC_CAP: usize = 64 * 1024 * 1024; // 64 MiB
+
 /// Options controlling the import.
 #[derive(Debug, Clone, Default)]
 pub struct LoadOptions {
@@ -185,6 +192,29 @@ fn parse_descr(descr: &str) -> Result<ElemType> {
     Ok(elem)
 }
 
+/// Resolve the (label, features) column split for a tabular source.
+///
+/// Shared by the CSV and Excel loaders: an explicit `opts.label_column` is
+/// looked up case-insensitively (missing = error), otherwise the label is
+/// auto-detected; every remaining column is a feature.
+fn resolve_columns(headers: &[String], opts: &LoadOptions) -> Result<(Option<usize>, Vec<usize>)> {
+    let label_idx = match &opts.label_column {
+        Some(name) => Some(
+            headers
+                .iter()
+                .position(|h| h.eq_ignore_ascii_case(name))
+                .ok_or_else(|| {
+                    DatasetError::Format(format!("label column '{}' not found", name))
+                })?,
+        ),
+        None => detect_label_column(headers),
+    };
+    let feature_idx: Vec<usize> = (0..headers.len())
+        .filter(|i| Some(*i) != label_idx)
+        .collect();
+    Ok((label_idx, feature_idx))
+}
+
 /// Auto-detect the label column from header names.
 ///
 /// Strong names ("label", "target", "class", ...) take precedence over the
@@ -204,8 +234,25 @@ fn shape_to_2d(shape: &[usize]) -> Result<(usize, usize)> {
     match shape.len() {
         0 => Err(DatasetError::Format("scalar NPY array".into())),
         1 => Ok((shape[0], 1)),
-        _ => Ok((shape[0], shape[1..].iter().product())),
+        _ => {
+            let cols = shape[1..]
+                .iter()
+                .try_fold(1usize, |acc, &d| acc.checked_mul(d))
+                .ok_or_else(|| DatasetError::Format("shape overflow".into()))?;
+            Ok((shape[0], cols))
+        }
     }
+}
+
+/// `offset + rows * cols * elem_size` with overflow mapped to a format error.
+/// Shapes are attacker-controlled (NPY/NPZ/IDX headers): in release builds a
+/// plain multiplication wraps, the bounds check passes, and the panic fires
+/// later on the UI thread when rows are decoded.
+fn checked_extent(offset: usize, rows: usize, cols: usize, elem_size: usize) -> Result<usize> {
+    rows.checked_mul(cols)
+        .and_then(|n| n.checked_mul(elem_size))
+        .and_then(|bytes| bytes.checked_add(offset))
+        .ok_or_else(|| DatasetError::Format("shape overflow".into()))
 }
 
 fn load_npy(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
@@ -223,7 +270,7 @@ fn load_npy(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
     if let Some(cap) = opts.max_rows {
         n_rows = n_rows.min(cap);
     }
-    let expected = header.data_offset + n_rows * n_cols * header.elem.size();
+    let expected = checked_extent(header.data_offset, n_rows, n_cols, header.elem.size())?;
     if map.len() < expected {
         return Err(DatasetError::Format("NPY payload shorter than shape".into()));
     }
@@ -285,11 +332,14 @@ pub fn decode_npy_as_f32(bytes: &[u8]) -> Result<Vec<f32>> {
             "fortran-order NPY arrays are not supported".into(),
         ));
     }
-    let count: usize = header.shape.iter().product::<usize>().max(
-        if header.shape.is_empty() { 1 } else { 0 },
-    );
+    let count: usize = header
+        .shape
+        .iter()
+        .try_fold(1usize, |acc, &d| acc.checked_mul(d))
+        .ok_or_else(|| DatasetError::Format("shape overflow".into()))?
+        .max(if header.shape.is_empty() { 1 } else { 0 });
     let es = header.elem.size();
-    if bytes.len() < header.data_offset + count * es {
+    if bytes.len() < checked_extent(header.data_offset, count, 1, es)? {
         return Err(DatasetError::Format("NPY payload shorter than shape".into()));
     }
     let mut out = Vec::with_capacity(count);
@@ -395,12 +445,27 @@ fn load_npz(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
     let read_entry = |archive: &mut zip::ZipArchive<std::io::BufReader<std::fs::File>>,
                       name: &str|
      -> Result<Vec<u8>> {
-        let mut entry = archive
+        let entry = archive
             .by_name(name)
             .map_err(|e| DatasetError::Format(format!("NPZ entry '{}': {}", name, e)))?;
-        // Stream-decompress: the compressed archive is never fully buffered.
-        let mut buf = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut buf)?;
+        // Zip-bomb guard: the size declared in the archive is attacker
+        // controlled, so never preallocate from it and never decompress past
+        // MAX_NPZ_ENTRY_BYTES.
+        let declared = entry.size();
+        if declared > MAX_NPZ_ENTRY_BYTES {
+            return Err(DatasetError::Format(format!(
+                "NPZ entry '{}' declares {} bytes (max {})",
+                name, declared, MAX_NPZ_ENTRY_BYTES
+            )));
+        }
+        let mut buf = Vec::with_capacity((declared as usize).min(NPZ_PREALLOC_CAP));
+        let read = entry.take(MAX_NPZ_ENTRY_BYTES + 1).read_to_end(&mut buf)?;
+        if read as u64 > MAX_NPZ_ENTRY_BYTES {
+            return Err(DatasetError::Format(format!(
+                "NPZ entry '{}' decompresses past {} bytes",
+                name, MAX_NPZ_ENTRY_BYTES
+            )));
+        }
         Ok(buf)
     };
 
@@ -411,6 +476,13 @@ fn load_npz(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         n_rows = n_rows.min(cap);
     }
     let es = header.elem.size();
+    // Validate the declared shape against the actual payload BEFORE any
+    // allocation: a hostile shape would otherwise abort the process on a
+    // failed Vec allocation or panic mid-decode in the worker.
+    let expected = checked_extent(header.data_offset, n_rows, n_cols, es)?;
+    if feat_raw.len() < expected {
+        return Err(DatasetError::Format("NPZ payload shorter than shape".into()));
+    }
     let mut data = Vec::with_capacity(n_rows * n_cols);
     for i in 0..n_rows * n_cols {
         data.push(header.elem.read_f32(&feat_raw, header.data_offset + i * es));
@@ -485,21 +557,7 @@ fn load_csv(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         .map(|h| h.trim().to_string())
         .collect();
 
-    let label_idx = match &opts.label_column {
-        Some(name) => Some(
-            headers
-                .iter()
-                .position(|h| h.eq_ignore_ascii_case(name))
-                .ok_or_else(|| {
-                    DatasetError::Format(format!("label column '{}' not found", name))
-                })?,
-        ),
-        None => detect_label_column(&headers),
-    };
-
-    let feature_idx: Vec<usize> = (0..headers.len())
-        .filter(|i| Some(*i) != label_idx)
-        .collect();
+    let (label_idx, feature_idx) = resolve_columns(&headers, opts)?;
     let n_cols = feature_idx.len();
     if n_cols == 0 {
         return Err(DatasetError::Format("CSV has no feature columns".into()));
@@ -571,20 +629,7 @@ fn load_excel(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         .map(|c| cell_to_string(c).trim().to_string())
         .collect();
 
-    let label_idx = match &opts.label_column {
-        Some(name) => Some(
-            headers
-                .iter()
-                .position(|h| h.eq_ignore_ascii_case(name))
-                .ok_or_else(|| {
-                    DatasetError::Format(format!("label column '{}' not found", name))
-                })?,
-        ),
-        None => detect_label_column(&headers),
-    };
-    let feature_idx: Vec<usize> = (0..headers.len())
-        .filter(|i| Some(*i) != label_idx)
-        .collect();
+    let (label_idx, feature_idx) = resolve_columns(&headers, opts)?;
     if feature_idx.is_empty() {
         return Err(DatasetError::Format("sheet has no feature columns".into()));
     }
@@ -654,7 +699,7 @@ fn finish_table_dataset(
     label_strs: Vec<String>,
 ) -> Result<Dataset> {
     let n_cols = feature_idx.len();
-    let n_rows = if n_cols == 0 { 0 } else { data.len() / n_cols };
+    let n_rows = data.len().checked_div(n_cols).unwrap_or(0);
 
     let (labels, label_names, label_column) = if let Some(li) = label_idx {
         let (labels, names) = labels_from_strings(&label_strs);
@@ -689,6 +734,10 @@ fn load_idx(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
     let (mut n_rows, n_cols) = shape_to_2d(&dims)?;
     if let Some(cap) = opts.max_rows {
         n_rows = n_rows.min(cap);
+    }
+    let expected = checked_extent(data_offset, n_rows, n_cols, elem.size())?;
+    if map.len() < expected {
+        return Err(DatasetError::Format("IDX payload shorter than shape".into()));
     }
 
     let mut metadata = DatasetMetadata::new(&file_stem(path), "idx", n_rows, n_cols);
@@ -946,6 +995,15 @@ mod tests {
         assert_eq!(shape_to_2d(&[10, 4]).unwrap(), (10, 4));
         assert_eq!(shape_to_2d(&[10, 2, 3]).unwrap(), (10, 6));
         assert!(shape_to_2d(&[]).is_err());
+        // Hostile shapes whose column product overflows must error cleanly.
+        assert!(shape_to_2d(&[2, usize::MAX / 2, 4]).is_err());
+    }
+
+    #[test]
+    fn checked_extent_maps_overflow_to_error() {
+        assert_eq!(checked_extent(10, 2, 3, 4).unwrap(), 34);
+        assert!(checked_extent(0, usize::MAX / 2, 8, 4).is_err());
+        assert!(checked_extent(usize::MAX, 1, 1, 1).is_err());
     }
 
     #[test]

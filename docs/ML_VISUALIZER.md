@@ -389,6 +389,9 @@ integration tests below.
 | Arrow dependency weight | optional `arrow-stream` feature, off by default (NDJSON needs no extra deps) |
 | Big-endian / fortran NPY, >1-byte IDX | rejected with explicit errors instead of silent corruption |
 | Unbounded live stream exhausts RAM | bounded rolling `StreamBuffer` (oldest rows dropped past the cap) |
+| Hostile stream peer (no auth on the socket) | `MAX_LINE_BYTES` (1 MiB) caps an NDJSON line that never ends; `MAX_COLS` (4096) caps the column count a first row can pin; the UI warns when the bind address is not loopback |
+| Hostile import files (NPZ zip-bomb, lying shapes) | per-entry decompression cap (2 GiB) with bounded preallocation; `checked_extent` maps shape-arithmetic overflow to a clean `Format` error before any allocation (NPY/NPZ/IDX) |
+| Port 11434 squatted by a non-Ollama process | HTTP chunk (16 MiB) and body (64 MiB) caps; malformed chunk sizes are errors, not silent truncation |
 | Stop hangs on a blocking socket read | `StreamHandle::stop` shuts the socket down to unblock the read, then joins |
 | Stream UI freeze under high row rate | render decoupled from wire rate: one snapshot rebuild per frame, keyed on a buffer version |
 

@@ -412,3 +412,53 @@ fn parquet_without_feature_gives_actionable_error() {
     let err = load(&path, &LoadOptions::default()).unwrap_err();
     assert!(err.to_string().contains("parquet-support"));
 }
+
+/// Serialize an NPY v1 buffer with an arbitrary (possibly lying) header dict.
+fn npy_raw(dict: &str, payload: &[u8]) -> Vec<u8> {
+    let mut header = dict.to_string();
+    header.push('\n');
+    let mut out = Vec::new();
+    out.extend_from_slice(b"\x93NUMPY");
+    out.push(1);
+    out.push(0);
+    out.extend_from_slice(&(header.len() as u16).to_le_bytes());
+    out.extend_from_slice(header.as_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
+#[test]
+fn npz_shape_larger_than_payload_is_a_clean_error() {
+    use std::io::Write;
+    // Declares (10, 10) f4 = 400 bytes but carries only 4: must be a Format
+    // error, not a panic in the decode loop.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("evil.npz");
+    let npy = npy_raw(
+        "{'descr': '<f4', 'fortran_order': False, 'shape': (10, 10), }",
+        &[0u8; 4],
+    );
+    let file = std::fs::File::create(&path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("X.npy", opts).unwrap();
+    zip.write_all(&npy).unwrap();
+    zip.finish().unwrap();
+
+    assert!(load(&path, &LoadOptions::default()).is_err());
+}
+
+#[test]
+fn npy_hostile_shape_overflow_is_a_clean_error() {
+    // (usize::MAX/2, 8) wraps a naive extent multiplication in release
+    // builds; the loader must map it to an error instead.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("evil.npy");
+    let dict = format!(
+        "{{'descr': '<f4', 'fortran_order': False, 'shape': ({}, 8), }}",
+        usize::MAX / 2
+    );
+    std::fs::write(&path, npy_raw(&dict, &[0u8; 4])).unwrap();
+    assert!(load(&path, &LoadOptions::default()).is_err());
+}

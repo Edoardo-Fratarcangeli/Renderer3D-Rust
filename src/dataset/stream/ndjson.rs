@@ -12,6 +12,10 @@ use crate::dataset::{DatasetError, Result};
 /// Read chunk size for pulling bytes off the transport.
 const CHUNK: usize = 16 * 1024;
 
+/// Upper bound on a single NDJSON line. The peer is untrusted: without a cap
+/// a stream that never sends `\n` grows the line buffer until OOM.
+pub(crate) const MAX_LINE_BYTES: usize = 1024 * 1024;
+
 pub struct NdjsonDecoder<R: Read> {
     reader: R,
     buf: Vec<u8>,
@@ -57,6 +61,15 @@ impl<R: Read + Send> BatchDecoder for NdjsonDecoder<R> {
                 if let Some(batch) = Self::parse_line(&line)? {
                     return Ok(Some(batch));
                 }
+            }
+            // DoS guard: after draining complete lines, whatever remains is
+            // the (partial) start of the next line. Refuse to buffer it
+            // beyond MAX_LINE_BYTES.
+            if self.buf.len() > MAX_LINE_BYTES {
+                return Err(DatasetError::Format(format!(
+                    "NDJSON line exceeds {} bytes",
+                    MAX_LINE_BYTES
+                )));
             }
             if self.eof {
                 // Flush a trailing line that had no terminating newline.
@@ -158,5 +171,14 @@ mod tests {
     fn surfaces_malformed_json() {
         let mut d = NdjsonDecoder::new(Cursor::new("{not json}\n"));
         assert!(d.next_batch().is_err());
+    }
+
+    #[test]
+    fn rejects_endless_line_without_newline() {
+        // 2 MiB of '1' with no terminating newline: must error, not OOM.
+        let data = vec![b'1'; 2 * MAX_LINE_BYTES];
+        let mut d = NdjsonDecoder::new(Cursor::new(data));
+        let err = d.next_batch().unwrap_err();
+        assert!(err.to_string().contains("exceeds"), "got: {err}");
     }
 }
