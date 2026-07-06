@@ -34,6 +34,7 @@ fn loaded_view() -> DatasetView {
         source: ImportSource::Builtin("blobs"),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Pca),
+        cae_field: None,
     });
     assert!(view.loaded.is_some(), "builtin import is synchronous");
     view
@@ -92,6 +93,7 @@ fn projection_dims_control_the_active_axes() {
             dims: 2,
             axes: [0, 1, 2],
         },
+        cae_field: None,
     });
     let pts = &view2d.loaded.as_ref().unwrap().projection.points;
     assert!(pts.iter().all(|p| p[2] == 0.0), "2D import must flatten z");
@@ -107,6 +109,7 @@ fn projection_dims_control_the_active_axes() {
             dims: 1,
             axes: [0, 1, 2],
         },
+        cae_field: None,
     });
     let pts = &view1d.loaded.as_ref().unwrap().projection.points;
     assert!(
@@ -161,6 +164,7 @@ fn unknown_builtin_reports_error_status() {
         source: ImportSource::Builtin("not_a_dataset"),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Pca),
+        cae_field: None,
     });
     assert!(view.loaded.is_none());
     assert_eq!(view.import.status.as_ref().unwrap().kind, StatusKind::Error);
@@ -192,6 +196,7 @@ fn file_import_runs_on_worker_thread_and_installs() {
         source: ImportSource::Path(csv),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Direct),
+        cae_field: None,
     });
     assert!(view.is_loading());
 
@@ -215,6 +220,7 @@ fn failed_file_import_surfaces_error_status() {
         source: ImportSource::Path("/definitely/missing.csv".into()),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Pca),
+        cae_field: None,
     });
     pump_until_idle(&ctx, &mut view, 30);
     assert!(view.loaded.is_none());

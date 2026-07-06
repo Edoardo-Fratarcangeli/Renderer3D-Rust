@@ -98,6 +98,29 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
             });
             ui.end_row();
 
+            // CFD/FEM result files (.vtk/.vtu/.vtp/.frd): pick the result
+            // field colored as contour bands. Geometry is projected directly
+            // (x/y/z), so the projection controls below do not apply to them.
+            let is_cae = crate::dataset::cae::is_cae_path(std::path::Path::new(
+                state.path_text.trim(),
+            ));
+            if is_cae {
+                ui.label(t!("dataset.cae_field").to_string());
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut state.cae_field)
+                            .desired_width(160.0)
+                            .hint_text(t!("dataset.cae_field_hint").to_string()),
+                    );
+                    ui.label(
+                        egui::RichText::new(t!("dataset.cae_file_hint").to_string())
+                            .weak()
+                            .small(),
+                    );
+                });
+                ui.end_row();
+            }
+
             ui.label(t!("dataset.field_projection").to_string());
             ui.horizontal(|ui| {
                 method_radio(ui, &mut state.use_pca, &mut state.use_radial);
@@ -144,10 +167,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
             )
             .min_size(egui::vec2(140.0, 28.0));
             if ui.add_enabled(can_load, button).clicked() {
+                let field = state.cae_field.trim();
                 request = Some(ImportRequest {
                     source: ImportSource::Path(state.path_text.trim().into()),
                     max_rows: state.limit_rows.then_some(state.max_rows),
                     projection,
+                    cae_field: (!field.is_empty()).then(|| field.to_string()),
                 });
             }
             if state.loading {
@@ -173,6 +198,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
                         source: ImportSource::Builtin(name),
                         max_rows: None,
                         projection,
+                        cae_field: None,
                     });
                 }
                 ui.label(egui::RichText::new(builtin_description(name)).weak().small());
@@ -198,6 +224,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
                         source: ImportSource::Builtin(name),
                         max_rows: None,
                         projection,
+                        cae_field: None,
                     });
                 }
                 ui.label(egui::RichText::new(builtin_description(name)).weak().small());

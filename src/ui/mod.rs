@@ -98,6 +98,9 @@ pub struct ImportRequest {
     pub max_rows: Option<usize>,
     /// Projection (method + dimensions + axes) used for the 3D preview.
     pub projection: ProjectionSpec,
+    /// For CFD/FEM result files: the field colored as contour bands
+    /// (None = the file's default / first field).
+    pub cae_field: Option<String>,
 }
 
 /// Severity of a [`StatusMessage`]; controls its color.
@@ -222,6 +225,8 @@ pub struct ImportState {
     pub dims: u8,
     /// For direct projection, the feature-column index mapped to X, Y, Z.
     pub axes: [usize; 3],
+    /// For CFD/FEM result files: the field name to color by (empty = first).
+    pub cae_field: String,
     /// Last import outcome shown to the user.
     pub status: Option<StatusMessage>,
     /// True while the worker thread is importing.
@@ -1203,13 +1208,29 @@ impl DatasetView {
                 ));
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.worker = Some(rx);
-                let spec = req.projection;
+                // CFD/FEM result files carry real geometry in their first
+                // three columns: project them directly so the mesh shape is
+                // preserved (PCA/radial would scramble it). The View tab can
+                // still reproject afterwards.
+                let spec = if crate::dataset::cae::is_cae_path(&path) {
+                    ProjectionSpec {
+                        method: ProjectionMethod::Direct,
+                        dims: 3,
+                        axes: [0, 1, 2],
+                    }
+                } else {
+                    req.projection
+                };
                 let max_rows = req.max_rows;
+                let cae_field = req.cae_field.clone();
                 std::thread::spawn(move || {
                     let cache_dir = PathBuf::from(CACHE_DIR);
-                    let result =
-                        load_dataset_pipeline_spec(&path, max_rows, &spec, Some(&cache_dir))
-                            .map_err(|e| e.to_string());
+                    let opts = loader::LoadOptions {
+                        max_rows,
+                        label_column: cae_field,
+                    };
+                    let result = load_dataset_pipeline_opts(&path, &opts, &spec, Some(&cache_dir))
+                        .map_err(|e| e.to_string());
                     let _ = tx.send(result);
                 });
             }
@@ -1252,7 +1273,18 @@ pub fn load_dataset_pipeline_spec(
         max_rows,
         label_column: None,
     };
-    let dataset = loader::load(path, &opts)?;
+    load_dataset_pipeline_opts(path, &opts, spec, cache_dir)
+}
+
+/// Full import pipeline with explicit [`loader::LoadOptions`] (row cap +
+/// label column / CFD-FEM field selection).
+pub fn load_dataset_pipeline_opts(
+    path: &std::path::Path,
+    opts: &loader::LoadOptions,
+    spec: &ProjectionSpec,
+    cache_dir: Option<&std::path::Path>,
+) -> crate::dataset::Result<LoadedDataset> {
+    let dataset = loader::load(path, opts)?;
     prepare_dataset_spec(dataset, spec, cache_dir)
 }
 

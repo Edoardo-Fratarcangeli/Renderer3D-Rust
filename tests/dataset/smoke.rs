@@ -7,8 +7,8 @@ use rendering_3d::dataset::builtin::{generate, BuiltinDataset};
 use rendering_3d::dataset::export::export_csv;
 use rendering_3d::dataset::index::{apply_filter, FilterSpec, SearchQuery};
 use rendering_3d::dataset::loader::{load, LoadOptions};
-use rendering_3d::dataset::preprocessor::ProjectionMethod;
-use rendering_3d::ui::{load_dataset_pipeline, prepare_dataset};
+use rendering_3d::dataset::preprocessor::{ProjectionMethod, ProjectionSpec};
+use rendering_3d::ui::{load_dataset_pipeline, load_dataset_pipeline_opts, prepare_dataset};
 use rendering_3d::visualization::point_cloud::{build_instances, PointCloudSettings};
 
 use crate::helpers;
@@ -80,6 +80,65 @@ fn builtin_blobs_filter_render_export() {
     let reloaded = load(&out, &LoadOptions::default()).unwrap();
     assert_eq!(reloaded.n_rows(), 100);
     assert_eq!(reloaded.label_names, vec!["cluster_0", "cluster_2"]);
+}
+
+#[test]
+fn cfd_fem_file_maps_through_the_full_pipeline() {
+    // A tiny VTK legacy "solver result": geometry + one scalar field, driven
+    // through the same loader -> index -> direct-projection -> point-cloud
+    // path the UI uses for real CFD/FEM files.
+    let mut vtk = String::from(
+        "# vtk DataFile Version 3.0\ncase\nASCII\nDATASET POLYDATA\nPOINTS 50 float\n",
+    );
+    for i in 0..50 {
+        vtk.push_str(&format!("{} {} 0\n", i, i % 7));
+    }
+    vtk.push_str("POINT_DATA 50\nSCALARS p float 1\nLOOKUP_TABLE default\n");
+    for i in 0..50 {
+        vtk.push_str(&format!("{}\n", i * 2));
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("case.vtk");
+    std::fs::write(&path, vtk).unwrap();
+
+    let spec = ProjectionSpec::full(ProjectionMethod::Direct);
+    let loaded =
+        load_dataset_pipeline_opts(&path, &LoadOptions::default(), &spec, None).unwrap();
+    assert_eq!(loaded.dataset.n_rows(), 50);
+    assert_eq!(loaded.dataset.metadata.column_names, vec!["x", "y", "z", "p"]);
+    assert_eq!(loaded.dataset.metadata.label_column.as_deref(), Some("p"));
+    // Contour bands become the label legend, low to high.
+    assert!(loaded.dataset.label_names.len() > 1);
+    assert_eq!(loaded.dataset.labels[0], 0);
+    assert_eq!(*loaded.dataset.labels.last().unwrap(), 9);
+    // Direct projection preserves the geometry's shape (x spans, z flat).
+    assert_eq!(loaded.projection.points.len(), 50);
+    let xs: Vec<f32> = loaded.projection.points.iter().map(|p| p[0]).collect();
+    assert!(xs.last().unwrap() > xs.first().unwrap());
+
+    // The whole cloud renders through the standard instancing path.
+    let rows: Vec<u32> = (0..50).collect();
+    let result = build_instances(
+        &loaded.projection.points,
+        &loaded.dataset.labels,
+        &rows,
+        &PointCloudSettings::default(),
+    );
+    assert_eq!(result.rendered_points, 50);
+
+    // A row budget subsamples uniformly instead of truncating.
+    let capped = load_dataset_pipeline_opts(
+        &path,
+        &LoadOptions {
+            max_rows: Some(10),
+            label_column: None,
+        },
+        &spec,
+        None,
+    )
+    .unwrap();
+    assert_eq!(capped.dataset.n_rows(), 10);
+    assert_eq!(capped.dataset.value(9, 0), 45.0); // strided, not first-10
 }
 
 #[test]

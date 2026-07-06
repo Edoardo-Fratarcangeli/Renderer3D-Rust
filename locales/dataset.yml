@@ -275,11 +275,29 @@ _version: 2
   fr: Importer un jeu de données
   de: Datensatz importieren
 "dataset.import_formats":
-  en: NPY · NPZ · CSV · Excel · Parquet · IDX — large files are memory mapped
-  it: NPY · NPZ · CSV · Excel · Parquet · IDX — i file grandi sono mappati in memoria
-  es: NPY · NPZ · CSV · Excel · Parquet · IDX — los archivos grandes se mapean en memoria
-  fr: NPY · NPZ · CSV · Excel · Parquet · IDX — les fichiers volumineux sont mappés en mémoire
-  de: NPY · NPZ · CSV · Excel · Parquet · IDX — große Dateien werden speicherabgebildet
+  en: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — large files are memory mapped or subsampled
+  it: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — i file grandi sono mappati in memoria o sottocampionati
+  es: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — los archivos grandes se mapean en memoria o se submuestrean
+  fr: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — les fichiers volumineux sont mappés en mémoire ou sous-échantillonnés
+  de: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — große Dateien werden speicherabgebildet oder unterabgetastet
+"dataset.cae_field":
+  en: Field
+  it: Campo
+  es: Campo
+  fr: Champ
+  de: Feld
+"dataset.cae_field_hint":
+  en: e.g. p, U, T (empty = first)
+  it: es. p, U, T (vuoto = primo)
+  es: p. ej. p, U, T (vacío = primero)
+  fr: p. ex. p, U, T (vide = premier)
+  de: z. B. p, U, T (leer = erstes)
+"dataset.cae_file_hint":
+  en: CFD/FEM result — geometry kept as x/y/z, field shown as contour bands
+  it: risultato CFD/FEM — geometria mantenuta su x/y/z, campo mostrato a bande di contorno
+  es: resultado CFD/FEM — geometría en x/y/z, campo mostrado en bandas de contorno
+  fr: résultat CFD/FEM — géométrie conservée en x/y/z, champ affiché en bandes de contour
+  de: CFD/FEM-Ergebnis — Geometrie bleibt x/y/z, Feld als Konturbänder dargestellt
 "dataset.field_file":
   en: File
   it: File

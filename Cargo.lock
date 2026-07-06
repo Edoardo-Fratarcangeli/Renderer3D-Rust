@@ -3480,6 +3480,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "flate2",
  "gltf",
  "image",
  "memmap2",

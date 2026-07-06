@@ -5,6 +5,7 @@
 //! unit-testable and reusable outside the UI.
 //!
 //! - [`loader`] — multi-format import (NPY/NPZ/CSV/IDX, optional Parquet)
+//! - [`cae`] — CFD / FEM result files (VTK legacy, VTU/VTP, CalculiX FRD)
 //! - [`metadata`] — JSON-persisted dataset description
 //! - [`index`] — label index + filter/search evaluation
 //! - [`preprocessor`] — 3D projection (PCA) with a disk cache
@@ -12,6 +13,7 @@
 //! - [`builtin`] — deterministic synthetic benchmark generators
 
 pub mod builtin;
+pub mod cae;
 pub mod export;
 pub mod index;
 pub mod loader;
