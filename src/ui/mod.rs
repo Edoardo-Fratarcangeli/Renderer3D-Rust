@@ -345,6 +345,11 @@ pub struct DatasetView {
     /// Runtime streaming tab state (config + live session).
     pub stream: stream_panel::StreamState,
 
+    /// View tab, "color bands" section: the column driving the contour
+    /// bands and how many bands it is quantized into.
+    pub recolor_col: usize,
+    pub recolor_bands: usize,
+
     render_dirty: bool,
     worker: Option<Receiver<Result<LoadedDataset, String>>>,
 }
@@ -390,6 +395,8 @@ impl DatasetView {
             settings: PointCloudSettings::default(),
             last_build_info: String::new(),
             stream: stream_panel::StreamState::default(),
+            recolor_col: 0,
+            recolor_bands: crate::dataset::cae::FIELD_BANDS,
             render_dirty: false,
             worker: None,
         }
@@ -432,6 +439,22 @@ impl DatasetView {
         // Fresh dataset, fresh editable color table (palette defaults).
         self.settings.label_colors =
             crate::visualization::color_mapper::palette(loaded.dataset.label_names.len());
+        // Point the View tab's "color bands" section at the column the labels
+        // came from (when they came from a column at all).
+        self.recolor_col = loaded
+            .dataset
+            .metadata
+            .label_column
+            .as_deref()
+            .and_then(|lc| {
+                loaded
+                    .dataset
+                    .metadata
+                    .column_names
+                    .iter()
+                    .position(|c| c == lc)
+            })
+            .unwrap_or(0);
         self.visible = true;
         self.loaded = Some(loaded);
         self.recompute_visible();
@@ -751,6 +774,38 @@ impl DatasetView {
         }
     }
 
+    /// Re-derive the label bands from any feature column of the loaded
+    /// dataset (used by the View tab). Every part of an import — each field,
+    /// vector component, magnitude or coordinate — can drive the point colors
+    /// and the per-band visibility filter without re-reading the file.
+    pub fn recolor_by_column(&mut self, col: usize, bands: usize) {
+        let Some(loaded) = self.loaded.as_mut() else {
+            return;
+        };
+        if col >= loaded.dataset.n_cols() {
+            return;
+        }
+        let bands = bands.clamp(2, 64);
+        loaded.dataset.relabel_by_column(col, bands);
+        loaded.index = DatasetIndex::build(
+            &loaded.dataset.labels,
+            loaded.dataset.label_names.len(),
+        );
+        let n_labels = loaded.dataset.label_names.len();
+        let column = loaded.dataset.metadata.label_column.clone().unwrap_or_default();
+        self.enabled_labels = (0..n_labels as u32).collect();
+        self.settings.label_colors = crate::visualization::color_mapper::palette(n_labels);
+        self.recompute_visible();
+        self.import.status = Some(StatusMessage::success(
+            t!(
+                "dataset.recolored",
+                column = column,
+                bands = n_labels.to_string()
+            )
+            .to_string(),
+        ));
+    }
+
     /// Build the instance batches for the current visible set. Returns an
     /// empty result when no dataset is loaded or the dataset is hidden.
     pub fn build_point_cloud(&mut self) -> point_cloud::PointCloudBuildResult {
@@ -1056,6 +1111,58 @@ impl DatasetView {
                     self.render_dirty = true;
                 }
 
+                let col_names: Vec<String> = self
+                    .loaded
+                    .as_ref()
+                    .map(|l| l.dataset.metadata.column_names.clone())
+                    .unwrap_or_default();
+                let n_cols = col_names.len();
+
+                // --- Recolor: derive the bands from any feature column ---
+                // Any part of the import (a CFD/FEM field, one vector
+                // component, a magnitude, a coordinate) becomes the color +
+                // per-band filter dimension, live, without re-reading the file.
+                if n_cols > 0 {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new(t!("dataset.color_bands").to_string()).heading(),
+                        );
+                    });
+                    let mut recolor = false;
+                    egui::Grid::new("recolor_grid")
+                        .num_columns(2)
+                        .spacing([12.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label(t!("dataset.color_by").to_string());
+                            let sel = self.recolor_col.min(n_cols - 1);
+                            egui::ComboBox::from_id_source("recolor_col_combo")
+                                .selected_text(col_names[sel].clone())
+                                .show_ui(ui, |ui| {
+                                    for (ci, name) in col_names.iter().enumerate() {
+                                        ui.selectable_value(&mut self.recolor_col, ci, name);
+                                    }
+                                });
+                            ui.end_row();
+
+                            ui.label(t!("dataset.bands").to_string());
+                            ui.add(
+                                egui::DragValue::new(&mut self.recolor_bands).range(2..=64),
+                            );
+                            ui.end_row();
+                        });
+                    ui.vertical_centered(|ui| {
+                        if ui.button(t!("dataset.apply_colors").to_string()).clicked() {
+                            recolor = true;
+                        }
+                    });
+                    if recolor {
+                        let (col, bands) = (self.recolor_col, self.recolor_bands);
+                        self.recolor_by_column(col, bands);
+                    }
+                }
+
                 // --- Reconfigure the projection on the loaded dataset ---
                 ui.add_space(8.0);
                 ui.separator();
@@ -1063,12 +1170,6 @@ impl DatasetView {
                     ui.label(egui::RichText::new(t!("dataset.projection").to_string()).heading());
                 });
 
-                let col_names: Vec<String> = self
-                    .loaded
-                    .as_ref()
-                    .map(|l| l.dataset.metadata.column_names.clone())
-                    .unwrap_or_default();
-                let n_cols = col_names.len();
                 let mut apply = false;
                 egui::Grid::new("projection_grid")
                     .num_columns(2)
@@ -1307,9 +1408,20 @@ pub fn prepare_dataset_spec(
 ) -> crate::dataset::Result<LoadedDataset> {
     // The label index is independent of the projection, so it is keyed only by
     // the dataset content (PCA-3 tag) and shared across projection configs.
+    // The label source column IS part of the identity though: the same
+    // CFD/FEM file imported with a different field selection produces
+    // different labels, so it must not reuse this cache entry.
     let index = match cache_dir {
         Some(dir) => {
-            let key = preprocessor::cache_key(&dataset, ProjectionMethod::Pca);
+            let key = crate::dataset::fnv1a64(&[
+                &preprocessor::cache_key(&dataset, ProjectionMethod::Pca).to_le_bytes(),
+                dataset
+                    .metadata
+                    .label_column
+                    .as_deref()
+                    .unwrap_or_default()
+                    .as_bytes(),
+            ]);
             let index_path = dir.join(format!("{:016x}.index.json", key));
             match DatasetIndex::load_json(&index_path) {
                 Ok(idx) if idx.n_rows == dataset.n_rows() => idx,

@@ -139,6 +139,15 @@ fn cfd_fem_file_maps_through_the_full_pipeline() {
     .unwrap();
     assert_eq!(capped.dataset.n_rows(), 10);
     assert_eq!(capped.dataset.value(9, 0), 45.0); // strided, not first-10
+
+    // Every part of the import is render-configurable after load: re-band
+    // the colors on another column (here y) at a different resolution.
+    let mut ds = loaded.dataset;
+    ds.relabel_by_column(1, 7);
+    assert_eq!(ds.metadata.label_column.as_deref(), Some("y"));
+    assert_eq!(ds.label_names.len(), 7);
+    let distinct: std::collections::HashSet<u32> = ds.labels.iter().copied().collect();
+    assert!(distinct.len() > 1, "y spans several bands");
 }
 
 #[test]

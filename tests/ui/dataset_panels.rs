@@ -41,6 +41,40 @@ fn loaded_view() -> DatasetView {
 }
 
 #[test]
+fn recolor_by_column_rebands_labels_filter_and_palette() {
+    let mut view = loaded_view();
+    let n_rows = view.loaded.as_ref().unwrap().dataset.n_rows();
+
+    // Re-band the colors on feature column 2 with 6 bands.
+    view.recolor_by_column(2, 6);
+    let loaded = view.loaded.as_ref().unwrap();
+    assert_eq!(loaded.dataset.label_names.len(), 6);
+    assert_eq!(
+        loaded.dataset.metadata.label_column.as_deref(),
+        Some("f2"),
+        "label column follows the banded column"
+    );
+    // The index matches the new labels and every band starts enabled/visible.
+    assert_eq!(loaded.index.n_rows, n_rows);
+    assert_eq!(view.enabled_labels.len(), 6);
+    assert_eq!(view.visible_rows.len(), n_rows);
+    assert_eq!(view.settings.label_colors.len(), 6);
+    assert!(view.take_render_dirty(), "recolor must trigger a GPU rebuild");
+
+    // Out-of-range columns and band counts are clamped/no-ops, not panics.
+    view.recolor_by_column(999, 6);
+    assert_eq!(view.loaded.as_ref().unwrap().dataset.label_names.len(), 6);
+    view.recolor_by_column(0, 1); // clamped up to 2 bands
+    assert_eq!(view.loaded.as_ref().unwrap().dataset.label_names.len(), 2);
+
+    // The View tab still renders after re-banding.
+    let ctx = egui::Context::default();
+    view.show_window = true;
+    view.tab = DatasetTab::View;
+    assert_eq!(run_frame(&ctx, &mut view), DatasetAction::None);
+}
+
+#[test]
 fn hidden_window_renders_nothing_and_returns_no_action() {
     let ctx = egui::Context::default();
     let mut view = DatasetView::new();

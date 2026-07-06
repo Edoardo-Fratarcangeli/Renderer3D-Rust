@@ -292,6 +292,36 @@ _version: 2
   es: p. ej. p, U, T (vacío = primero)
   fr: p. ex. p, U, T (vide = premier)
   de: z. B. p, U, T (leer = erstes)
+"dataset.color_bands":
+  en: 🎨 Color bands
+  it: 🎨 Bande di colore
+  es: 🎨 Bandas de color
+  fr: 🎨 Bandes de couleur
+  de: 🎨 Farbbänder
+"dataset.color_by":
+  en: Color by
+  it: Colora per
+  es: Colorear por
+  fr: Colorer par
+  de: Färben nach
+"dataset.bands":
+  en: Bands
+  it: Bande
+  es: Bandas
+  fr: Bandes
+  de: Bänder
+"dataset.apply_colors":
+  en: Apply bands
+  it: Applica bande
+  es: Aplicar bandas
+  fr: Appliquer les bandes
+  de: Bänder anwenden
+"dataset.recolored":
+  en: "colored by '%{column}' in %{bands} bands"
+  it: "colorato per '%{column}' in %{bands} bande"
+  es: "coloreado por '%{column}' en %{bands} bandas"
+  fr: "coloré par '%{column}' en %{bands} bandes"
+  de: "gefärbt nach '%{column}' in %{bands} Bändern"
 "dataset.cae_file_hint":
   en: CFD/FEM result — geometry kept as x/y/z, field shown as contour bands
   it: risultato CFD/FEM — geometria mantenuta su x/y/z, campo mostrato a bande di contorno
