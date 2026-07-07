@@ -4,6 +4,9 @@
 //! - NPZ: zip of NPY entries, stream-decompressed (features + optional labels).
 //! - CSV: streamed record by record through the `csv` reader.
 //! - IDX (MNIST-style): memory mapped, sibling label file auto-detected.
+//! - VTK / VTU / VTP / FRD: CFD & FEM solver results (see [`super::cae`]);
+//!   `max_rows` acts as a point budget applied by uniform striding and
+//!   `label_column` selects the result field colored as contour bands.
 //! - Parquet: behind the optional `parquet-support` feature.
 //!
 //! Entry point is [`load`], which dispatches on the file extension and
@@ -46,6 +49,9 @@ pub fn load(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         "csv" => load_csv(path, opts),
         "xlsx" | "xlsm" | "xls" | "ods" => load_excel(path, opts),
         "idx" | "idx3-ubyte" | "idx1-ubyte" | "ubyte" => load_idx(path, opts),
+        "vtk" => super::cae::load_vtk_legacy(path, opts),
+        "vtu" | "vtp" => super::cae::load_vtk_xml(path, opts),
+        "frd" => super::cae::load_frd(path, opts),
         #[cfg(feature = "parquet-support")]
         "parquet" => load_parquet(path, opts),
         #[cfg(not(feature = "parquet-support"))]

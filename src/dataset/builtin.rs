@@ -210,34 +210,16 @@ const FIELD_BANDS: usize = 10;
 /// Turn sampled 3D points + a per-point scalar field into a [`Dataset`] where
 /// the field is quantized into [`FIELD_BANDS`] contour bands stored as labels.
 ///
-/// This is the single place CAE generators share: color-by-label then renders
-/// the field as a banded FEM-style contour plot, and the band legend doubles as
-/// a per-isovalue visibility filter — all via the existing dataset pipeline.
+/// The quantization itself lives in [`super::cae::band_labels`], shared with
+/// the real CFD/FEM file importers: color-by-label then renders the field as
+/// a banded FEM-style contour plot, and the band legend doubles as a
+/// per-isovalue visibility filter — all via the existing dataset pipeline.
 fn field_dataset(name: &str, points: &[[f32; 3]], field: &[f32], unit: &str) -> Dataset {
-    let (mut min, mut max) = (f32::INFINITY, f32::NEG_INFINITY);
-    for &f in field {
-        min = min.min(f);
-        max = max.max(f);
-    }
-    let span = (max - min).max(1e-9);
-
     let mut data = Vec::with_capacity(points.len() * 3);
-    let mut labels = Vec::with_capacity(points.len());
-    for (p, &f) in points.iter().zip(field) {
+    for p in points {
         data.extend_from_slice(p);
-        let t = ((f - min) / span).clamp(0.0, 1.0);
-        let band = ((t * FIELD_BANDS as f32) as usize).min(FIELD_BANDS - 1);
-        labels.push(band as u32);
     }
-
-    // Band legend reads like a contour scale: low → high physical values.
-    let names = (0..FIELD_BANDS)
-        .map(|i| {
-            let lo = min + span * (i as f32 / FIELD_BANDS as f32);
-            let hi = min + span * ((i + 1) as f32 / FIELD_BANDS as f32);
-            format!("{lo:.2}–{hi:.2} {unit}")
-        })
-        .collect();
+    let (labels, names) = super::cae::band_labels(field, FIELD_BANDS, unit);
     finish(name, 3, data, labels, names)
 }
 

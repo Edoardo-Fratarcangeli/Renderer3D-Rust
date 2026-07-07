@@ -5,6 +5,7 @@
 //! unit-testable and reusable outside the UI.
 //!
 //! - [`loader`] — multi-format import (NPY/NPZ/CSV/IDX, optional Parquet)
+//! - [`cae`] — CFD / FEM result files (VTK legacy, VTU/VTP, CalculiX FRD)
 //! - [`metadata`] — JSON-persisted dataset description
 //! - [`index`] — label index + filter/search evaluation
 //! - [`preprocessor`] — 3D projection (PCA) with a disk cache
@@ -12,6 +13,7 @@
 //! - [`builtin`] — deterministic synthetic benchmark generators
 
 pub mod builtin;
+pub mod cae;
 pub mod export;
 pub mod index;
 pub mod loader;
@@ -198,6 +200,29 @@ impl Dataset {
     pub fn label_name(&self, row: usize) -> &str {
         &self.label_names[self.labels[row] as usize]
     }
+
+    /// Decode every value of one feature column (streams rows, so this works
+    /// for memory-mapped sources without materializing the whole matrix).
+    pub fn column_values(&self, col: usize) -> Vec<f32> {
+        assert!(col < self.n_cols(), "column {} out of range", col);
+        (0..self.n_rows()).map(|r| self.value(r, col)).collect()
+    }
+
+    /// Re-derive the labels as `bands` contour bands of feature column `col`,
+    /// updating the vocabulary, the label column and the label stats.
+    ///
+    /// This is what makes every part of an imported dataset drivable in the
+    /// render: any column — a CFD/FEM field, a single vector component, a
+    /// magnitude, even a coordinate — can become the color/filter dimension
+    /// after the import, without touching the file again.
+    pub fn relabel_by_column(&mut self, col: usize, bands: usize) {
+        let values = self.column_values(col);
+        let (labels, names) = cae::band_labels(&values, bands, "");
+        self.labels = labels;
+        self.label_names = names;
+        self.metadata.label_column = self.metadata.column_names.get(col).cloned();
+        self.metadata.set_label_stats(&self.labels, &self.label_names);
+    }
 }
 
 /// Stable 64-bit content key for cache filenames (FNV-1a, no extra deps).
@@ -275,6 +300,47 @@ mod tests {
         assert!(DatasetError::InvalidQuery("z".into())
             .to_string()
             .contains("invalid query"));
+    }
+
+    #[test]
+    fn relabel_by_column_rebands_any_column() {
+        let mut ds = Dataset {
+            metadata: DatasetMetadata::new("rb", "builtin", 4, 2),
+            source: FeatureSource::InMemory(vec![
+                0.0, 10.0, //
+                1.0, 20.0, //
+                2.0, 30.0, //
+                3.0, 40.0,
+            ]),
+            labels: vec![0, 0, 0, 0],
+            label_names: vec!["unlabeled".into()],
+        };
+        ds.metadata.column_names = vec!["x".into(), "p".into()];
+
+        ds.relabel_by_column(1, 4);
+        assert_eq!(ds.label_names.len(), 4);
+        assert_eq!(ds.labels, vec![0, 1, 2, 3]);
+        assert_eq!(ds.metadata.label_column.as_deref(), Some("p"));
+        // Stats follow the new vocabulary.
+        assert_eq!(ds.metadata.labels.len(), 4);
+        assert!(ds.metadata.labels.iter().all(|s| s.count == 1));
+
+        // Re-band on the other column with a different resolution.
+        ds.relabel_by_column(0, 2);
+        assert_eq!(ds.label_names.len(), 2);
+        assert_eq!(ds.labels, vec![0, 0, 1, 1]);
+        assert_eq!(ds.metadata.label_column.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn column_values_decodes_one_column() {
+        let ds = Dataset {
+            metadata: DatasetMetadata::new("cv", "builtin", 2, 3),
+            source: FeatureSource::InMemory(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            labels: vec![0, 0],
+            label_names: vec!["only".into()],
+        };
+        assert_eq!(ds.column_values(1), vec![2.0, 5.0]);
     }
 
     #[test]

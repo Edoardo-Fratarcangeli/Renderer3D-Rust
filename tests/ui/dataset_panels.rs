@@ -34,9 +34,44 @@ fn loaded_view() -> DatasetView {
         source: ImportSource::Builtin("blobs"),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Pca),
+        cae_field: None,
     });
     assert!(view.loaded.is_some(), "builtin import is synchronous");
     view
+}
+
+#[test]
+fn recolor_by_column_rebands_labels_filter_and_palette() {
+    let mut view = loaded_view();
+    let n_rows = view.loaded.as_ref().unwrap().dataset.n_rows();
+
+    // Re-band the colors on feature column 2 with 6 bands.
+    view.recolor_by_column(2, 6);
+    let loaded = view.loaded.as_ref().unwrap();
+    assert_eq!(loaded.dataset.label_names.len(), 6);
+    assert_eq!(
+        loaded.dataset.metadata.label_column.as_deref(),
+        Some("f2"),
+        "label column follows the banded column"
+    );
+    // The index matches the new labels and every band starts enabled/visible.
+    assert_eq!(loaded.index.n_rows, n_rows);
+    assert_eq!(view.enabled_labels.len(), 6);
+    assert_eq!(view.visible_rows.len(), n_rows);
+    assert_eq!(view.settings.label_colors.len(), 6);
+    assert!(view.take_render_dirty(), "recolor must trigger a GPU rebuild");
+
+    // Out-of-range columns and band counts are clamped/no-ops, not panics.
+    view.recolor_by_column(999, 6);
+    assert_eq!(view.loaded.as_ref().unwrap().dataset.label_names.len(), 6);
+    view.recolor_by_column(0, 1); // clamped up to 2 bands
+    assert_eq!(view.loaded.as_ref().unwrap().dataset.label_names.len(), 2);
+
+    // The View tab still renders after re-banding.
+    let ctx = egui::Context::default();
+    view.show_window = true;
+    view.tab = DatasetTab::View;
+    assert_eq!(run_frame(&ctx, &mut view), DatasetAction::None);
 }
 
 #[test]
@@ -92,6 +127,7 @@ fn projection_dims_control_the_active_axes() {
             dims: 2,
             axes: [0, 1, 2],
         },
+        cae_field: None,
     });
     let pts = &view2d.loaded.as_ref().unwrap().projection.points;
     assert!(pts.iter().all(|p| p[2] == 0.0), "2D import must flatten z");
@@ -107,6 +143,7 @@ fn projection_dims_control_the_active_axes() {
             dims: 1,
             axes: [0, 1, 2],
         },
+        cae_field: None,
     });
     let pts = &view1d.loaded.as_ref().unwrap().projection.points;
     assert!(
@@ -161,6 +198,7 @@ fn unknown_builtin_reports_error_status() {
         source: ImportSource::Builtin("not_a_dataset"),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Pca),
+        cae_field: None,
     });
     assert!(view.loaded.is_none());
     assert_eq!(view.import.status.as_ref().unwrap().kind, StatusKind::Error);
@@ -192,6 +230,7 @@ fn file_import_runs_on_worker_thread_and_installs() {
         source: ImportSource::Path(csv),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Direct),
+        cae_field: None,
     });
     assert!(view.is_loading());
 
@@ -215,6 +254,7 @@ fn failed_file_import_surfaces_error_status() {
         source: ImportSource::Path("/definitely/missing.csv".into()),
         max_rows: None,
         projection: ProjectionSpec::full(ProjectionMethod::Pca),
+        cae_field: None,
     });
     pump_until_idle(&ctx, &mut view, 30);
     assert!(view.loaded.is_none());

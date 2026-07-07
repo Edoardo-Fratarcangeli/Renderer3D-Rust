@@ -19,6 +19,7 @@ anyhow = "1.0"
 memmap2 = "0.9"                                        # Memory-mapped large dataset files
 csv = "1.3"                                            # Streaming CSV loader
 zip = { version = "2", default-features = false, features = ["deflate"] } # NPZ archives
+flate2 = "1"                                           # zlib-compressed VTK XML data arrays
 parquet = { version = "53", optional = true }          # Optional Parquet loader
 arrow = { version = "59", optional = true }            # Optional Arrow IPC stream decoder
 calamine = "0.26"                                      # Excel (xlsx/xls/ods) geometry tables
