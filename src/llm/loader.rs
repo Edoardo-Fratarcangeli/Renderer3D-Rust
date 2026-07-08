@@ -118,7 +118,7 @@ pub fn from_json(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
         })
         .collect();
 
-    let mut graph = NetworkGraph { name: model.name, layers, edges: vec![], estimated_vram_gb: None, moe_config: None };
+    let mut graph = NetworkGraph { name: model.name, layers, edges: vec![], estimated_vram_gb: None, moe_config: None, data_graph: false };
     graph.layout();
     Ok((graph, tokenizer))
 }
@@ -203,7 +203,7 @@ pub fn from_gguf(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
     let spec   = ArchSpec::from_metadata(family, &arch, &numeric_meta);
     let (layers, vram_gb, moe_config) = crate::llm::arch::build_layers(&spec);
 
-    let mut graph = NetworkGraph { name, layers, edges: vec![], estimated_vram_gb: Some(vram_gb), moe_config };
+    let mut graph = NetworkGraph { name, layers, edges: vec![], estimated_vram_gb: Some(vram_gb), moe_config, data_graph: false };
     graph.layout();
     Ok((graph, tokenizer))
 }
@@ -226,7 +226,7 @@ fn capped_nodes(weights: &[f32]) -> Vec<Node> {
     let max = sampled.iter().cloned().fold(0.0f32, f32::max).max(1e-8);
     sampled
         .into_iter()
-        .map(|w| Node { position: [0.0; 3], weight_magnitude: w / max })
+        .map(|w| Node::new(w / max))
         .collect()
 }
 

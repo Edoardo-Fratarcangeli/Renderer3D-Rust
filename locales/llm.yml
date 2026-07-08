@@ -285,11 +285,11 @@ _version: 2
   de: "🧠 Neuronale Netze"
 
 "llm.net_hint":
-  en: "Build a network architecture or load a .gguf/.json model — visualized in 3D."
-  it: "Costruisci un'architettura di rete o carica un modello .gguf/.json — visualizzato in 3D."
-  es: "Crea una arquitectura de red o carga un modelo .gguf/.json — visualizado en 3D."
-  fr: "Construisez une architecture ou chargez un modèle .gguf/.json — visualisé en 3D."
-  de: "Erstelle eine Netzarchitektur oder lade ein .gguf/.json-Modell — in 3D dargestellt."
+  en: "Build an architecture, load a .gguf/.json model or import a graph file (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualized in 3D."
+  it: "Costruisci un'architettura, carica un modello .gguf/.json o importa un file di grafo (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualizzato in 3D."
+  es: "Crea una arquitectura, carga un modelo .gguf/.json o importa un grafo (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualizado en 3D."
+  fr: "Construisez une architecture, chargez un modèle .gguf/.json ou importez un graphe (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualisé en 3D."
+  de: "Erstelle eine Architektur, lade ein .gguf/.json-Modell oder importiere eine Graphdatei (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — in 3D dargestellt."
 
 "llm.net_arch":
   en: Architecture
@@ -353,3 +353,63 @@ _version: 2
   es: Avanzado…
   fr: Avancé…
   de: Erweitert…
+"llm.distance_scale":
+  en: Distance scale
+  it: Scala distanze
+  es: Escala de distancias
+  fr: Échelle des distances
+  de: Abstandsskala
+"llm.edge_width":
+  en: Link width
+  it: Spessore link
+  es: Grosor de enlaces
+  fr: Épaisseur des liens
+  de: Kantenbreite
+"llm.edge_color":
+  en: Link color
+  it: Colore link
+  es: Color de enlaces
+  fr: Couleur des liens
+  de: Kantenfarbe
+"llm.nodes_table":
+  en: "🕸 Nodes — per-node size & color"
+  it: "🕸 Nodi — dimensione e colore per nodo"
+  es: "🕸 Nodos — tamaño y color por nodo"
+  fr: "🕸 Nœuds — taille et couleur par nœud"
+  de: "🕸 Knoten — Größe und Farbe pro Knoten"
+"llm.node_filter":
+  en: filter by label
+  it: filtra per etichetta
+  es: filtrar por etiqueta
+  fr: filtrer par étiquette
+  de: nach Label filtern
+"llm.node_label":
+  en: Label
+  it: Etichetta
+  es: Etiqueta
+  fr: Étiquette
+  de: Label
+"llm.node_degree":
+  en: Degree
+  it: Grado
+  es: Grado
+  fr: Degré
+  de: Grad
+"llm.node_size":
+  en: Size
+  it: Dimensione
+  es: Tamaño
+  fr: Taille
+  de: Größe
+"llm.node_color":
+  en: Color
+  it: Colore
+  es: Color
+  fr: Couleur
+  de: Farbe
+"llm.nodes_truncated":
+  en: "showing the first %{max} matching nodes — refine the filter to reach the rest"
+  it: "mostrati i primi %{max} nodi corrispondenti — affina il filtro per raggiungere gli altri"
+  es: "se muestran los primeros %{max} nodos — afina el filtro para llegar al resto"
+  fr: "affichage des %{max} premiers nœuds — affinez le filtre pour atteindre les autres"
+  de: "die ersten %{max} passenden Knoten — Filter verfeinern, um den Rest zu erreichen"

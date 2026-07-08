@@ -112,6 +112,7 @@ pub fn load_model_graph(model_name: &str) -> Result<(NetworkGraph, Option<Tokeni
         edges:  vec![],
         estimated_vram_gb: Some(vram_gb),
         moe_config,
+        data_graph: false,
     };
     graph.layout();
     Ok((graph, None))

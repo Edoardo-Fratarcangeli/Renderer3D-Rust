@@ -254,7 +254,7 @@ mod tests {
             name: format!("{kind:?}"),
             kind,
             nodes: (0..n)
-                .map(|_| Node { position: [0.0; 3], weight_magnitude: 0.5 })
+                .map(|_| Node::new(0.5))
                 .collect(),
         };
         let mut g = NetworkGraph {
@@ -267,6 +267,7 @@ mod tests {
             edges: vec![],
             estimated_vram_gb: None,
             moe_config: None,
+            data_graph: false,
         };
         g.layout();
         g

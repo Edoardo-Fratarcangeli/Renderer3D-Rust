@@ -142,6 +142,24 @@ pub struct Node {
     pub position: [f32; 3],
     /// Normalized importance weight ∈ [0, 1]; drives sphere radius.
     pub weight_magnitude: f32,
+    /// Explicit per-node color (from graph files or table edits); None means
+    /// the layer color (or the accent override) applies.
+    pub color: Option<[f32; 3]>,
+    /// Node label from graph files (id or label attribute); None for
+    /// neural-network nodes, which are addressed by layer + index.
+    pub label: Option<String>,
+}
+
+impl Node {
+    /// Unpositioned, unlabeled node with the given normalized weight.
+    pub fn new(weight_magnitude: f32) -> Self {
+        Node {
+            position: [0.0; 3],
+            weight_magnitude,
+            color: None,
+            label: None,
+        }
+    }
 }
 
 pub struct Layer {
@@ -168,12 +186,21 @@ pub struct NetworkGraph {
     pub estimated_vram_gb: Option<f64>,
     /// MoE configuration if the model uses Mixture of Experts.
     pub moe_config: Option<MoeConfig>,
+    /// True when this graph came from a graph data file (GraphML, GEXF, DOT,
+    /// …) rather than a neural-network description: positions and edges are
+    /// real data — [`Self::layout`] must not overwrite them — and the UI
+    /// offers the per-node editing table.
+    pub data_graph: bool,
 }
 
 impl NetworkGraph {
     /// Compute 3D positions for all nodes and build a representative edge set.
-    /// Call once after loading; mutates positions in place.
+    /// Call once after loading; mutates positions in place. No-op for data
+    /// graphs, whose positions and edges come from the file / graph layout.
     pub fn layout(&mut self) {
+        if self.data_graph {
+            return;
+        }
         for (layer_idx, layer) in self.layers.iter_mut().enumerate() {
             let x = layer_idx as f32 * LAYER_SPACING;
             let n = layer.nodes.len();
