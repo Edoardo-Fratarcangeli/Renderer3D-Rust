@@ -236,16 +236,13 @@ fn attn_nodes(spec: &ArchSpec) -> Vec<Node> {
     }
     let group = (spec.n_heads / spec.n_kv_heads).max(1);
     (0..total)
-        .map(|i| Node {
-            position: [0.0; 3],
-            weight_magnitude: if i % group == 0 { 0.55 } else { 0.80 },
-        })
+        .map(|i| Node::new(if i % group == 0 { 0.55 } else { 0.80 }))
         .collect()
 }
 
 fn uniform_nodes(n: usize, w: f32) -> Vec<Node> {
     (0..n.min(MAX_NODES_PER_LAYER))
-        .map(|_| Node { position: [0.0; 3], weight_magnitude: w })
+        .map(|_| Node::new(w))
         .collect()
 }
 

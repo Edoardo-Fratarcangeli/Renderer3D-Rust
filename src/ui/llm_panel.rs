@@ -28,6 +28,7 @@ use cgmath::{InnerSpace, Matrix4};
 
 use crate::llm::activation::{ActivationMode, ActivationState};
 use crate::llm::exporter::AnimExporter;
+use crate::llm::graph_import;
 use crate::llm::loader;
 use crate::llm::network::{
     LayerKind, NetworkGraph, NodeStyle, NODE_BASE_SCALE, NODE_MAX_SCALE, NODE_SPACING,
@@ -68,6 +69,9 @@ type LayerSummary = (String, LayerKind, usize, (f32, f32, f32));
 pub struct LlmRenderData {
     pub node_instances: Vec<InstanceRaw>,
     pub edge_vertices:  Vec<Vertex>,
+    /// Solid edge beams (stretched cubes), used instead of line-list edges
+    /// when [`LlmView::edge_width`] > 0 so links have configurable thickness.
+    pub edge_solid_instances: Vec<InstanceRaw>,
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
@@ -102,6 +106,18 @@ pub struct LlmView {
     pub accent_color: [f32; 3],
     /// Grid cell size used to snap node positions in [`NodeStyle::Voxels`].
     pub voxel_grid: f32,
+    /// Multiplier on node positions: spreads or compacts the whole graph
+    /// without touching the stored layout ("scala distanze").
+    pub distance_scale: f32,
+    /// Edge thickness in world units; 0 draws classic 1-px lines, > 0 draws
+    /// solid instanced beams ("dimensione link").
+    pub edge_width: f32,
+    /// Override the automatic edge coloring with [`Self::edge_color`].
+    pub edge_color_enabled: bool,
+    /// User edge color (linear RGB) used when [`Self::edge_color_enabled`].
+    pub edge_color: [f32; 3],
+    /// Filter text of the per-node editing table (data graphs only).
+    pub node_table_filter: String,
 
     render_dirty:     bool,
     animation_active: bool,
@@ -169,6 +185,11 @@ impl LlmView {
             accent_enabled:   false,
             accent_color:     [0.20, 0.65, 1.00],
             voxel_grid:       NODE_SPACING,
+            distance_scale:   1.0,
+            edge_width:       0.0,
+            edge_color_enabled: false,
+            edge_color:       [0.25, 0.55, 0.95],
+            node_table_filter: String::new(),
             render_dirty:     false,
             animation_active: false,
             worker:           None,
@@ -250,11 +271,34 @@ impl LlmView {
                         .and_then(|e| e.to_str())
                         .unwrap_or("")
                         .to_ascii_lowercase();
+                    let stem = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("graph")
+                        .to_string();
                     match ext.as_str() {
                         "gguf" => loader::from_gguf(&data).map_err(|e| e.to_string()),
-                        "json" => loader::from_json(&data).map_err(|e| e.to_string()),
-                        other  => Err(format!(
-                            "Unsupported model format '.{other}'. Use .json or .gguf"
+                        // `.json` is ambiguous: try the neural-network model
+                        // description first, then the JSON graph shapes
+                        // (node-link, Cytoscape, JSON-LD, RDF/JSON).
+                        "json" => loader::from_json(&data).map_err(|e| e.to_string()).or_else(
+                            |model_err| {
+                                graph_import::from_json_auto(&data, &stem)
+                                    .map(|g| (g, None))
+                                    .map_err(|graph_err| {
+                                        format!(
+                                            "not a model JSON ({model_err}) nor a graph JSON \
+                                             ({graph_err})"
+                                        )
+                                    })
+                            },
+                        ),
+                        ext if graph_import::is_graph_extension(ext) => {
+                            graph_import::load_graph(&data, ext, &stem).map(|g| (g, None))
+                        }
+                        other => Err(format!(
+                            "Unsupported format '.{other}'. Models: .json/.gguf — graphs: \
+                             .json/.cyjs/.graphml/.gexf/.gdf/.dot/.gv/.tgf/.net/.sif/.jsonld/.rj"
                         )),
                     }
                 });
@@ -568,7 +612,9 @@ impl LlmView {
     }
 
     pub fn centroid(&self) -> Option<[f32; 3]> {
-        self.graph.as_ref()?.centroid()
+        let c = self.graph.as_ref()?.centroid()?;
+        let ds = self.distance_scale.max(0.01);
+        Some([c[0] * ds, c[1] * ds, c[2] * ds])
     }
 
     /// Primitive mesh the renderer should instance for node bodies.
@@ -628,6 +674,7 @@ impl LlmView {
         }
 
         let mut best: Option<((usize, usize), f32)> = None;
+        let ds = self.distance_scale.max(0.01);
 
         for (li, layer) in graph.layers.iter().enumerate() {
             if !self.is_layer_visible(li, layer.kind) {
@@ -635,9 +682,9 @@ impl LlmView {
             }
             for (ni, node) in layer.nodes.iter().enumerate() {
                 let c = cgmath::Vector3::new(
-                    node.position[0],
-                    node.position[1],
-                    node.position[2],
+                    node.position[0] * ds,
+                    node.position[1] * ds,
+                    node.position[2] * ds,
                 );
                 let scale = (NODE_BASE_SCALE
                     + node.weight_magnitude * (NODE_MAX_SCALE - NODE_BASE_SCALE))
@@ -671,14 +718,20 @@ impl LlmView {
     // ── GPU render data ─────────────────────────────────────────────────────
 
     pub fn build_render_data(&mut self) -> LlmRenderData {
+        let empty = || LlmRenderData {
+            node_instances: vec![],
+            edge_vertices: vec![],
+            edge_solid_instances: vec![],
+        };
         if !self.visible {
-            return LlmRenderData { node_instances: vec![], edge_vertices: vec![] };
+            return empty();
         }
         let Some(graph) = &self.graph else {
-            return LlmRenderData { node_instances: vec![], edge_vertices: vec![] };
+            return empty();
         };
 
         let now = Instant::now();
+        let ds = self.distance_scale.max(0.01);
 
         let style = self.render_style;
         let style_mult = style.scale_mult();
@@ -686,12 +739,17 @@ impl LlmView {
         for (li, layer) in graph.layers.iter().enumerate() {
             if !self.is_layer_visible(li, layer.kind) { continue; }
             // Accent color overrides the per-kind palette when enabled.
-            let base_col = if self.accent_enabled {
+            let layer_col = if self.accent_enabled {
                 self.accent_color
             } else {
                 layer.kind.base_color()
             };
             for (ni, node) in layer.nodes.iter().enumerate() {
+                // Per-node file/table colors win unless the accent override is on.
+                let base_col = match (self.accent_enabled, node.color) {
+                    (false, Some(c)) => c,
+                    _ => layer_col,
+                };
                 let fwd  = self.activation.as_ref().map(|a| a.glow_at(li, ni, now)).unwrap_or(0.0);
                 let back = self.activation.as_ref().map(|a| a.back_glow_at(li, ni, now)).unwrap_or(0.0);
                 let total_glow = (fwd + back).min(1.0);
@@ -716,10 +774,15 @@ impl LlmView {
 
                 // In voxel mode snap node centers onto a regular grid so the
                 // network reads as stacked blocks instead of free spheres.
+                let scaled = [
+                    node.position[0] * ds,
+                    node.position[1] * ds,
+                    node.position[2] * ds,
+                ];
                 let p = if style == NodeStyle::Voxels {
-                    snap_to_grid(node.position, self.voxel_grid)
+                    snap_to_grid(scaled, self.voxel_grid)
                 } else {
-                    node.position
+                    scaled
                 };
                 let model = Matrix4::from_translation(cgmath::Vector3::new(p[0], p[1], p[2]))
                     * Matrix4::from_scale(scale);
@@ -751,6 +814,7 @@ impl LlmView {
         }
 
         let mut edge_vertices = Vec::new();
+        let mut edge_solid_instances = Vec::new();
         for edge in &graph.edges {
             let Some(fl)  = graph.layers.get(edge.from_layer)  else { continue };
             let Some(tl)  = graph.layers.get(edge.to_layer)    else { continue };
@@ -774,21 +838,150 @@ impl LlmView {
 
             let fwd_glow  = (gf + gt) * 0.5;
             let back_glow = (bf + bt) * 0.5;
-            // Passive dim base is darker for low-importance edges, brighter for high.
-            let base_dim = lerp3([0.03, 0.04, 0.09], [0.10, 0.14, 0.26], edge.importance);
-            let base_lit = lerp3(CYAN, WHITE, edge.importance * 0.5);
+            // Passive dim base is darker for low-importance edges, brighter
+            // for high; the user edge color replaces the automatic ramp.
+            let (base_dim, base_lit) = if self.edge_color_enabled {
+                let c = self.edge_color;
+                (
+                    lerp3([c[0] * 0.25, c[1] * 0.25, c[2] * 0.25], c, edge.importance),
+                    c,
+                )
+            } else {
+                (
+                    lerp3([0.03, 0.04, 0.09], [0.10, 0.14, 0.26], edge.importance),
+                    lerp3(CYAN, WHITE, edge.importance * 0.5),
+                )
+            };
             let col = if back_glow > fwd_glow {
                 lerp3(lerp3(base_dim, ORANGE, edge.importance), ORANGE, back_glow)
             } else {
                 lerp3(base_dim, base_lit, fwd_glow.max(edge.importance * 0.25))
             };
 
-            let normal = [0.0f32, 0.0, 1.0];
-            edge_vertices.push(Vertex { position: fn_.position, color: col, normal });
-            edge_vertices.push(Vertex { position: tn.position,  color: col, normal });
+            let a = [fn_.position[0] * ds, fn_.position[1] * ds, fn_.position[2] * ds];
+            let b = [tn.position[0] * ds, tn.position[1] * ds, tn.position[2] * ds];
+            if self.edge_width > 0.0 {
+                if let Some(instance) = beam_instance(a, b, self.edge_width, col) {
+                    edge_solid_instances.push(instance);
+                }
+            } else {
+                let normal = [0.0f32, 0.0, 1.0];
+                edge_vertices.push(Vertex { position: a, color: col, normal });
+                edge_vertices.push(Vertex { position: b, color: col, normal });
+            }
         }
 
-        LlmRenderData { node_instances, edge_vertices }
+        LlmRenderData { node_instances, edge_vertices, edge_solid_instances }
+    }
+
+    // ── Editable nodes table (data graphs) ──────────────────────────────────
+
+    /// Per-node editing table for imported graph files: label, degree, and
+    /// live-editable size and color per node. This is what makes every part
+    /// of a graph import configurable after load, like the dataset pipeline.
+    fn nodes_table_ui(&mut self, ui: &mut egui::Ui) {
+        const MAX_TABLE_ROWS: usize = 500;
+        if !self.graph.as_ref().is_some_and(|g| g.data_graph) {
+            return;
+        }
+        ui.add_space(6.0);
+        let heading = t!("llm.nodes_table").to_string();
+        let filter_hint = t!("llm.node_filter").to_string();
+        let mut dirty = false;
+        egui::CollapsingHeader::new(heading)
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("🔍");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.node_table_filter)
+                            .desired_width(180.0)
+                            .hint_text(filter_hint),
+                    );
+                });
+                let filter = self.node_table_filter.trim().to_ascii_lowercase();
+                let Some(graph) = self.graph.as_mut() else { return };
+
+                // Degree from the real edge list (data graphs use layer 0).
+                let n = graph.layers[0].nodes.len();
+                let mut degree = vec![0u32; n];
+                for e in &graph.edges {
+                    if let Some(d) = degree.get_mut(e.from_node) {
+                        *d += 1;
+                    }
+                    if let Some(d) = degree.get_mut(e.to_node) {
+                        *d += 1;
+                    }
+                }
+                let layer_col = graph.layers[0].kind.base_color();
+
+                let mut shown = 0usize;
+                egui::ScrollArea::vertical()
+                    .max_height(230.0)
+                    .show(ui, |ui| {
+                        egui::Grid::new("graph_nodes_grid")
+                            .num_columns(4)
+                            .striped(true)
+                            .spacing([14.0, 4.0])
+                            .show(ui, |ui| {
+                                for h in [
+                                    t!("llm.node_label"),
+                                    t!("llm.node_degree"),
+                                    t!("llm.node_size"),
+                                    t!("llm.node_color"),
+                                ] {
+                                    ui.label(egui::RichText::new(h.to_string()).weak().small());
+                                }
+                                ui.end_row();
+                                for (ni, node) in graph.layers[0].nodes.iter_mut().enumerate() {
+                                    let label = node
+                                        .label
+                                        .clone()
+                                        .unwrap_or_else(|| ni.to_string());
+                                    if !filter.is_empty()
+                                        && !label.to_ascii_lowercase().contains(&filter)
+                                    {
+                                        continue;
+                                    }
+                                    if shown >= MAX_TABLE_ROWS {
+                                        break;
+                                    }
+                                    shown += 1;
+                                    ui.label(label);
+                                    ui.label(degree.get(ni).copied().unwrap_or(0).to_string());
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut node.weight_magnitude)
+                                                .range(0.05..=1.0)
+                                                .speed(0.01),
+                                        )
+                                        .changed()
+                                    {
+                                        dirty = true;
+                                    }
+                                    let mut c = node.color.unwrap_or(layer_col);
+                                    if ui.color_edit_button_rgb(&mut c).changed() {
+                                        node.color = Some(c);
+                                        dirty = true;
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                    });
+                if shown >= MAX_TABLE_ROWS {
+                    ui.label(
+                        egui::RichText::new(
+                            t!("llm.nodes_truncated", max = MAX_TABLE_ROWS.to_string())
+                                .to_string(),
+                        )
+                        .weak()
+                        .small(),
+                    );
+                }
+            });
+        if dirty {
+            self.render_dirty = true;
+        }
     }
 
     // ── egui UI ─────────────────────────────────────────────────────────────
@@ -1008,10 +1201,49 @@ impl LlmView {
             });
 
             ui.add_space(6.0);
-            ui.add(
-                egui::Slider::new(&mut self.node_scale_mult, 0.4..=3.0)
-                    .text(t!("llm.node_scale").to_string()),
-            );
+            if ui
+                .add(
+                    egui::Slider::new(&mut self.node_scale_mult, 0.4..=3.0)
+                        .text(t!("llm.node_scale").to_string()),
+                )
+                .changed()
+            {
+                self.mark_dirty();
+            }
+            if ui
+                .add(
+                    egui::Slider::new(&mut self.distance_scale, 0.2..=5.0)
+                        .logarithmic(true)
+                        .text(t!("llm.distance_scale").to_string()),
+                )
+                .changed()
+            {
+                self.mark_dirty();
+            }
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.edge_width, 0.0..=0.20)
+                            .text(t!("llm.edge_width").to_string()),
+                    )
+                    .changed()
+                {
+                    self.mark_dirty();
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(&mut self.edge_color_enabled, t!("llm.edge_color").to_string())
+                    .changed()
+                {
+                    self.mark_dirty();
+                }
+                ui.add_enabled_ui(self.edge_color_enabled, |ui| {
+                    if ui.color_edit_button_rgb(&mut self.edge_color).changed() {
+                        self.mark_dirty();
+                    }
+                });
+            });
             ui.add(
                 egui::Slider::new(&mut self.wave_speed, 0.25..=4.0)
                     .text(t!("llm.wave_speed").to_string()),
@@ -1032,6 +1264,8 @@ impl LlmView {
                 }
             });
         });
+
+        self.nodes_table_ui(ui);
 
         // Loss curve (shown below sliders when training steps have been taken)
         if !self.loss_history.is_empty() {
@@ -1317,6 +1551,38 @@ impl LlmView {
 
 /// Snap a world-space position onto a regular grid of cell size `g`.
 #[inline]
+/// Instance matrix for a solid edge beam: a unit cube stretched from `a` to
+/// `b` with square cross-section `width`. None for degenerate (zero-length)
+/// edges such as self-loops on coincident nodes.
+fn beam_instance(a: [f32; 3], b: [f32; 3], width: f32, color: [f32; 3]) -> Option<InstanceRaw> {
+    use cgmath::Vector3;
+    let d = Vector3::new(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    let len = d.magnitude();
+    if len < 1e-6 {
+        return None;
+    }
+    let dir = d / len;
+    // Any axis not parallel to the edge yields a stable cross-section basis.
+    let up = if dir.x.abs() < 0.9 {
+        Vector3::unit_x()
+    } else {
+        Vector3::unit_y()
+    };
+    let u = dir.cross(up).normalize();
+    let v = dir.cross(u);
+    let mid = Vector3::new((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5);
+    let model = Matrix4::from_cols(
+        (dir * len).extend(0.0),
+        (u * width).extend(0.0),
+        (v * width).extend(0.0),
+        mid.extend(1.0),
+    );
+    Some(InstanceRaw {
+        model: model.into(),
+        color: [color[0], color[1], color[2], 1.0],
+    })
+}
+
 fn snap_to_grid(p: [f32; 3], g: f32) -> [f32; 3] {
     if g <= 1e-4 {
         return p;

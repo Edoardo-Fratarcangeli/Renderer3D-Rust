@@ -163,6 +163,8 @@ pub struct State {
     pub llm_view: crate::ui::llm_panel::LlmView,
     llm_node_batch: Option<(wgpu::Buffer, u32)>,
     llm_edge_buf: Option<(wgpu::Buffer, u32)>,
+    /// Solid edge beams (instanced cubes) when the LLM/graph edge width > 0.
+    llm_edge_solid_batch: Option<(wgpu::Buffer, u32)>,
 
     // Imported 3D solid models (STL/OBJ/glTF), keyed by scene-object id.
     pub custom_meshes: std::collections::HashMap<usize, CustomMesh>,
@@ -611,6 +613,7 @@ impl State {
             llm_view: crate::ui::llm_panel::LlmView::new(),
             llm_node_batch: None,
             llm_edge_buf: None,
+            llm_edge_solid_batch: None,
         })
     }
 
@@ -2013,6 +2016,7 @@ impl State {
             self.llm_view.clear();
             self.llm_node_batch = None;
             self.llm_edge_buf   = None;
+            self.llm_edge_solid_batch = None;
         }
 
         // Kick off a 3D-model import requested from the Solids window.
@@ -2092,6 +2096,17 @@ impl State {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
                 self.llm_edge_buf = Some((buf, data.edge_vertices.len() as u32));
+            }
+            if data.edge_solid_instances.is_empty() {
+                self.llm_edge_solid_batch = None;
+            } else {
+                let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("LLM Edge Beam Instance Buffer"),
+                    contents: bytemuck::cast_slice(&data.edge_solid_instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                self.llm_edge_solid_batch =
+                    Some((buf, data.edge_solid_instances.len() as u32));
             }
         }
 
@@ -2456,6 +2471,18 @@ impl State {
                 render_pass.set_vertex_buffer(0, edge_buf.slice(..));
                 render_pass.set_vertex_buffer(1, single_instance_buffer.slice(..));
                 render_pass.draw(0..*edge_count, 0..1);
+            }
+
+            // Draw solid edge beams (instanced cubes) when edge width > 0.
+            if let Some((beam_buf, beam_count)) = &self.llm_edge_solid_batch {
+                render_pass.set_pipeline(&self.render_pipeline);
+                render_pass.set_vertex_buffer(0, self.cube_mesh.vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, beam_buf.slice(..));
+                render_pass.set_index_buffer(
+                    self.cube_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                render_pass.draw_indexed(0..self.cube_mesh.num_indices, 0, 0..*beam_count);
             }
 
             // Draw LLM/network nodes (triangle pipeline, instanced). The body

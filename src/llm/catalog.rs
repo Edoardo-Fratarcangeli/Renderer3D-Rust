@@ -215,6 +215,7 @@ impl NetArch {
             edges: vec![],
             estimated_vram_gb: None,
             moe_config: None,
+            data_graph: false,
         };
         graph.layout();
         graph
@@ -232,7 +233,7 @@ fn nodes(n: usize, w: f32) -> Vec<Node> {
             // Cheap deterministic jitter in [-0.12, 0.12].
             let h = ((i as u32).wrapping_mul(2654435761) >> 24) as f32 / 255.0;
             let weight = (w + (h - 0.5) * 0.24).clamp(0.05, 1.0);
-            Node { position: [0.0; 3], weight_magnitude: weight }
+            Node::new(weight)
         })
         .collect()
 }
