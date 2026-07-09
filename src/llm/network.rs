@@ -148,6 +148,10 @@ pub struct Node {
     /// Node label from graph files (id or label attribute); None for
     /// neural-network nodes, which are addressed by layer + index.
     pub label: Option<String>,
+    /// The node's internal data: every attribute the source file carried
+    /// that is not already mapped (label / position / size / color), as
+    /// key–value pairs shown by the node inspector.
+    pub attrs: Vec<(String, String)>,
 }
 
 impl Node {
@@ -158,6 +162,7 @@ impl Node {
             weight_magnitude,
             color: None,
             label: None,
+            attrs: Vec::new(),
         }
     }
 }
@@ -249,6 +254,21 @@ impl NetworkGraph {
         for edge in &mut self.edges {
             edge.importance /= max_imp;
         }
+    }
+
+    /// Every node connected to `(layer, node)` by an edge, as
+    /// `(layer, node, importance, outgoing)` — the navigation base for the
+    /// node inspector's neighbor list.
+    pub fn neighbors(&self, layer: usize, node: usize) -> Vec<(usize, usize, f32, bool)> {
+        let mut out = Vec::new();
+        for e in &self.edges {
+            if e.from_layer == layer && e.from_node == node {
+                out.push((e.to_layer, e.to_node, e.importance, true));
+            } else if e.to_layer == layer && e.to_node == node {
+                out.push((e.from_layer, e.from_node, e.importance, false));
+            }
+        }
+        out
     }
 
     /// World-space centroid of all nodes, used to auto-focus the camera.

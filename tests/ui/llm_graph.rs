@@ -103,6 +103,65 @@ fn accent_override_beats_per_node_colors() {
 }
 
 #[test]
+fn selecting_a_node_highlights_it_and_its_neighbors() {
+    let mut view = view_with_graph();
+    // Find node "b" (the middle of the a-b-c chain) and select it.
+    let bi = view
+        .graph
+        .as_ref()
+        .unwrap()
+        .layers[0]
+        .nodes
+        .iter()
+        .position(|n| n.label.as_deref() == Some("b"))
+        .unwrap();
+    view.selected_node = Some((0, bi));
+    let data = view.build_render_data();
+
+    // The selected node uses the golden selected-object shader path
+    // (alpha = 2.0) and is drawn larger; the others stay at alpha 1.0.
+    let alphas: Vec<f32> = data.node_instances.iter().map(|i| i.color[3]).collect();
+    assert_eq!(alphas.iter().filter(|&&a| (a - 2.0).abs() < 1e-4).count(), 1);
+    assert_eq!(alphas.iter().filter(|&&a| (a - 1.0).abs() < 1e-4).count(), 2);
+    // Its neighbors (a and c) render brighter than they would unselected.
+    view.selected_node = None;
+    let plain = view.build_render_data();
+    let sum = |d: &rendering_3d::ui::llm_panel::LlmRenderData| -> f32 {
+        d.node_instances.iter().map(|i| i.color[0] + i.color[1] + i.color[2]).sum()
+    };
+    assert!(sum(&data) > sum(&plain), "selection brightens the neighborhood");
+}
+
+#[test]
+fn graph_nodes_carry_internal_data_and_neighbors() {
+    let text = r#"<gexf><graph>
+  <attributes class="node"><attribute id="0" title="city"/></attributes>
+  <nodes>
+    <node id="a" label="Alpha"><attvalues><attvalue for="0" value="Roma"/></attvalues></node>
+    <node id="b" label="Beta"/>
+  </nodes>
+  <edges><edge source="a" target="b"/></edges>
+</graph></gexf>"#;
+    let g = graph_import::load_graph(text.as_bytes(), "gexf", "t").unwrap();
+    let a = g.layers[0]
+        .nodes
+        .iter()
+        .position(|n| n.label.as_deref() == Some("Alpha"))
+        .unwrap();
+    assert_eq!(
+        g.layers[0].nodes[a].attrs,
+        vec![("city".to_string(), "Roma".to_string())]
+    );
+    let nb = g.neighbors(0, a);
+    assert_eq!(nb.len(), 1);
+    assert_eq!(
+        g.layers[0].nodes[nb[0].1].label.as_deref(),
+        Some("Beta"),
+        "neighbor navigation reaches the connected node"
+    );
+}
+
+#[test]
 fn data_graph_flag_gates_layout_and_table() {
     let g = sample_graph();
     assert!(g.data_graph);
