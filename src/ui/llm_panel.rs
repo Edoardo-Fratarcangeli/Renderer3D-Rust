@@ -706,13 +706,13 @@ impl LlmView {
             }
         }
 
-        if let Some(((li, ni), _)) = best {
-            self.selected_node = Some((li, ni));
-            true
-        } else {
-            self.selected_node = None;
-            false
+        let new_sel = best.map(|(sel, _)| sel);
+        if new_sel != self.selected_node {
+            self.selected_node = new_sel;
+            // The selection highlight lives in the instance colors.
+            self.render_dirty = true;
         }
+        new_sel.is_some()
     }
 
     // ── GPU render data ─────────────────────────────────────────────────────
@@ -732,6 +732,20 @@ impl LlmView {
 
         let now = Instant::now();
         let ds = self.distance_scale.max(0.01);
+
+        // Selection highlight: the picked node glows golden (selected shader
+        // path) and its direct neighbors brighten, so the neighborhood being
+        // explored is readable in the 3D view.
+        let neighbor_set: std::collections::HashSet<(usize, usize)> = self
+            .selected_node
+            .map(|(sl, sn)| {
+                graph
+                    .neighbors(sl, sn)
+                    .into_iter()
+                    .map(|(l, n, _, _)| (l, n))
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let style = self.render_style;
         let style_mult = style.scale_mult();
@@ -754,11 +768,15 @@ impl LlmView {
                 let back = self.activation.as_ref().map(|a| a.back_glow_at(li, ni, now)).unwrap_or(0.0);
                 let total_glow = (fwd + back).min(1.0);
 
+                let is_selected = self.selected_node == Some((li, ni));
+                let is_neighbor = neighbor_set.contains(&(li, ni));
+
                 let scale = (NODE_BASE_SCALE
                     + node.weight_magnitude * (NODE_MAX_SCALE - NODE_BASE_SCALE))
                     * self.node_scale_mult
                     * style_mult
-                    * (1.0 + total_glow * 0.5);
+                    * (1.0 + total_glow * 0.5)
+                    * if is_selected { 1.3 } else { 1.0 };
 
                 let [r, g, b] = if total_glow > 0.01 {
                     // Blend forward (cyan→white) and backward (orange→yellow) by strength.
@@ -767,10 +785,18 @@ impl LlmView {
                     let w = fwd + back + 1e-8;
                     lerp3(back_col, fwd_col, fwd / w)
                 } else {
-                    [base_col[0] * 0.45, base_col[1] * 0.45, base_col[2] * 0.45]
+                    // Neighbors of the selected node stay near full brightness.
+                    let dim = if is_selected || is_neighbor { 0.85 } else { 0.45 };
+                    [base_col[0] * dim, base_col[1] * dim, base_col[2] * dim]
                 };
 
-                let alpha = if total_glow > 0.01 { 3.0 + total_glow } else { 1.0 };
+                let alpha = if total_glow > 0.01 {
+                    3.0 + total_glow
+                } else if is_selected {
+                    2.0 // golden selected-object shader path
+                } else {
+                    1.0
+                };
 
                 // In voxel mode snap node centers onto a regular grid so the
                 // network reads as stacked blocks instead of free spheres.
@@ -888,6 +914,7 @@ impl LlmView {
         let heading = t!("llm.nodes_table").to_string();
         let filter_hint = t!("llm.node_filter").to_string();
         let mut dirty = false;
+        let mut select: Option<(usize, usize)> = None;
         egui::CollapsingHeader::new(heading)
             .default_open(false)
             .show(ui, |ui| {
@@ -900,6 +927,7 @@ impl LlmView {
                     );
                 });
                 let filter = self.node_table_filter.trim().to_ascii_lowercase();
+                let selected = self.selected_node;
                 let Some(graph) = self.graph.as_mut() else { return };
 
                 // Degree from the real edge list (data graphs use layer 0).
@@ -947,7 +975,14 @@ impl LlmView {
                                         break;
                                     }
                                     shown += 1;
-                                    ui.label(label);
+                                    // Clicking a row selects the node in the
+                                    // 3D view and opens it in the inspector.
+                                    if ui
+                                        .selectable_label(selected == Some((0, ni)), label)
+                                        .clicked()
+                                    {
+                                        select = Some((0, ni));
+                                    }
                                     ui.label(degree.get(ni).copied().unwrap_or(0).to_string());
                                     if ui
                                         .add(
@@ -979,6 +1014,10 @@ impl LlmView {
                     );
                 }
             });
+        if let Some(sel) = select {
+            self.selected_node = Some(sel);
+            dirty = true;
+        }
         if dirty {
             self.render_dirty = true;
         }
@@ -1024,8 +1063,12 @@ impl LlmView {
             LlmTab::Ollama => { self.tab_ollama(ui); LlmAction::None }
         };
 
-        self.show_node_inspector(ui);
-
+        let focus = self.show_node_inspector(ui);
+        if matches!(action, LlmAction::None) {
+            if let Some(p) = focus {
+                return LlmAction::FocusGraph(p);
+            }
+        }
         action
     }
 
@@ -1476,11 +1519,56 @@ impl LlmView {
     }
     // ── Node inspector ───────────────────────────────────────────────────────
 
-    fn show_node_inspector(&self, ui: &mut egui::Ui) {
-        let Some((li, ni)) = self.selected_node else { return };
-        let Some(graph) = &self.graph else { return };
-        let Some(layer) = graph.layers.get(li) else { return };
-        let Some(node) = layer.nodes.get(ni) else { return };
+    /// Selected-node panel. For neural networks it shows layer/weight/glow;
+    /// for imported data graphs it is a full explorer: the node's internal
+    /// data (every file attribute), live size/color editing, and a clickable
+    /// neighbor list to navigate the graph (select or 🎯 focus the camera).
+    /// Returns a world-space point to focus when the user asks for it.
+    fn show_node_inspector(&mut self, ui: &mut egui::Ui) -> Option<[f32; 3]> {
+        const MAX_NEIGHBOR_ROWS: usize = 200;
+        let (li, ni) = self.selected_node?;
+        let ds = self.distance_scale.max(0.01);
+
+        // Immutable snapshot first: the editing widgets below need &mut graph.
+        let (
+            data_graph,
+            layer_kind,
+            layer_name,
+            n_in_layer,
+            node_label,
+            node_pos,
+            node_attrs,
+            neighbors,
+        ) = {
+            let graph = self.graph.as_ref()?;
+            let layer = graph.layers.get(li)?;
+            let node = layer.nodes.get(ni)?;
+            // Deduped neighbor snapshot: (layer, node, outgoing, label, position).
+            let mut seen = std::collections::HashSet::new();
+            let neighbors: Vec<(usize, usize, bool, String, [f32; 3])> = graph
+                .neighbors(li, ni)
+                .into_iter()
+                .filter(|&(l, n, _, _)| seen.insert((l, n)))
+                .filter_map(|(l, n, _, out)| {
+                    let nb = graph.layers.get(l)?.nodes.get(n)?;
+                    let label = nb
+                        .label
+                        .clone()
+                        .unwrap_or_else(|| format!("{}·{}", l, n));
+                    Some((l, n, out, label, nb.position))
+                })
+                .collect();
+            (
+                graph.data_graph,
+                layer.kind,
+                layer.name.clone(),
+                layer.nodes.len(),
+                node.label.clone(),
+                node.position,
+                node.attrs.clone(),
+                neighbors,
+            )
+        };
 
         let now = Instant::now();
         let fwd  = self.activation.as_ref().map(|a| a.glow_at(li, ni, now)).unwrap_or(0.0);
@@ -1489,44 +1577,154 @@ impl LlmView {
         ui.separator();
         ui.horizontal(|ui| {
             ui.strong("Node Inspector");
-            ui.label(
-                egui::RichText::new(format!(
-                    "Layer {} · Node {}/{}",
-                    li,
-                    ni,
-                    layer.nodes.len()
-                ))
-                .weak()
-                .small(),
-            );
+            let title = match &node_label {
+                Some(l) => l.clone(),
+                None => format!("Layer {} · Node {}/{}", li, ni, n_in_layer),
+            };
+            ui.label(egui::RichText::new(title).weak());
         });
 
-        ui.horizontal(|ui| {
-            let kind_label = format!("{:?}", layer.kind);
-            ui.label(egui::RichText::new(kind_label).color(egui::Color32::from_rgb(
-                (layer.kind.base_color()[0] * 255.0) as u8,
-                (layer.kind.base_color()[1] * 255.0) as u8,
-                (layer.kind.base_color()[2] * 255.0) as u8,
-            )));
-            ui.label(egui::RichText::new(&layer.name).italics().weak());
-        });
+        if !data_graph {
+            ui.horizontal(|ui| {
+                let kind_label = format!("{:?}", layer_kind);
+                ui.label(egui::RichText::new(kind_label).color(egui::Color32::from_rgb(
+                    (layer_kind.base_color()[0] * 255.0) as u8,
+                    (layer_kind.base_color()[1] * 255.0) as u8,
+                    (layer_kind.base_color()[2] * 255.0) as u8,
+                )));
+                ui.label(egui::RichText::new(&layer_name).italics().weak());
+            });
+        }
 
-        ui.horizontal(|ui| {
-            ui.label(format!("Weight: {:.4}", node.weight_magnitude));
-            ui.add(
-                egui::ProgressBar::new(node.weight_magnitude)
-                    .desired_width(60.0),
-            );
-        });
+        let mut focus: Option<[f32; 3]> = None;
+        let mut select: Option<(usize, usize)> = None;
+        let mut dirty = false;
+
+        // Live size/color editing on the selected node (data graphs); NN
+        // nodes keep the read-only weight bar.
+        if data_graph {
+            if let Some(node) = self
+                .graph
+                .as_mut()
+                .and_then(|g| g.layers.get_mut(li))
+                .and_then(|l| l.nodes.get_mut(ni))
+            {
+                ui.horizontal(|ui| {
+                    ui.label(t!("llm.node_size").to_string());
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut node.weight_magnitude)
+                                .range(0.05..=1.0)
+                                .speed(0.01),
+                        )
+                        .changed()
+                    {
+                        dirty = true;
+                    }
+                    ui.label(t!("llm.node_color").to_string());
+                    let mut c = node.color.unwrap_or_else(|| layer_kind.base_color());
+                    if ui.color_edit_button_rgb(&mut c).changed() {
+                        node.color = Some(c);
+                        dirty = true;
+                    }
+                    if ui
+                        .button("🎯")
+                        .on_hover_text(t!("menu.focus").to_string())
+                        .clicked()
+                    {
+                        focus = Some([node_pos[0] * ds, node_pos[1] * ds, node_pos[2] * ds]);
+                    }
+                });
+            }
+        } else {
+            ui.horizontal(|ui| {
+                let weight = self
+                    .graph
+                    .as_ref()
+                    .and_then(|g| g.layers.get(li))
+                    .and_then(|l| l.nodes.get(ni))
+                    .map(|n| n.weight_magnitude)
+                    .unwrap_or(0.0);
+                ui.label(format!("Weight: {:.4}", weight));
+                ui.add(egui::ProgressBar::new(weight).desired_width(60.0));
+            });
+        }
 
         ui.label(
             egui::RichText::new(format!(
                 "Pos: ({:.2}, {:.2}, {:.2})",
-                node.position[0], node.position[1], node.position[2]
+                node_pos[0], node_pos[1], node_pos[2]
             ))
             .weak()
             .small(),
         );
+
+        // The node's internal data, exactly as the file carried it.
+        if !node_attrs.is_empty() {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(t!("llm.node_attrs").to_string()).strong().small());
+            egui::ScrollArea::vertical()
+                .id_source("node_attrs_scroll")
+                .max_height(120.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("node_attrs_grid")
+                        .num_columns(2)
+                        .striped(true)
+                        .spacing([12.0, 2.0])
+                        .show(ui, |ui| {
+                            for (key, value) in &node_attrs {
+                                ui.label(egui::RichText::new(key).weak());
+                                ui.label(value);
+                                ui.end_row();
+                            }
+                        });
+                });
+        }
+
+        // Neighbor navigation: click a neighbor to select it, 🎯 to fly there.
+        if data_graph {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(
+                    t!("llm.node_neighbors", count = neighbors.len().to_string()).to_string(),
+                )
+                .strong()
+                .small(),
+            );
+            egui::ScrollArea::vertical()
+                .id_source("node_neighbors_scroll")
+                .max_height(150.0)
+                .show(ui, |ui| {
+                    for (l, n, out, label, pos) in neighbors.iter().take(MAX_NEIGHBOR_ROWS) {
+                        ui.horizontal(|ui| {
+                            let arrow = if *out { "→" } else { "←" };
+                            if ui
+                                .selectable_label(false, format!("{arrow} {label}"))
+                                .clicked()
+                            {
+                                select = Some((*l, *n));
+                            }
+                            if ui
+                                .small_button("🎯")
+                                .on_hover_text(t!("menu.focus").to_string())
+                                .clicked()
+                            {
+                                focus = Some([pos[0] * ds, pos[1] * ds, pos[2] * ds]);
+                            }
+                        });
+                    }
+                    if neighbors.len() > MAX_NEIGHBOR_ROWS {
+                        ui.label(
+                            egui::RichText::new(
+                                t!("llm.nodes_truncated", max = MAX_NEIGHBOR_ROWS.to_string())
+                                    .to_string(),
+                            )
+                            .weak()
+                            .small(),
+                        );
+                    }
+                });
+        }
 
         if fwd > 0.01 || back > 0.01 {
             ui.horizontal(|ui| {
@@ -1544,6 +1742,15 @@ impl LlmView {
                 }
             });
         }
+
+        if let Some(sel) = select {
+            self.selected_node = Some(sel);
+            dirty = true;
+        }
+        if dirty {
+            self.render_dirty = true;
+        }
+        focus
     }
 }
 

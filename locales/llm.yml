@@ -413,3 +413,15 @@ _version: 2
   es: "se muestran los primeros %{max} nodos — afina el filtro para llegar al resto"
   fr: "affichage des %{max} premiers nœuds — affinez le filtre pour atteindre les autres"
   de: "die ersten %{max} passenden Knoten — Filter verfeinern, um den Rest zu erreichen"
+"llm.node_attrs":
+  en: "📎 Internal data"
+  it: "📎 Dati interni"
+  es: "📎 Datos internos"
+  fr: "📎 Données internes"
+  de: "📎 Interne Daten"
+"llm.node_neighbors":
+  en: "🕸 Neighbors (%{count}) — click to navigate"
+  it: "🕸 Vicini (%{count}) — clicca per navigare"
+  es: "🕸 Vecinos (%{count}) — haz clic para navegar"
+  fr: "🕸 Voisins (%{count}) — cliquez pour naviguer"
+  de: "🕸 Nachbarn (%{count}) — zum Navigieren klicken"

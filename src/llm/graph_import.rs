@@ -103,6 +103,8 @@ struct GNode {
     pos: Option<[f32; 3]>,
     size: Option<f32>,
     color: Option<[f32; 3]>,
+    /// Unmapped file attributes, preserved for the node inspector.
+    attrs: Vec<(String, String)>,
 }
 
 #[derive(Default)]
@@ -151,6 +153,12 @@ impl GraphBuilder {
     fn set_color(&mut self, id: &str, color: [f32; 3]) {
         let i = self.node(id);
         self.nodes[i].color = Some(color);
+    }
+
+    /// Attach one internal-data attribute (unmapped file field) to a node.
+    fn add_attr(&mut self, id: &str, key: &str, value: impl Into<String>) {
+        let i = self.node(id);
+        self.nodes[i].attrs.push((key.to_string(), value.into()));
     }
 
     /// Build the final [`NetworkGraph`]: normalize sizes, lay out positions,
@@ -205,6 +213,7 @@ impl GraphBuilder {
                     weight_magnitude: weight.clamp(0.05, 1.0),
                     color: g.color,
                     label: g.label.clone(),
+                    attrs: g.attrs.clone(),
                 }
             })
             .collect();
@@ -447,6 +456,23 @@ fn f32_of(v: &serde_json::Value) -> Option<f32> {
     v.as_f64().map(|f| f as f32)
 }
 
+/// Human string for a JSON attribute value (scalars verbatim, containers as
+/// compact JSON). None for null.
+fn json_attr_string(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+/// Local name of an IRI (`http://…#label` → `label`, `foaf/name` → `name`).
+fn iri_local_name(iri: &str) -> &str {
+    iri.rsplit(['#', '/', ':']).next().unwrap_or(iri)
+}
+
 // ── Minimal XML scanning (same approach as the VTK XML importer) ──
 
 /// All `<tag ...>inner</tag>` / `<tag .../>` occurrences in `text`, as
@@ -559,6 +585,20 @@ fn parse_node_link(text: &str) -> Result<GraphBuilder, String> {
         if let Some(c) = node.get("color").and_then(json_color) {
             b.set_color(&id, c);
         }
+        // Every unmapped key is internal data for the inspector.
+        if let Some(obj) = node.as_object() {
+            for (key, value) in obj {
+                if matches!(
+                    key.as_str(),
+                    "id" | "label" | "name" | "x" | "y" | "z" | "size" | "value" | "color"
+                ) {
+                    continue;
+                }
+                if let Some(s) = json_attr_string(value) {
+                    b.add_attr(&id, key, s);
+                }
+            }
+        }
     }
 
     let links = v
@@ -635,6 +675,16 @@ fn parse_cyjs(text: &str) -> Result<GraphBuilder, String> {
             }
             if let Some(c) = data.get("color").and_then(json_color) {
                 b.set_color(&id, c);
+            }
+            if let Some(obj) = data.as_object() {
+                for (key, value) in obj {
+                    if matches!(key.as_str(), "id" | "label" | "name" | "size" | "color") {
+                        continue;
+                    }
+                    if let Some(s) = json_attr_string(value) {
+                        b.add_attr(&id, key, s);
+                    }
+                }
             }
         }
     };
@@ -720,6 +770,15 @@ fn parse_graphml(text: &str) -> Result<GraphBuilder, String> {
         ) {
             b.set_color(&id, [r / 255.0, g / 255.0, bl / 255.0]);
         }
+        for (key, value) in &data {
+            if matches!(
+                key.as_str(),
+                "label" | "name" | "x" | "y" | "z" | "size" | "color" | "r" | "g" | "b"
+            ) {
+                continue;
+            }
+            b.add_attr(&id, key, value.clone());
+        }
     }
     for (attrs, inner) in xml_elements(text, "edge") {
         let (Some(s), Some(t)) = (xml_attr(attrs, "source"), xml_attr(attrs, "target")) else {
@@ -742,12 +801,30 @@ fn parse_graphml(text: &str) -> Result<GraphBuilder, String> {
 // ---------------------------------------------------------------------------
 
 fn parse_gexf(text: &str) -> Result<GraphBuilder, String> {
+    // <attributes><attribute id=".." title=".."/></attributes> declarations
+    // give the per-node <attvalue for=".."> entries their names.
+    let mut attr_title: HashMap<String, String> = HashMap::new();
+    for (aattrs, _) in xml_elements(text, "attribute") {
+        if let Some(id) = xml_attr(aattrs, "id") {
+            let title = xml_attr(aattrs, "title").unwrap_or_else(|| id.clone());
+            attr_title.insert(id, title);
+        }
+    }
+
     let mut b = GraphBuilder::default();
     for (attrs, inner) in xml_elements(text, "node") {
         let Some(id) = xml_attr(attrs, "id") else { continue };
         b.node(&id);
         if let Some(l) = xml_attr(attrs, "label") {
             b.set_label(&id, &l);
+        }
+        for (vattrs, _) in xml_elements(inner, "attvalue") {
+            let key = xml_attr(vattrs, "for").or_else(|| xml_attr(vattrs, "id"));
+            let value = xml_attr(vattrs, "value");
+            if let (Some(key), Some(value)) = (key, value) {
+                let name = attr_title.get(&key).cloned().unwrap_or(key);
+                b.add_attr(&id, &name, value);
+            }
         }
         for (cattrs, _) in xml_elements(inner, "viz:color") {
             let ch = |k: &str| xml_attr(cattrs, k).and_then(|v| v.parse::<f32>().ok());
@@ -865,6 +942,17 @@ fn parse_gdf(text: &str) -> Result<GraphBuilder, String> {
                 }
                 if let Some(c) = get("color").and_then(|v| parse_color(v)) {
                     b.set_color(&id, c);
+                }
+                for (fi, field) in fields.iter().enumerate() {
+                    if matches!(
+                        field.as_str(),
+                        "name" | "label" | "x" | "y" | "z" | "width" | "size" | "color"
+                    ) {
+                        continue;
+                    }
+                    if let Some(v) = values.get(fi).filter(|v| !v.is_empty()) {
+                        b.add_attr(&id, field, v.clone());
+                    }
                 }
             }
             Section::Edges => {
@@ -993,6 +1081,12 @@ fn parse_dot(text: &str) -> Result<GraphBuilder, String> {
         }
         if let Some(s) = attrs.get("width").and_then(|v| v.parse::<f32>().ok()) {
             b.set_size(id, s);
+        }
+        for (key, value) in attrs {
+            if matches!(key.as_str(), "label" | "pos" | "fillcolor" | "color" | "width") {
+                continue;
+            }
+            b.add_attr(id, key, value.clone());
         }
     };
 
@@ -1269,11 +1363,13 @@ fn parse_rdf_json(text: &str) -> Result<GraphBuilder, String> {
                 match ty {
                     "uri" | "bnode" => b.edge(subject, value, 1.0),
                     _ => {
-                        // Literal: a *label-ish predicate names the subject.
-                        if pred.to_ascii_lowercase().ends_with("label")
-                            || pred.to_ascii_lowercase().ends_with("name")
-                        {
+                        // Literal: a *label-ish predicate names the subject,
+                        // everything else is internal data.
+                        let low = pred.to_ascii_lowercase();
+                        if low.ends_with("label") || low.ends_with("name") {
                             b.set_label(subject, value);
+                        } else {
+                            b.add_attr(subject, iri_local_name(pred), value);
                         }
                     }
                 }
@@ -1333,7 +1429,12 @@ fn parse_jsonld(text: &str) -> Result<GraphBuilder, String> {
                             serde_json::Value::String(s) if is_label => {
                                 b.set_label(&id, s);
                             }
-                            _ => {}
+                            // Literal property: keep it as internal data.
+                            other => {
+                                if let Some(s) = json_attr_string(other) {
+                                    b.add_attr(&id, iri_local_name(key), s);
+                                }
+                            }
                         }
                     }
                 }
@@ -1597,6 +1698,76 @@ digraph G {
         assert_eq!(g.node_count(), 3, "a, b, c");
         assert_eq!(g.edges.len(), 3);
         assert!(g.layers[0].nodes.iter().any(|n| n.label.as_deref() == Some("Anna")));
+    }
+
+    #[test]
+    fn internal_data_attributes_survive_for_every_format() {
+        let attrs_of = |g: &NetworkGraph, label: &str| -> Vec<(String, String)> {
+            g.layers[0].nodes[label_index(g, label)].attrs.clone()
+        };
+
+        // Node-link JSON: unmapped keys become attributes.
+        let nl = r#"{"nodes": [{"id": "a", "group": 3, "role": "hub"}], "links": []}"#;
+        let g = from_json_auto(nl.as_bytes(), "nl").unwrap();
+        let attrs = attrs_of(&g, "a");
+        assert!(attrs.contains(&("group".into(), "3".into())));
+        assert!(attrs.contains(&("role".into(), "hub".into())));
+
+        // Cytoscape: data fields beyond id/label.
+        let cy = r#"{"elements": {"nodes": [{"data": {"id": "n", "score": 0.7}}], "edges": []}}"#;
+        let g = load_graph(cy.as_bytes(), "cyjs", "c").unwrap();
+        assert!(attrs_of(&g, "n").contains(&("score".into(), "0.7".into())));
+
+        // GraphML: unmapped <data> keys.
+        let gm = r#"<graphml>
+  <key id="d0" for="node" attr.name="type" attr.type="string"/>
+  <graph><node id="x"><data key="d0">router</data></node></graph>
+</graphml>"#;
+        let g = load_graph(gm.as_bytes(), "graphml", "g").unwrap();
+        assert!(attrs_of(&g, "x").contains(&("type".into(), "router".into())));
+
+        // GEXF: attvalues resolved through the <attribute> titles.
+        let gx = r#"<gexf><graph>
+  <attributes class="node"><attribute id="0" title="country"/></attributes>
+  <nodes><node id="p" label="P"><attvalues><attvalue for="0" value="IT"/></attvalues></node></nodes>
+</graph></gexf>"#;
+        let g = load_graph(gx.as_bytes(), "gexf", "g").unwrap();
+        assert!(attrs_of(&g, "P").contains(&("country".into(), "IT".into())));
+
+        // GDF: extra columns.
+        let gdf = "nodedef>name VARCHAR,label VARCHAR,dept VARCHAR\nu1,User 1,Physics\n";
+        let g = load_graph(gdf.as_bytes(), "gdf", "g").unwrap();
+        assert!(attrs_of(&g, "User 1").contains(&("dept".into(), "Physics".into())));
+
+        // DOT: unmapped attributes.
+        let dot = r#"graph { z [shape=box, rank=3]; }"#;
+        let g = load_graph(dot.as_bytes(), "dot", "g").unwrap();
+        let attrs = attrs_of(&g, "z");
+        assert!(attrs.contains(&("shape".into(), "box".into())));
+        assert!(attrs.contains(&("rank".into(), "3".into())));
+
+        // RDF/JSON: literal predicates keep their local name.
+        let rj = r#"{"http://ex.org/a": {"http://ex.org/age": [{"type": "literal", "value": "42"}]}}"#;
+        let g = load_graph(rj.as_bytes(), "rj", "g").unwrap();
+        assert!(g.layers[0].nodes[0].attrs.contains(&("age".into(), "42".into())));
+
+        // JSON-LD: literal properties.
+        let jl = r#"{"@graph": [{"@id": "ex:n", "name": "N", "schema:year": 2024}]}"#;
+        let g = load_graph(jl.as_bytes(), "jsonld", "g").unwrap();
+        assert!(attrs_of(&g, "N").contains(&("year".into(), "2024".into())));
+    }
+
+    #[test]
+    fn neighbors_lists_both_directions() {
+        let mut b = GraphBuilder::default();
+        b.edge("a", "b", 1.0);
+        b.edge("c", "a", 1.0);
+        let g = net(b);
+        let a = label_index(&g, "a");
+        let nb = g.neighbors(0, a);
+        assert_eq!(nb.len(), 2);
+        let outgoing: Vec<bool> = nb.iter().map(|&(_, _, _, out)| out).collect();
+        assert!(outgoing.contains(&true) && outgoing.contains(&false));
     }
 
     #[test]
