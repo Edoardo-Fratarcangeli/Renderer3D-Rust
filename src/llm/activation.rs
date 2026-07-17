@@ -256,6 +256,7 @@ mod tests {
             nodes: (0..n)
                 .map(|_| Node::new(0.5))
                 .collect(),
+            shape: None,
         };
         let mut g = NetworkGraph {
             name: "test".into(),
@@ -268,6 +269,7 @@ mod tests {
             estimated_vram_gb: None,
             moe_config: None,
             data_graph: false,
+            note: None,
         };
         g.layout();
         g

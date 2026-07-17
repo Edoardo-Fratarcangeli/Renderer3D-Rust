@@ -291,7 +291,7 @@ fn network_section(ui: &mut egui::Ui, state: &mut ImportState) {
     ui.horizontal(|ui| {
         ui.add(
             egui::TextEdit::singleline(&mut state.net_path)
-                .hint_text("model.gguf · model.json · graph.graphml/.gexf/.dot/.cyjs/…")
+                .hint_text("model.gguf · graph.graphml/.gexf/.dot/… · dump.sql · data.sqlite/.db")
                 .desired_width(280.0),
         );
         let can_load = !state.net_path.trim().is_empty();

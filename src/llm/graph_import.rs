@@ -243,11 +243,13 @@ impl GraphBuilder {
                 name: "nodes".to_string(),
                 kind: LayerKind::Graph,
                 nodes,
+                shape: None,
             }],
             edges,
             estimated_vram_gb: None,
             moe_config: None,
             data_graph: true,
+            note: None,
         })
     }
 }
@@ -376,8 +378,9 @@ fn force_layout(n: usize, edges: &[(usize, usize, f32)]) -> Vec<[f32; 3]> {
     pts
 }
 
-/// Evenly distributed points on a sphere (deterministic, O(n)).
-fn fibonacci_sphere(n: usize) -> Vec<[f32; 3]> {
+/// Evenly distributed points on a sphere (deterministic, O(n)). Shared with
+/// the database importer's cluster layout.
+pub(crate) fn fibonacci_sphere(n: usize) -> Vec<[f32; 3]> {
     let golden = std::f32::consts::PI * (3.0 - 5.0f32.sqrt());
     (0..n)
         .map(|i| {

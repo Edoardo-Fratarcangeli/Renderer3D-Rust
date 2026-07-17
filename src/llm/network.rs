@@ -171,6 +171,9 @@ pub struct Layer {
     pub name: String,
     pub kind: LayerKind,
     pub nodes: Vec<Node>,
+    /// Per-layer primitive override for node bodies (database import gives
+    /// every table its own shape). None follows the global render style.
+    pub shape: Option<crate::scene::GeometryType>,
 }
 
 /// Sparse directed edge between two nodes across adjacent layers.
@@ -196,6 +199,10 @@ pub struct NetworkGraph {
     /// real data — [`Self::layout`] must not overwrite them — and the UI
     /// offers the per-node editing table.
     pub data_graph: bool,
+    /// Import caveat surfaced by the UI (e.g. "sampled 200000 of 1.2M rows"
+    /// for big databases, or a schema-only fallback). None when the source
+    /// was imported in full.
+    pub note: Option<String>,
 }
 
 impl NetworkGraph {

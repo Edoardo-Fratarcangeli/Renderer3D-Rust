@@ -161,7 +161,9 @@ pub struct State {
 
     // LLM / SLM parameter visualizer
     pub llm_view: crate::ui::llm_panel::LlmView,
-    llm_node_batch: Option<(wgpu::Buffer, u32)>,
+    /// Node instances grouped by primitive mesh (database imports draw each
+    /// table with its own shape; other graphs produce a single batch).
+    llm_node_batches: Vec<(GeometryType, wgpu::Buffer, u32)>,
     llm_edge_buf: Option<(wgpu::Buffer, u32)>,
     /// Solid edge beams (instanced cubes) when the LLM/graph edge width > 0.
     llm_edge_solid_batch: Option<(wgpu::Buffer, u32)>,
@@ -611,7 +613,7 @@ impl State {
             mesh_worker: None,
             sphere_lod_mesh,
             llm_view: crate::ui::llm_panel::LlmView::new(),
-            llm_node_batch: None,
+            llm_node_batches: Vec::new(),
             llm_edge_buf: None,
             llm_edge_solid_batch: None,
         })
@@ -2014,7 +2016,7 @@ impl State {
         }
         if remove_llm {
             self.llm_view.clear();
-            self.llm_node_batch = None;
+            self.llm_node_batches.clear();
             self.llm_edge_buf   = None;
             self.llm_edge_solid_batch = None;
         }
@@ -2077,15 +2079,17 @@ impl State {
         // on any structural change (load, clear, visibility toggle).
         if self.llm_view.take_render_dirty() {
             let data = self.llm_view.build_render_data();
-            if data.node_instances.is_empty() {
-                self.llm_node_batch = None;
-            } else {
+            self.llm_node_batches.clear();
+            for (geometry, instances) in &data.node_batches {
+                if instances.is_empty() {
+                    continue;
+                }
                 let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("LLM Node Instance Buffer"),
-                    contents: bytemuck::cast_slice(&data.node_instances),
+                    contents: bytemuck::cast_slice(instances),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
-                self.llm_node_batch = Some((buf, data.node_instances.len() as u32));
+                self.llm_node_batches.push((*geometry, buf, instances.len() as u32));
             }
             if data.edge_vertices.is_empty() {
                 self.llm_edge_buf = None;
@@ -2485,12 +2489,14 @@ impl State {
                 render_pass.draw_indexed(0..self.cube_mesh.num_indices, 0, 0..*beam_count);
             }
 
-            // Draw LLM/network nodes (triangle pipeline, instanced). The body
-            // mesh follows the chosen render style: cubes for voxel mode, the
-            // low-poly sphere for spheres/points.
-            if let Some((node_buf, node_count)) = &self.llm_node_batch {
-                let node_mesh = match self.llm_view.node_geometry() {
+            // Draw LLM/network nodes (triangle pipeline, instanced). Each
+            // batch carries its own primitive mesh: cubes for voxel mode,
+            // the low-poly sphere for spheres/points, and per-table shapes
+            // (sphere / cube / plane) for database imports.
+            for (geo_type, node_buf, node_count) in &self.llm_node_batches {
+                let node_mesh = match geo_type {
                     GeometryType::Cube => &self.cube_mesh,
+                    GeometryType::Plane => &self.plane_mesh,
                     _ => &self.sphere_lod_mesh,
                 };
                 render_pass.set_pipeline(&self.render_pipeline);
