@@ -199,6 +199,10 @@ pub struct NetworkGraph {
     /// real data — [`Self::layout`] must not overwrite them — and the UI
     /// offers the per-node editing table.
     pub data_graph: bool,
+    /// Import caveat surfaced by the UI (e.g. "sampled 200000 of 1.2M rows"
+    /// for big databases, or a schema-only fallback). None when the source
+    /// was imported in full.
+    pub note: Option<String>,
 }
 
 impl NetworkGraph {

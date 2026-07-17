@@ -269,6 +269,7 @@ mod tests {
             estimated_vram_gb: None,
             moe_config: None,
             data_graph: false,
+            note: None,
         };
         g.layout();
         g

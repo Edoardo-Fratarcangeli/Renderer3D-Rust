@@ -62,8 +62,17 @@ pub enum LlmAction {
 /// background worker (file import and Ollama /api/show share it).
 type GraphWorkerRx = mpsc::Receiver<Result<(NetworkGraph, Option<Tokenizer>), String>>;
 
-/// Per-layer digest for the inspector list: (name, kind, node count, color).
-type LayerSummary = (String, LayerKind, usize, (f32, f32, f32));
+/// Per-layer digest for the inspector list: (name, kind, node count, weight
+/// stats, per-layer shape override, display color). The last two carry the
+/// database import's per-table shape and color into the list rows.
+type LayerSummary = (
+    String,
+    LayerKind,
+    usize,
+    (f32, f32, f32),
+    Option<GeometryType>,
+    Option<[f32; 3]>,
+);
 
 // ─── Render data ─────────────────────────────────────────────────────────────
 
@@ -154,8 +163,9 @@ pub struct LlmView {
     loss_history: Vec<f32>,
     /// Count of training steps taken since model loaded.
     training_step: u32,
-    /// When true, skip every N-1 transformer blocks in 3D render.
-    compact_view: bool,
+    /// When true, skip every N-1 transformer blocks in 3D render. Model
+    /// graphs only — [`Self::install_graph`] resets it for data graphs.
+    pub compact_view: bool,
     /// How many blocks to skip per stride window in compact mode.
     compact_stride: usize,
     /// Animation frame exporter.
@@ -320,8 +330,20 @@ impl LlmView {
             Ok(Ok((graph, tokenizer))) => {
                 self.worker = None;
                 self.install_graph(graph, tokenizer, |g| {
-                    format!("Loaded '{}' — {} layers · {} nodes · {} edges",
-                        g.name, g.layers.len(), g.node_count(), g.edges.len())
+                    // Relational imports (one layer per table) read as tables/
+                    // rows/relations; models and graph files keep the generic
+                    // layers/nodes/edges wording.
+                    let mut s = if g.data_graph && g.layers.len() > 1 {
+                        format!("Loaded '{}' — {} tables · {} rows · {} relations",
+                            g.name, g.layers.len(), g.node_count(), g.edges.len())
+                    } else {
+                        format!("Loaded '{}' — {} layers · {} nodes · {} edges",
+                            g.name, g.layers.len(), g.node_count(), g.edges.len())
+                    };
+                    if let Some(note) = &g.note {
+                        s.push_str(&format!(" ({note})"));
+                    }
+                    s
                 });
             }
             Ok(Err(msg)) => {
@@ -582,6 +604,11 @@ impl LlmView {
     ) {
         let s = msg(&graph);
         self.status = Some(StatusMessage::success(s));
+        // Compact view is a transformer-block filter; on a data graph it
+        // would hide entire layers (e.g. database tables) arbitrarily.
+        if graph.data_graph {
+            self.compact_view = false;
+        }
         self.graph = Some(graph);
         self.tokenizer = tokenizer;
         self.activation = None;
@@ -1159,28 +1186,54 @@ impl LlmView {
             });
 
             let n_nodes: usize = graph.layers.iter().map(|l| l.nodes.len()).sum();
+            // Relational imports (one layer per table) speak the data domain's
+            // language; models and graph files keep the network wording.
+            let relational = graph.data_graph && graph.layers.len() > 1;
+            let (k_layers, k_nodes, k_edges) = if relational {
+                (t!("llm.tables"), t!("llm.rows"), t!("llm.relations"))
+            } else {
+                (t!("llm.layers"), t!("llm.nodes"), t!("llm.edges"))
+            };
             ui.label(
                 egui::RichText::new(format!(
                     "{} {} · {} {} · {} {}",
-                    graph.layers.len(), t!("llm.layers"),
-                    n_nodes, t!("llm.nodes"),
-                    graph.edges.len(), t!("llm.edges"),
+                    graph.layers.len(), k_layers,
+                    n_nodes, k_nodes,
+                    graph.edges.len(), k_edges,
                 ))
                 .weak(),
             );
+            // Import caveats (e.g. a big database sampled down) stay visible,
+            // not just in the transient status message.
+            if let Some(note) = &graph.note {
+                ui.label(
+                    egui::RichText::new(format!("⚠ {note}"))
+                        .color(egui::Color32::from_rgb(235, 180, 60))
+                        .small(),
+                );
+            }
 
             // Collect layer data to avoid borrow conflicts with self.activation inside egui closure.
             let layer_summaries: Vec<LayerSummary> = graph
                 .layers
                 .iter()
-                .map(|l| (l.name.clone(), l.kind, l.nodes.len(), layer_stats(l)))
+                .map(|l| {
+                    (
+                        l.name.clone(),
+                        l.kind,
+                        l.nodes.len(),
+                        layer_stats(l),
+                        l.shape,
+                        l.nodes.first().and_then(|n| n.color),
+                    )
+                })
                 .collect();
 
             egui::ScrollArea::vertical()
                 .id_source("llm_layer_scroll")
                 .max_height(120.0)
                 .show(ui, |ui| {
-                    for (li, (name, kind, node_count, (wmin, wmax, wmean))) in layer_summaries.iter().enumerate() {
+                    for (li, (name, kind, node_count, (wmin, wmax, wmean), shape, color)) in layer_summaries.iter().enumerate() {
                         // Compute mean_glow for this layer once per row (reused for bar and label).
                         let mean_glow: f32 = if self.animation_active {
                             let now = Instant::now();
@@ -1193,7 +1246,29 @@ impl LlmView {
                         };
 
                         let row_resp = ui.horizontal(|ui| {
-                            ui.label(kind.icon());
+                            // Database tables show their actual shape glyph in
+                            // their actual color; other layers keep the kind icon.
+                            match shape {
+                                Some(s) => {
+                                    let glyph = match s {
+                                        GeometryType::Cube => "⬛",
+                                        GeometryType::Plane => "⬜",
+                                        _ => "⏺",
+                                    };
+                                    let c = color.unwrap_or_else(|| kind.base_color());
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(
+                                            (c[0] * 255.0) as u8,
+                                            (c[1] * 255.0) as u8,
+                                            (c[2] * 255.0) as u8,
+                                        ),
+                                        glyph,
+                                    );
+                                }
+                                None => {
+                                    ui.label(kind.icon());
+                                }
+                            }
                             ui.label(name.as_str());
                             ui.add(
                                 egui::ProgressBar::new(*wmean)
@@ -1215,8 +1290,13 @@ impl LlmView {
                             });
                         }).response;
                         row_resp.on_hover_ui(|ui| {
-                            ui.label(format!("Nodes: {node_count}"));
-                            ui.label(format!("Weight  min {wmin:.3} · mean {wmean:.3} · max {wmax:.3}"));
+                            let (k_count, k_stat) = if relational {
+                                ("Rows", "Size")
+                            } else {
+                                ("Nodes", "Weight")
+                            };
+                            ui.label(format!("{k_count}: {node_count}"));
+                            ui.label(format!("{k_stat}  min {wmin:.3} · mean {wmean:.3} · max {wmax:.3}"));
                             if let Some(anim) = &self.activation {
                                 let now = Instant::now();
                                 let mean_glow: f32 = (0..*node_count)
@@ -1232,49 +1312,78 @@ impl LlmView {
             ui.separator();
         }
 
-        // Prompt injection
-        ui.heading(t!("llm.heading_prompt").to_string());
         let has_model = self.graph.is_some();
+        let is_data = self.graph.as_ref().is_some_and(|g| g.data_graph);
 
-        ui.add_enabled_ui(has_model, |ui| {
-            ui.add(
-                egui::TextEdit::multiline(&mut self.prompt_text)
-                    .hint_text(t!("llm.prompt_hint").to_string())
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY),
-            );
+        // Prompt injection & activation animation are model concepts; a data
+        // graph (graph file or database) has nothing to propagate, and the
+        // compact view would hide entire tables — hide the whole section.
+        if !is_data {
+            ui.heading(t!("llm.heading_prompt").to_string());
+            ui.add_enabled_ui(has_model, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.prompt_text)
+                        .hint_text(t!("llm.prompt_hint").to_string())
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                );
 
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button(t!("llm.btn_inject").to_string()).clicked() {
+                        self.inject_prompt();
+                    }
+                    if ui.button(t!("llm.btn_train_step").to_string()).clicked() {
+                        self.start_training_sim();
+                    }
+                    if ui.button(t!("llm.btn_clear_anim").to_string()).clicked() {
+                        self.activation = None;
+                        self.animation_active = false;
+                        self.render_dirty = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if self.animation_active {
+                        ui.spinner();
+                        let label = match self.activation.as_ref().map(|a| a.mode) {
+                            Some(ActivationMode::Training) => t!("llm.training").to_string(),
+                            _                              => t!("llm.propagating").to_string(),
+                        };
+                        ui.colored_label(egui::Color32::from_rgb(0, 200, 255), label);
+                    } else if self.activation.is_some() {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(120, 220, 120),
+                            t!("llm.activated").to_string(),
+                        );
+                    }
+                });
+                ui.add(
+                    egui::Slider::new(&mut self.wave_speed, 0.25..=4.0)
+                        .text(t!("llm.wave_speed").to_string()),
+                );
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut self.compact_view, t!("llm.compact_view").to_string()).changed() {
+                        self.mark_dirty();
+                    }
+                    if self.compact_view
+                        && ui
+                            .add(
+                                egui::Slider::new(&mut self.compact_stride, 2..=8usize)
+                                    .text(t!("llm.compact_stride").to_string()),
+                            )
+                            .changed()
+                    {
+                        self.mark_dirty();
+                    }
+                });
+            });
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui.button(t!("llm.btn_inject").to_string()).clicked() {
-                    self.inject_prompt();
-                }
-                if ui.button(t!("llm.btn_train_step").to_string()).clicked() {
-                    self.start_training_sim();
-                }
-                if ui.button(t!("llm.btn_clear_anim").to_string()).clicked() {
-                    self.activation = None;
-                    self.animation_active = false;
-                    self.render_dirty = true;
-                }
-            });
-            ui.horizontal(|ui| {
-                if self.animation_active {
-                    ui.spinner();
-                    let label = match self.activation.as_ref().map(|a| a.mode) {
-                        Some(ActivationMode::Training) => t!("llm.training").to_string(),
-                        _                              => t!("llm.propagating").to_string(),
-                    };
-                    ui.colored_label(egui::Color32::from_rgb(0, 200, 255), label);
-                } else if self.activation.is_some() {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(120, 220, 120),
-                        t!("llm.activated").to_string(),
-                    );
-                }
-            });
+        }
 
-            ui.add_space(6.0);
+        // Render controls apply to every graph kind (models, graph files,
+        // databases): node/distance scale, link width and link color.
+        ui.heading(t!("llm.render_heading").to_string());
+        ui.add_enabled_ui(has_model, |ui| {
             if ui
                 .add(
                     egui::Slider::new(&mut self.node_scale_mult, 0.4..=3.0)
@@ -1318,25 +1427,6 @@ impl LlmView {
                     }
                 });
             });
-            ui.add(
-                egui::Slider::new(&mut self.wave_speed, 0.25..=4.0)
-                    .text(t!("llm.wave_speed").to_string()),
-            );
-            ui.horizontal(|ui| {
-                if ui.checkbox(&mut self.compact_view, t!("llm.compact_view").to_string()).changed() {
-                    self.mark_dirty();
-                }
-                if self.compact_view
-                    && ui
-                        .add(
-                            egui::Slider::new(&mut self.compact_stride, 2..=8usize)
-                                .text(t!("llm.compact_stride").to_string()),
-                        )
-                        .changed()
-                {
-                    self.mark_dirty();
-                }
-            });
         });
 
         self.nodes_table_ui(ui);
@@ -1373,8 +1463,8 @@ impl LlmView {
             }
         }
 
-        // Export animation UI
-        if has_model {
+        // Export animation UI (activation animations only exist for models).
+        if has_model && !is_data {
             ui.separator();
             ui.heading(t!("llm.export_heading").to_string());
             ui.horizontal(|ui| {
@@ -1563,10 +1653,12 @@ impl LlmView {
         // Immutable snapshot first: the editing widgets below need &mut graph.
         let (
             data_graph,
+            n_layers,
             layer_kind,
             layer_name,
             n_in_layer,
             node_label,
+            node_color,
             node_pos,
             node_attrs,
             neighbors,
@@ -1591,10 +1683,12 @@ impl LlmView {
                 .collect();
             (
                 graph.data_graph,
+                graph.layers.len(),
                 layer.kind,
                 layer.name.clone(),
                 layer.nodes.len(),
                 node.label.clone(),
+                node.color,
                 node.position,
                 node.attrs.clone(),
                 neighbors,
@@ -1624,6 +1718,20 @@ impl LlmView {
                     (layer_kind.base_color()[2] * 255.0) as u8,
                 )));
                 ui.label(egui::RichText::new(&layer_name).italics().weak());
+            });
+        } else if n_layers > 1 {
+            // Relational import: say which table this row belongs to, in the
+            // table's own color.
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(t!("llm.table").to_string()).weak());
+                let c = node_color.unwrap_or_else(|| layer_kind.base_color());
+                ui.label(egui::RichText::new(&layer_name).strong().color(
+                    egui::Color32::from_rgb(
+                        (c[0] * 255.0) as u8,
+                        (c[1] * 255.0) as u8,
+                        (c[2] * 255.0) as u8,
+                    ),
+                ));
             });
         }
 

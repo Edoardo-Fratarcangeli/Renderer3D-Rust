@@ -1368,13 +1368,17 @@ pub fn tables_to_network(mut tables: Vec<DbTable>, name: &str) -> Result<Network
         return Ok(schema_network(&tables, name));
     }
 
-    // Proportional cap: huge databases are sampled instead of refused.
+    // Proportional cap: huge databases are sampled instead of refused. The
+    // caveat is surfaced to the user through [`NetworkGraph::note`].
+    let mut note: Option<String> = None;
     if total_rows > MAX_GRAPH_NODES {
         let scale = MAX_GRAPH_NODES as f64 / total_rows as f64;
         for t in &mut tables {
             let keep = ((t.rows.len() as f64 * scale) as usize).clamp(1, t.rows.len());
             t.rows.truncate(keep);
         }
+        let kept: usize = tables.iter().map(|t| t.rows.len()).sum();
+        note = Some(format!("sampled {kept} of {total_rows} rows"));
     }
 
     // Cluster geometry: table centers on a sphere, rows in a ball around
@@ -1497,7 +1501,15 @@ pub fn tables_to_network(mut tables: Vec<DbTable>, name: &str) -> Result<Network
             }
         }
     }
-    edges.truncate(MAX_GRAPH_EDGES);
+    if edges.len() > MAX_GRAPH_EDGES {
+        let dropped = edges.len() - MAX_GRAPH_EDGES;
+        edges.truncate(MAX_GRAPH_EDGES);
+        let extra = format!("{dropped} relations not drawn");
+        note = Some(match note {
+            Some(n) => format!("{n} · {extra}"),
+            None => extra,
+        });
+    }
 
     // Node size from relation degree (rows touched by more FKs read bigger).
     let mut degree: HashMap<(usize, usize), usize> = HashMap::new();
@@ -1525,6 +1537,7 @@ pub fn tables_to_network(mut tables: Vec<DbTable>, name: &str) -> Result<Network
         estimated_vram_gb: None,
         moe_config: None,
         data_graph: true,
+        note,
     })
 }
 
@@ -1605,6 +1618,7 @@ fn schema_network(tables: &[DbTable], name: &str) -> NetworkGraph {
         estimated_vram_gb: None,
         moe_config: None,
         data_graph: true,
+        note: Some("schema only — the source contains no rows".to_string()),
     }
 }
 
@@ -2053,5 +2067,17 @@ INSERT INTO t (id, v) VALUES (-2, 'neg');
         let g = tables_to_network(vec![t], "big").unwrap();
         assert!(g.node_count() <= MAX_GRAPH_NODES);
         assert!(g.node_count() > MAX_GRAPH_NODES / 2);
+        // The sampling is surfaced to the user, not silent.
+        let note = g.note.expect("sampling sets a user-facing note");
+        assert!(note.contains("sampled"), "note says sampling happened: {note}");
+    }
+
+    #[test]
+    fn full_imports_carry_no_note_and_schema_fallback_says_so() {
+        let full = parse_sql_dump("INSERT INTO t VALUES (1), (2);").unwrap();
+        assert_eq!(tables_to_network(full, "t").unwrap().note, None);
+        let ddl = parse_sql_dump("CREATE TABLE a (id INT PRIMARY KEY);").unwrap();
+        let note = tables_to_network(ddl, "a").unwrap().note.unwrap();
+        assert!(note.contains("schema only"));
     }
 }

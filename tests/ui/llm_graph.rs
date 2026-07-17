@@ -240,3 +240,50 @@ INSERT INTO orders (id, user_id, item) VALUES (10, 1, 'Book');
         .iter()
         .any(|(k, v)| k == "item" && v == "Book"));
 }
+
+#[test]
+fn data_graphs_neutralize_model_only_view_state() {
+    // Compact view is a transformer-block filter left over from a model
+    // session; installing a data graph must reset it, or whole database
+    // tables would silently disappear from the 3D view.
+    let dump = r#"
+CREATE TABLE a (id INT PRIMARY KEY);
+CREATE TABLE b (id INT PRIMARY KEY, a_id INT REFERENCES a(id));
+CREATE TABLE c (id INT PRIMARY KEY, b_id INT REFERENCES b(id));
+CREATE TABLE d (id INT PRIMARY KEY);
+INSERT INTO a (id) VALUES (1);
+INSERT INTO b (id, a_id) VALUES (1, 1);
+INSERT INTO c (id, b_id) VALUES (1, 1);
+INSERT INTO d (id) VALUES (1);
+"#;
+    let g = rendering_3d::llm::db_import::load_db(dump.as_bytes(), "sql", "s").unwrap();
+    let mut view = LlmView::new();
+    view.compact_view = true; // stale state from a previous model session
+    view.load_preset(g);
+    assert!(!view.compact_view, "installing a data graph resets compact view");
+    let data = view.build_render_data();
+    assert_eq!(
+        all_instances(&data).len(),
+        4,
+        "every table row renders — none hidden by the block filter"
+    );
+}
+
+#[test]
+fn sampling_note_reaches_the_ui_state() {
+    use rendering_3d::llm::db_import::{tables_to_network, DbColumn, DbTable};
+    let t = DbTable {
+        name: "big".into(),
+        columns: vec![DbColumn { name: "id".into(), ty: "INT".into() }],
+        pk: Some(0),
+        fks: vec![],
+        rows: (0..rendering_3d::llm::graph_import::MAX_GRAPH_NODES + 10)
+            .map(|i| vec![Some(i.to_string())])
+            .collect(),
+    };
+    let g = tables_to_network(vec![t], "big").unwrap();
+    let mut view = LlmView::new();
+    view.load_preset(g);
+    let note = view.graph.as_ref().unwrap().note.as_ref().unwrap();
+    assert!(note.contains("sampled"));
+}

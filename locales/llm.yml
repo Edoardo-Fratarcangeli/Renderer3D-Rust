@@ -12,18 +12,18 @@ _version: 2
 
 
 "llm.window_title":
-  en: LLM / SLM Visualizer
-  it: Visualizzatore LLM / SLM
-  es: Visualizador LLM / SLM
-  fr: Visualiseur LLM / SLM
-  de: LLM / SLM Visualizer
+  en: Network Visualizer — models · graphs · databases
+  it: Visualizzatore di reti — modelli · grafi · database
+  es: Visualizador de redes — modelos · grafos · bases de datos
+  fr: Visualiseur de réseaux — modèles · graphes · bases de données
+  de: Netzwerk-Visualizer — Modelle · Graphen · Datenbanken
 
 "llm.heading_import":
-  en: Import Model
-  it: Importa modello
-  es: Importar modelo
-  fr: Importer le modèle
-  de: Modell importieren
+  en: Import model / graph / database
+  it: Importa modello / grafo / database
+  es: Importar modelo / grafo / base de datos
+  fr: Importer un modèle / graphe / base de données
+  de: Modell / Graph / Datenbank importieren
 
 "llm.import_hint":
   en: "Load a .gguf/.json model, a graph file or a database (.sql dump, SQLite) to visualize its network."
@@ -80,6 +80,41 @@ _version: 2
   es: conexiones
   fr: connexions
   de: Kanten
+
+"llm.tables":
+  en: tables
+  it: tabelle
+  es: tablas
+  fr: tables
+  de: Tabellen
+
+"llm.rows":
+  en: rows
+  it: righe
+  es: filas
+  fr: lignes
+  de: Zeilen
+
+"llm.relations":
+  en: relations
+  it: relazioni
+  es: relaciones
+  fr: relations
+  de: Relationen
+
+"llm.table":
+  en: Table
+  it: Tabella
+  es: Tabla
+  fr: Table
+  de: Tabelle
+
+"llm.render_heading":
+  en: Rendering
+  it: Resa 3D
+  es: Renderizado
+  fr: Rendu
+  de: Darstellung
 
 "llm.heading_prompt":
   en: Inject Prompt
@@ -278,11 +313,11 @@ _version: 2
   de: "⏺ Aufnehmen"
 
 "llm.net_heading":
-  en: "🧠 Neural Networks"
-  it: "🧠 Reti neurali"
-  es: "🧠 Redes neuronales"
-  fr: "🧠 Réseaux de neurones"
-  de: "🧠 Neuronale Netze"
+  en: "🧠 Neural Networks · Graphs · Databases"
+  it: "🧠 Reti neurali · Grafi · Database"
+  es: "🧠 Redes neuronales · Grafos · Bases de datos"
+  fr: "🧠 Réseaux de neurones · Graphes · Bases de données"
+  de: "🧠 Neuronale Netze · Graphen · Datenbanken"
 
 "llm.net_hint":
   en: "Build an architecture, load a .gguf/.json model, import a graph file (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) or a database (.sql dump, SQLite .db/.sqlite): tables become colored/shaped clusters linked by their relations — visualized in 3D."
