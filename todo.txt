@@ -17,6 +17,7 @@ x 2026-07-03 Fase 1 completa: clippy sbloccato, id draft univoci, undo su creazi
 x 2026-07-03 Fase 2 completa: cap stream NDJSON (linea/colonne) + warning bind non-loopback, guardie zip-bomb NPZ, checked_extent su shape NPY/NPZ/IDX, cap client Ollama, anti formula-injection CSV, GGUF read_bytes senza overflow, log dir assoluta +security @robustness
 x 2026-07-03 Fase 4 parziale: debounce salvataggio settings sugli slider griglia, logger bufferizzato con flush su warning+, avvio con errori anyhow leggibili +perf @quality
 x 2026-07-03 Fase 3.8 default unificati in settings.rs; 5.2 workflow CI (clippy -D warnings + test, Linux+Windows); 5.4 pulizie (capped_nodes stride uniforme, resolve_columns condiviso CSV/Excel); 5.5 limiti documentati +hygiene @quality
+x 2026-07-17 Import database relazionali (dump .sql MySQL/Postgres/SQLite + file SQLite nativi) come reti 3D: layer per tabella con colore/forma propri, nodo per riga in cluster spaziali, edge per foreign key, dimensione dal grado, dati riga nell'inspector +import @data
 
 
 

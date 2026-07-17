@@ -256,6 +256,7 @@ mod tests {
             nodes: (0..n)
                 .map(|_| Node::new(0.5))
                 .collect(),
+            shape: None,
         };
         let mut g = NetworkGraph {
             name: "test".into(),

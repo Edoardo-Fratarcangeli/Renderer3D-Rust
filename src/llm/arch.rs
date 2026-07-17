@@ -176,6 +176,7 @@ pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64, Option<MoeConfig>) {
         name: "Embedding".into(),
         kind: LayerKind::Embedding,
         nodes: uniform_nodes(spec.hidden_size.min(MAX_NODES_PER_LAYER), 0.60),
+        shape: None,
     });
 
     for i in 0..spec.n_layers {
@@ -183,12 +184,14 @@ pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64, Option<MoeConfig>) {
             name: format!("Block {i} · Attn"),
             kind: LayerKind::Attention,
             nodes: attn_nodes(spec),
+            shape: None,
         });
         let ln_n = (spec.hidden_size / 32).clamp(4, MAX_NODES_PER_LAYER);
         layers.push(Layer {
             name: format!("Block {i} · LN"),
             kind: LayerKind::LayerNorm,
             nodes: uniform_nodes(ln_n, 0.40),
+            shape: None,
         });
         if spec.n_experts > 1 {
             for e in 0..spec.n_experts {
@@ -196,6 +199,7 @@ pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64, Option<MoeConfig>) {
                     name: format!("Block {i} · Expert {e}"),
                     kind: LayerKind::Expert,
                     nodes: uniform_nodes(spec.ffn_size.min(MAX_NODES_PER_LAYER), 0.50),
+                    shape: None,
                 });
             }
         } else {
@@ -203,6 +207,7 @@ pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64, Option<MoeConfig>) {
                 name: format!("Block {i} · FFN"),
                 kind: LayerKind::FeedForward,
                 nodes: uniform_nodes(spec.ffn_size.min(MAX_NODES_PER_LAYER), 0.50),
+                shape: None,
             });
         }
     }
@@ -211,6 +216,7 @@ pub fn build_layers(spec: &ArchSpec) -> (Vec<Layer>, f64, Option<MoeConfig>) {
         name: "Output".into(),
         kind: LayerKind::Output,
         nodes: uniform_nodes(spec.hidden_size.min(MAX_NODES_PER_LAYER), 0.55),
+        shape: None,
     });
 
     let moe_config = if spec.n_experts > 1 {

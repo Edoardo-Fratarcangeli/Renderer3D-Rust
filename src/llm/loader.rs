@@ -114,7 +114,7 @@ pub fn from_json(data: &[u8]) -> Result<(NetworkGraph, Option<Tokenizer>)> {
                 vec![0.5; jl.num_nodes.unwrap_or(16)]
             };
             let nodes = capped_nodes(&raw);
-            Layer { name: jl.name, kind, nodes }
+            Layer { name: jl.name, kind, nodes, shape: None }
         })
         .collect();
 

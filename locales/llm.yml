@@ -26,11 +26,11 @@ _version: 2
   de: Modell importieren
 
 "llm.import_hint":
-  en: "Load a .gguf or .json model file to visualize its parameter network."
-  it: "Carica un file .gguf o .json per visualizzare la rete dei parametri."
-  es: "Carga un archivo .gguf o .json para visualizar la red de parámetros."
-  fr: "Chargez un fichier .gguf ou .json pour visualiser le réseau de paramètres."
-  de: "Lade eine .gguf- oder .json-Datei, um das Parameternetzwerk zu visualisieren."
+  en: "Load a .gguf/.json model, a graph file or a database (.sql dump, SQLite) to visualize its network."
+  it: "Carica un modello .gguf/.json, un file di grafo o un database (dump .sql, SQLite) per visualizzarne la rete."
+  es: "Carga un modelo .gguf/.json, un grafo o una base de datos (volcado .sql, SQLite) para visualizar su red."
+  fr: "Chargez un modèle .gguf/.json, un graphe ou une base de données (dump .sql, SQLite) pour visualiser son réseau."
+  de: "Lade ein .gguf/.json-Modell, eine Graphdatei oder eine Datenbank (.sql-Dump, SQLite), um ihr Netzwerk zu visualisieren."
 
 "llm.btn_load":
   en: Load
@@ -285,11 +285,11 @@ _version: 2
   de: "🧠 Neuronale Netze"
 
 "llm.net_hint":
-  en: "Build an architecture, load a .gguf/.json model or import a graph file (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualized in 3D."
-  it: "Costruisci un'architettura, carica un modello .gguf/.json o importa un file di grafo (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualizzato in 3D."
-  es: "Crea una arquitectura, carga un modelo .gguf/.json o importa un grafo (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualizado en 3D."
-  fr: "Construisez une architecture, chargez un modèle .gguf/.json ou importez un graphe (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — visualisé en 3D."
-  de: "Erstelle eine Architektur, lade ein .gguf/.json-Modell oder importiere eine Graphdatei (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) — in 3D dargestellt."
+  en: "Build an architecture, load a .gguf/.json model, import a graph file (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) or a database (.sql dump, SQLite .db/.sqlite): tables become colored/shaped clusters linked by their relations — visualized in 3D."
+  it: "Costruisci un'architettura, carica un modello .gguf/.json, importa un file di grafo (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) o un database (dump .sql, SQLite .db/.sqlite): le tabelle diventano cluster con colori/forme propri collegati dalle relazioni — visualizzato in 3D."
+  es: "Crea una arquitectura, carga un modelo .gguf/.json, importa un grafo (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) o una base de datos (volcado .sql, SQLite .db/.sqlite): las tablas se vuelven clústeres con colores/formas propios unidos por sus relaciones — visualizado en 3D."
+  fr: "Construisez une architecture, chargez un modèle .gguf/.json, importez un graphe (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) ou une base de données (dump .sql, SQLite .db/.sqlite) : les tables deviennent des clusters aux couleurs/formes propres reliés par leurs relations — visualisé en 3D."
+  de: "Erstelle eine Architektur, lade ein .gguf/.json-Modell, importiere eine Graphdatei (GraphML, GEXF, DOT, GDF, TGF, Pajek, SIF, Cytoscape/node-link/JSON-LD) oder eine Datenbank (.sql-Dump, SQLite .db/.sqlite): Tabellen werden zu Clustern mit eigenen Farben/Formen, verbunden durch ihre Relationen — in 3D dargestellt."
 
 "llm.net_arch":
   en: Architecture

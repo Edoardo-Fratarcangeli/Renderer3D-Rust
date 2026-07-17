@@ -28,6 +28,7 @@ use cgmath::{InnerSpace, Matrix4};
 
 use crate::llm::activation::{ActivationMode, ActivationState};
 use crate::llm::exporter::AnimExporter;
+use crate::llm::db_import;
 use crate::llm::graph_import;
 use crate::llm::loader;
 use crate::llm::network::{
@@ -67,7 +68,10 @@ type LayerSummary = (String, LayerKind, usize, (f32, f32, f32));
 // ─── Render data ─────────────────────────────────────────────────────────────
 
 pub struct LlmRenderData {
-    pub node_instances: Vec<InstanceRaw>,
+    /// Node instances grouped by primitive mesh. Layers without a per-layer
+    /// shape override (see [`crate::llm::network::Layer::shape`]) land in the
+    /// batch of the global render style's geometry.
+    pub node_batches: Vec<(GeometryType, Vec<InstanceRaw>)>,
     pub edge_vertices:  Vec<Vertex>,
     /// Solid edge beams (stretched cubes), used instead of line-list edges
     /// when [`LlmView::edge_width`] > 0 so links have configurable thickness.
@@ -296,9 +300,13 @@ impl LlmView {
                         ext if graph_import::is_graph_extension(ext) => {
                             graph_import::load_graph(&data, ext, &stem).map(|g| (g, None))
                         }
+                        ext if db_import::is_db_extension(ext) => {
+                            db_import::load_db(&data, ext, &stem).map(|g| (g, None))
+                        }
                         other => Err(format!(
                             "Unsupported format '.{other}'. Models: .json/.gguf — graphs: \
-                             .json/.cyjs/.graphml/.gexf/.gdf/.dot/.gv/.tgf/.net/.sif/.jsonld/.rj"
+                             .json/.cyjs/.graphml/.gexf/.gdf/.dot/.gv/.tgf/.net/.sif/.jsonld/.rj \
+                             — databases: .sql/.sqlite/.sqlite3/.db/.db3"
                         )),
                     }
                 });
@@ -719,7 +727,7 @@ impl LlmView {
 
     pub fn build_render_data(&mut self) -> LlmRenderData {
         let empty = || LlmRenderData {
-            node_instances: vec![],
+            node_batches: vec![],
             edge_vertices: vec![],
             edge_solid_instances: vec![],
         };
@@ -749,9 +757,19 @@ impl LlmView {
 
         let style = self.render_style;
         let style_mult = style.scale_mult();
-        let mut node_instances = Vec::new();
+        let default_geom = self.node_geometry();
+        let mut node_batches: Vec<(GeometryType, Vec<InstanceRaw>)> = Vec::new();
         for (li, layer) in graph.layers.iter().enumerate() {
             if !self.is_layer_visible(li, layer.kind) { continue; }
+            // Per-layer shape override (database tables) wins over the style.
+            let geom = layer.shape.unwrap_or(default_geom);
+            let batch = match node_batches.iter().position(|(g, _)| *g == geom) {
+                Some(idx) => idx,
+                None => {
+                    node_batches.push((geom, Vec::new()));
+                    node_batches.len() - 1
+                }
+            };
             // Accent color overrides the per-kind palette when enabled.
             let layer_col = if self.accent_enabled {
                 self.accent_color
@@ -805,7 +823,7 @@ impl LlmView {
                     node.position[1] * ds,
                     node.position[2] * ds,
                 ];
-                let p = if style == NodeStyle::Voxels {
+                let p = if style == NodeStyle::Voxels && layer.shape.is_none() {
                     snap_to_grid(scaled, self.voxel_grid)
                 } else {
                     scaled
@@ -813,7 +831,7 @@ impl LlmView {
                 let model = Matrix4::from_translation(cgmath::Vector3::new(p[0], p[1], p[2]))
                     * Matrix4::from_scale(scale);
 
-                node_instances.push(InstanceRaw {
+                node_batches[batch].1.push(InstanceRaw {
                     model: model.into(),
                     color: [r, g, b, alpha],
                 });
@@ -897,7 +915,7 @@ impl LlmView {
             }
         }
 
-        LlmRenderData { node_instances, edge_vertices, edge_solid_instances }
+        LlmRenderData { node_batches, edge_vertices, edge_solid_instances }
     }
 
     // ── Editable nodes table (data graphs) ──────────────────────────────────
@@ -930,18 +948,15 @@ impl LlmView {
                 let selected = self.selected_node;
                 let Some(graph) = self.graph.as_mut() else { return };
 
-                // Degree from the real edge list (data graphs use layer 0).
-                let n = graph.layers[0].nodes.len();
-                let mut degree = vec![0u32; n];
+                // Degree from the real edge list. Graph files keep every node
+                // in layer 0; database imports use one layer per table.
+                let mut degree: std::collections::HashMap<(usize, usize), u32> =
+                    std::collections::HashMap::new();
                 for e in &graph.edges {
-                    if let Some(d) = degree.get_mut(e.from_node) {
-                        *d += 1;
-                    }
-                    if let Some(d) = degree.get_mut(e.to_node) {
-                        *d += 1;
-                    }
+                    *degree.entry((e.from_layer, e.from_node)).or_default() += 1;
+                    *degree.entry((e.to_layer, e.to_node)).or_default() += 1;
                 }
-                let layer_col = graph.layers[0].kind.base_color();
+                let multi_layer = graph.layers.len() > 1;
 
                 let mut shown = 0usize;
                 egui::ScrollArea::vertical()
@@ -961,45 +976,61 @@ impl LlmView {
                                     ui.label(egui::RichText::new(h.to_string()).weak().small());
                                 }
                                 ui.end_row();
-                                for (ni, node) in graph.layers[0].nodes.iter_mut().enumerate() {
-                                    let label = node
-                                        .label
-                                        .clone()
-                                        .unwrap_or_else(|| ni.to_string());
-                                    if !filter.is_empty()
-                                        && !label.to_ascii_lowercase().contains(&filter)
-                                    {
-                                        continue;
+                                'outer: for (li, layer) in
+                                    graph.layers.iter_mut().enumerate()
+                                {
+                                    let layer_col = layer.kind.base_color();
+                                    let layer_name = layer.name.clone();
+                                    for (ni, node) in layer.nodes.iter_mut().enumerate() {
+                                        let mut label = node
+                                            .label
+                                            .clone()
+                                            .unwrap_or_else(|| ni.to_string());
+                                        if !filter.is_empty()
+                                            && !label.to_ascii_lowercase().contains(&filter)
+                                            && !layer_name.to_ascii_lowercase().contains(&filter)
+                                        {
+                                            continue;
+                                        }
+                                        if shown >= MAX_TABLE_ROWS {
+                                            break 'outer;
+                                        }
+                                        shown += 1;
+                                        if multi_layer {
+                                            label = format!("{layer_name} · {label}");
+                                        }
+                                        // Clicking a row selects the node in the
+                                        // 3D view and opens it in the inspector.
+                                        if ui
+                                            .selectable_label(selected == Some((li, ni)), label)
+                                            .clicked()
+                                        {
+                                            select = Some((li, ni));
+                                        }
+                                        ui.label(
+                                            degree
+                                                .get(&(li, ni))
+                                                .copied()
+                                                .unwrap_or(0)
+                                                .to_string(),
+                                        );
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut node.weight_magnitude)
+                                                    .range(0.05..=1.0)
+                                                    .speed(0.01),
+                                            )
+                                            .changed()
+                                        {
+                                            dirty = true;
+                                        }
+                                        let mut c = node.color.unwrap_or(layer_col);
+                                        if ui.color_edit_button_rgb(&mut c).changed() {
+                                            node.color = Some(c);
+                                            dirty = true;
+                                        }
+                                        ui.end_row();
                                     }
-                                    if shown >= MAX_TABLE_ROWS {
-                                        break;
-                                    }
-                                    shown += 1;
-                                    // Clicking a row selects the node in the
-                                    // 3D view and opens it in the inspector.
-                                    if ui
-                                        .selectable_label(selected == Some((0, ni)), label)
-                                        .clicked()
-                                    {
-                                        select = Some((0, ni));
-                                    }
-                                    ui.label(degree.get(ni).copied().unwrap_or(0).to_string());
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut node.weight_magnitude)
-                                                .range(0.05..=1.0)
-                                                .speed(0.01),
-                                        )
-                                        .changed()
-                                    {
-                                        dirty = true;
-                                    }
-                                    let mut c = node.color.unwrap_or(layer_col);
-                                    if ui.color_edit_button_rgb(&mut c).changed() {
-                                        node.color = Some(c);
-                                        dirty = true;
-                                    }
-                                    ui.end_row();
                                 }
                             });
                     });
@@ -1086,7 +1117,7 @@ impl LlmView {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.path_text)
-                    .hint_text("model.gguf  or  model.json")
+                    .hint_text("model.gguf · graph.graphml · dump.sql · data.sqlite")
                     .desired_width(310.0),
             );
             let loading = self.worker.is_some();

@@ -239,7 +239,7 @@ fn nodes(n: usize, w: f32) -> Vec<Node> {
 }
 
 fn layer(name: impl Into<String>, kind: LayerKind, n: usize, w: f32) -> Layer {
-    Layer { name: name.into(), kind, nodes: nodes(n, w) }
+    Layer { name: name.into(), kind, nodes: nodes(n, w), shape: None }
 }
 
 // ─── Architecture builders ─────────────────────────────────────────────────────
