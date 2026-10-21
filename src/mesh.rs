@@ -109,7 +109,7 @@ impl MeshData {
         use cgmath::InnerSpace;
         const EPS: f32 = 1e-7;
         let mut best: Option<f32> = None;
-        for tri in self.indices.chunks_exact(3) {
+        for tri in self.indices.as_chunks::<3>().0 {
             let v0 = vec3(self.vertices[tri[0] as usize].position);
             let v1 = vec3(self.vertices[tri[1] as usize].position);
             let v2 = vec3(self.vertices[tri[2] as usize].position);
@@ -187,7 +187,7 @@ fn triangulate(mode: gltf::mesh::Mode, idx: &[u32]) -> Vec<u32> {
 fn smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     use cgmath::InnerSpace;
     let mut acc = vec![cgmath::Vector3::new(0.0_f32, 0.0, 0.0); positions.len()];
-    for tri in indices.chunks_exact(3) {
+    for tri in indices.as_chunks::<3>().0 {
         let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
         let v0 = vec3(positions[i0]);
         let v1 = vec3(positions[i1]);

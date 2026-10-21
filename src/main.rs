@@ -30,7 +30,7 @@ fn load_icon() -> winit::window::Icon {
     let mut rgba_data = pixmap.take();
     // Tiny-skia uses premultiplied alpha, winit expects non-premultiplied alpha.
     // Convert it back:
-    for pixel in rgba_data.chunks_exact_mut(4) {
+    for pixel in rgba_data.as_chunks_mut::<4>().0 {
         let a = pixel[3] as f32 / 255.0;
         if a > 0.0 {
             pixel[0] = (pixel[0] as f32 / a).min(255.0) as u8;

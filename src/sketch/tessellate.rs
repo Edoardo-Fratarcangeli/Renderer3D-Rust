@@ -106,7 +106,7 @@ mod tests {
 
     /// Sum of triangle areas from an index list.
     fn triangulated_area(points: &[Vec2], tris: &[usize]) -> f32 {
-        tris.chunks_exact(3)
+        tris.as_chunks::<3>().0.iter()
             .map(|t| {
                 let a = points[t[0]];
                 let b = points[t[1]];
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(tris.len(), 6, "n-2 = 2 triangles");
         assert!((triangulated_area(&sq, &tris) - 4.0).abs() < 1e-4);
         // Each triangle is CCW (positive area via signed cross).
-        for t in tris.chunks_exact(3) {
+        for t in tris.as_chunks::<3>().0 {
             assert!(cross(sq[t[0]], sq[t[1]], sq[t[2]]) > 0.0);
         }
     }
@@ -143,7 +143,7 @@ mod tests {
         assert_eq!(tris.len(), (poly.len() - 2) * 3);
         // Shoelace area of the L: 4*1 + 1*2 = 6.
         assert!((triangulated_area(&poly, &tris) - 6.0).abs() < 1e-4);
-        for t in tris.chunks_exact(3) {
+        for t in tris.as_chunks::<3>().0 {
             assert!(cross(poly[t[0]], poly[t[1]], poly[t[2]]) > 0.0);
         }
     }
@@ -154,7 +154,7 @@ mod tests {
         let cw = [[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0]];
         let tris = triangulate(&cw).unwrap();
         assert!((triangulated_area(&cw, &tris) - 4.0).abs() < 1e-4);
-        for t in tris.chunks_exact(3) {
+        for t in tris.as_chunks::<3>().0 {
             assert!(cross(cw[t[0]], cw[t[1]], cw[t[2]]) > 0.0);
         }
     }
