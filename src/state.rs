@@ -1939,7 +1939,7 @@ impl State {
                 if pts.len() == 2 {
                     painter.line_segment(
                         [pts[0], pts[1]],
-                        egui::Stroke::new(2.0, egui::Color32::YELLOW),
+                        egui::Stroke::new(2.0_f32, egui::Color32::YELLOW),
                     );
                     let a = self.measure_points[0];
                     let b = self.measure_points[1];
