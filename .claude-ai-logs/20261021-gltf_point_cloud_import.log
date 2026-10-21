@@ -1,0 +1,50 @@
+TASK
+Integrate glTF/GLB point clouds (primitives with mode = POINTS) as true point
+datasets instead of feeding them to the solid-mesh importer.
+
+ROOT CAUSE
+mesh::load_gltf ignored primitive.mode(): a POINTS primitive without indices
+was indexed 0..n and drawn as a TriangleList, i.e. every 3 consecutive points
+became a bogus triangle; COLOR_0 was dropped; strips/fans were also misread.
+
+SOLUTION
+- src/dataset/pointcloud.rs (new): inspect() census of primitives by topology;
+  load_gltf() -> Dataset with x,y,z (node transforms applied), r,g,b (COLOR_0),
+  nx,ny,nz (NORMAL), every custom _ATTRIBUTE; _CLASSIFICATION -> LAS/ASPRS
+  categorical labels; label_column override -> contour bands; uniform stride
+  row budget (default 2M); explicit error for Draco/meshopt/quantization.
+- dataset::loader: gltf/glb dispatch + is_spatial_path() (direct projection
+  for CAE and point clouds). DatasetMetadata.color_columns (serde default).
+- visualization: ColorMode::Native + build_instances_colored() (build_instances
+  kept as wrapper, API unchanged). LoadedDataset.colors derived once.
+- ui: Native mode default when colors exist, "original colors" button in View
+  tab, recolor-by-column switches back to labels, import dialog field hints for
+  point clouds, DatasetView::import_point_cloud() handover.
+- mesh.rs: topology-aware (strip/fan triangulated, points/lines skipped,
+  points-only file -> clear error).
+- state.rs: model import worker inspects glTF; points -> Data window, triangles
+  -> solid; mixed files yield both.
+- Cargo: gltf feature "extras" (custom attributes). No new crates.
+- Locales (en/it/es/fr/de), README, docs/GEOMETRY_IMPORT.md.
+
+VERIFICATION
+cargo test: all green (new: 8 pointcloud unit, 2 mesh unit, 1 routing unit,
+3 integration). Benchmark (release, ignored): 40.8 MB GLB, 2.4M points with
+colors + classification -> load+index+projection in ~0.64 s.
+
+FILES
+Cargo.toml, README.md, docs/GEOMETRY_IMPORT.md, locales/dataset.yml,
+locales/geometry.yml, src/dataset/{pointcloud.rs,loader.rs,metadata.rs,mod.rs},
+src/mesh.rs, src/state.rs, src/ui/{mod.rs,import_dialog.rs},
+src/visualization/{color_mapper.rs,point_cloud.rs},
+tests/dataset/{pointcloud_tests.rs,helpers.rs,bench.rs,main.rs}
+
+OUT OF SCOPE (flagged)
+- Mesh glTF import still ignores node transforms (pre-existing).
+- Draco-compressed GLB unsupported (needs native decoder).
+- PLY / LAS / LAZ / E57 point clouds not yet supported.
+- Pre-existing warnings: float_literal_f32_fallback at src/state.rs (Stroke::new)
+  and src/ui/llm_panel.rs:1452; repo not rustfmt-clean.
+
+COMMIT
+feat(pointcloud): import glTF/GLB point clouds as point datasets

@@ -6,6 +6,7 @@
 //!
 //! - [`loader`] — multi-format import (NPY/NPZ/CSV/IDX, optional Parquet)
 //! - [`cae`] — CFD / FEM result files (VTK legacy, VTU/VTP, CalculiX FRD)
+//! - [`pointcloud`] — glTF / GLB point clouds (`mode = POINTS` primitives)
 //! - [`metadata`] — JSON-persisted dataset description
 //! - [`index`] — label index + filter/search evaluation
 //! - [`preprocessor`] — 3D projection (PCA) with a disk cache
@@ -18,6 +19,7 @@ pub mod export;
 pub mod index;
 pub mod loader;
 pub mod metadata;
+pub mod pointcloud;
 pub mod preprocessor;
 pub mod stream;
 

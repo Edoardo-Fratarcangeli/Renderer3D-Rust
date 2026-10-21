@@ -10,13 +10,25 @@ _version: 2
   fr: 📥 Importer des modèles 3D
   de: 📥 3D-Modelle importieren
 "geometry.model_formats_hint":
-  en: "From AutoCAD, SketchUp, Blender or SolidWorks: export to STL / OBJ / glTF and import here."
-  it: "Da AutoCAD, SketchUp, Blender o SolidWorks: esporta in STL / OBJ / glTF e importa qui."
-  es: "Desde AutoCAD, SketchUp, Blender o SolidWorks: exporta a STL / OBJ / glTF e impórtalo aquí."
-  fr: "Depuis AutoCAD, SketchUp, Blender ou SolidWorks : exportez en STL / OBJ / glTF puis importez ici."
-  de: "Aus AutoCAD, SketchUp, Blender oder SolidWorks: als STL / OBJ / glTF exportieren und hier importieren."
+  en: "From AutoCAD, SketchUp, Blender or SolidWorks: export to STL / OBJ / glTF and import here. glTF/GLB point clouds open in the Data window."
+  it: "Da AutoCAD, SketchUp, Blender o SolidWorks: esporta in STL / OBJ / glTF e importa qui. Le nuvole di punti glTF/GLB si aprono nella finestra Dati."
+  es: "Desde AutoCAD, SketchUp, Blender o SolidWorks: exporta a STL / OBJ / glTF e impórtalo aquí. Las nubes de puntos glTF/GLB se abren en la ventana Datos."
+  fr: "Depuis AutoCAD, SketchUp, Blender ou SolidWorks : exportez en STL / OBJ / glTF puis importez ici. Les nuages de points glTF/GLB s'ouvrent dans la fenêtre Données."
+  de: "Aus AutoCAD, SketchUp, Blender oder SolidWorks: als STL / OBJ / glTF exportieren und hier importieren. glTF/GLB-Punktwolken öffnen sich im Daten-Fenster."
 
 # ── 3D model import ──────────────────────────────────────────────────────────
+"geometry.point_cloud_routed":
+  en: "%{path}: point cloud detected — opened in the Data window"
+  it: "%{path}: nuvola di punti rilevata — aperta nella finestra Dati"
+  es: "%{path}: nube de puntos detectada — abierta en la ventana Datos"
+  fr: "%{path} : nuage de points détecté — ouvert dans la fenêtre Données"
+  de: "%{path}: Punktwolke erkannt — im Daten-Fenster geöffnet"
+"geometry.no_renderable_primitives":
+  en: glTF has neither triangles nor points to display (lines are not supported)
+  it: il glTF non contiene né triangoli né punti da visualizzare (le linee non sono supportate)
+  es: el glTF no contiene triángulos ni puntos que mostrar (las líneas no se admiten)
+  fr: le glTF ne contient ni triangles ni points à afficher (les lignes ne sont pas prises en charge)
+  de: glTF enthält weder Dreiecke noch Punkte zur Anzeige (Linien werden nicht unterstützt)
 "geometry.import_model_heading":
   en: Import a 3D model
   it: Importa un modello 3D

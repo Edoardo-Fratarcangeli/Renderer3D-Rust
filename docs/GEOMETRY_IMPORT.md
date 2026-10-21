@@ -42,7 +42,30 @@ measured and picked like any primitive.
 
 - **STL** — binary/ASCII triangle soup (per-face normals).
 - **OBJ** — Wavefront meshes (smooth normals computed if absent).
-- **glTF / GLB** — positions, normals and indices from all primitives.
+- **glTF / GLB** — positions, normals and indices from every triangle
+  primitive (lists, strips and fans). Point primitives (`mode = POINTS`)
+  are **not** turned into faces: a file holding a point cloud is routed to
+  the Data window (see below), and a file mixing both yields a solid plus a
+  point cloud. Line primitives are skipped. Files requiring Draco / meshopt
+  / quantization extensions are refused with an explicit message.
+
+### glTF / GLB point clouds
+
+Point clouds load through the dataset pipeline (`src/dataset/pointcloud.rs`),
+from the Data window's import form or handed over by the Solids window:
+
+- Columns: `x, y, z` (node transforms applied), `r, g, b` from `COLOR_0`,
+  `nx, ny, nz` from `NORMAL`, plus every custom `_ATTRIBUTE` (lowercased,
+  vectors split into `name_0..n`).
+- Labels: `_CLASSIFICATION` becomes categorical labels named after the
+  ASPRS/LAS classes (ground, building, vegetation, …); the *Field* box
+  overrides it with any column, quantized into contour bands.
+- Rendering: instanced points in their **original colors** (View tab →
+  *original colors*), switchable to per-label or by-distance coloring.
+  Filters, search, spatial volumes, the synced table, picking and CSV export
+  all apply.
+- Large clouds: the row cap (default 2M) is applied as a uniform stride over
+  the whole cloud; the renderer then caps the instances it draws.
 - **STEP** (`.step`/`.stp`) — recognised but **not yet tessellated**; it
   returns a clear "not supported yet" error.
 

@@ -26,6 +26,10 @@ pub struct DatasetMetadata {
     pub labels: Vec<LabelStat>,
     /// Whether the feature matrix is memory mapped rather than RAM-resident.
     pub memory_mapped: bool,
+    /// Feature columns holding a native per-point RGB color (linear, 0..1),
+    /// e.g. the `COLOR_0` of a glTF point cloud.
+    #[serde(default)]
+    pub color_columns: Option<[usize; 3]>,
     /// Unix timestamp (seconds) of creation.
     pub created_at: u64,
 }
@@ -42,6 +46,7 @@ impl DatasetMetadata {
             label_column: None,
             labels: Vec::new(),
             memory_mapped: false,
+            color_columns: None,
             created_at: now_unix(),
         }
     }
