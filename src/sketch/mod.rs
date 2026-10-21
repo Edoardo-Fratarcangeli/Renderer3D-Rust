@@ -158,11 +158,11 @@ impl Sketch {
 
         let mut indices = Vec::with_capacity(tris.len() * 2);
         // Front faces keep the CCW (→ +normal) winding from the tessellator.
-        for t in tris.chunks_exact(3) {
+        for t in tris.as_chunks::<3>().0 {
             indices.extend_from_slice(&[t[0] as u32, t[1] as u32, t[2] as u32]);
         }
         // Back faces: reversed winding, offset into the -normal vertex block.
-        for t in tris.chunks_exact(3) {
+        for t in tris.as_chunks::<3>().0 {
             indices.extend_from_slice(&[(t[0] + n) as u32, (t[2] + n) as u32, (t[1] + n) as u32]);
         }
         Ok(MeshData { vertices, indices })
@@ -317,7 +317,7 @@ mod tests {
         // Sum the front triangle areas (first half of the index list).
         let front = mesh.indices.len() / 2;
         let mut area = 0.0;
-        for t in mesh.indices[..front].chunks_exact(3) {
+        for t in mesh.indices[..front].as_chunks::<3>().0 {
             let p0 = cgmath::Vector3::from(mesh.vertices[t[0] as usize].position);
             let p1 = cgmath::Vector3::from(mesh.vertices[t[1] as usize].position);
             let p2 = cgmath::Vector3::from(mesh.vertices[t[2] as usize].position);

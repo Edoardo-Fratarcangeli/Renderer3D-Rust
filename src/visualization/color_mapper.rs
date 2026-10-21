@@ -47,6 +47,10 @@ pub enum ColorMode {
     /// Sequential gradient driven by the distance from the cloud center,
     /// turning the radial distance into an extra visual dimension.
     ByDistance,
+    /// The native per-point color shipped with the data (e.g. a scanned
+    /// point cloud's RGB). Falls back to [`ColorMode::ByLabel`] when the
+    /// dataset carries none.
+    Native,
 }
 
 /// Sequential viridis-like gradient for a normalized scalar `t` in `[0, 1]`

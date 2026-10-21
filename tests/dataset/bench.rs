@@ -68,3 +68,31 @@ fn bench_instance_build_200k() {
         t.elapsed()
     );
 }
+
+/// Real-world scale: a ~40 MB GLB scan (2.4M points with colors and
+/// classification) through load + index + direct projection.
+#[test]
+#[ignore]
+fn bench_glb_point_cloud_40mb() {
+    use rendering_3d::dataset::preprocessor::ProjectionSpec;
+    use rendering_3d::ui::load_dataset_pipeline_opts;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = helpers::write_point_cloud_glb(dir.path(), "scan.glb", 2_400_000);
+    let mb = std::fs::metadata(&path).unwrap().len() as f64 / 1e6;
+    let opts = LoadOptions {
+        max_rows: Some(2_400_000),
+        label_column: None,
+    };
+    let spec = ProjectionSpec::full(ProjectionMethod::Direct);
+    let t = Instant::now();
+    let loaded = load_dataset_pipeline_opts(&path, &opts, &spec, None).unwrap();
+    println!(
+        "GLB point cloud {:.1} MB, {} points: {:?}",
+        mb,
+        loaded.dataset.n_rows(),
+        t.elapsed()
+    );
+    assert_eq!(loaded.dataset.n_rows(), 2_400_000);
+    assert!(loaded.colors.is_some());
+}

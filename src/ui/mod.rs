@@ -44,6 +44,7 @@ use crate::dataset::stream::{StreamConfig, StreamEvent, StreamSession};
 use crate::dataset::{builtin, loader, Dataset, DatasetIndex};
 use crate::llm::catalog::NetArch;
 use crate::llm::network::NodeStyle;
+use crate::visualization::color_mapper::ColorMode;
 use crate::visualization::point_cloud::{self, PointCloudSettings};
 use crate::visualization::spatial::{self, FilterVolume, SpatialCombine, SpatialMode};
 
@@ -58,6 +59,9 @@ pub struct LoadedDataset {
     pub index: DatasetIndex,
     /// Normalized 3D coordinates, one per row.
     pub projection: Projection,
+    /// Native per-row RGB colors, when the source ships them (see
+    /// [`crate::dataset::DatasetMetadata::color_columns`]).
+    pub colors: Option<Vec<[f32; 3]>>,
 }
 
 /// What the dataset UI asks the host (`State`) to do this frame.
@@ -72,7 +76,7 @@ pub enum DatasetAction {
 /// Where an import should read from.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportSource {
-    /// A dataset file on disk (NPY/NPZ/CSV/IDX/Parquet).
+    /// A dataset file on disk (NPY/NPZ/CSV/IDX/Parquet/CAE/glTF point cloud).
     Path(PathBuf),
     /// One of the synthetic benchmark generators (see [`builtin`]).
     Builtin(&'static str),
@@ -439,6 +443,13 @@ impl DatasetView {
         // Fresh dataset, fresh editable color table (palette defaults).
         self.settings.label_colors =
             crate::visualization::color_mapper::palette(loaded.dataset.label_names.len());
+        // Data shipping its own colors (scanned point clouds) shows them by
+        // default; otherwise never stay on a native mode with nothing to show.
+        if loaded.colors.is_some() {
+            self.settings.color_mode = ColorMode::Native;
+        } else if self.settings.color_mode == ColorMode::Native {
+            self.settings.color_mode = ColorMode::ByLabel;
+        }
         // Point the View tab's "color bands" section at the column the labels
         // came from (when they came from a column at all).
         self.recolor_col = loaded
@@ -503,6 +514,21 @@ impl DatasetView {
             (sum[1] / n) as f32,
             (sum[2] / n) as f32,
         ])
+    }
+
+    /// Import a point cloud handed over by another window (a glTF/GLB opened
+    /// as a 3D model): geometry is projected directly, the Data window opens
+    /// on the Import tab so progress and the result summary are visible.
+    pub fn import_point_cloud(&mut self, path: PathBuf) {
+        self.import.path_text = path.display().to_string();
+        self.show_window = true;
+        self.tab = DatasetTab::Import;
+        self.start_import(ImportRequest {
+            source: ImportSource::Path(path),
+            max_rows: self.import.limit_rows.then_some(self.import.max_rows),
+            projection: ProjectionSpec::full(ProjectionMethod::Direct),
+            cae_field: None,
+        });
     }
 
     /// Remove the loaded dataset and clear the rendered point cloud.
@@ -795,6 +821,10 @@ impl DatasetView {
         let column = loaded.dataset.metadata.label_column.clone().unwrap_or_default();
         self.enabled_labels = (0..n_labels as u32).collect();
         self.settings.label_colors = crate::visualization::color_mapper::palette(n_labels);
+        // Asking for bands means showing them, not the native colors.
+        if self.settings.color_mode == ColorMode::Native {
+            self.settings.color_mode = ColorMode::ByLabel;
+        }
         self.recompute_visible();
         self.import.status = Some(StatusMessage::success(
             t!(
@@ -820,9 +850,10 @@ impl DatasetView {
         let Some(loaded) = &self.loaded else {
             return empty();
         };
-        let result = point_cloud::build_instances(
+        let result = point_cloud::build_instances_colored(
             &loaded.projection.points,
             &loaded.dataset.labels,
+            loaded.colors.as_deref(),
             &self.visible_rows,
             &self.settings,
         );
@@ -1049,7 +1080,6 @@ impl DatasetView {
                             .changed();
                         ui.end_row();
 
-                        use crate::visualization::color_mapper::ColorMode;
                         use crate::visualization::geometry_assigner::GeometryPolicy;
 
                         // Shape channel: uniform, per label, or by distance.
@@ -1085,11 +1115,26 @@ impl DatasetView {
 
                         // Color channel: per label, or by distance from center.
                         ui.label(t!("dataset.color_channel").to_string());
+                        let has_native = self
+                            .loaded
+                            .as_ref()
+                            .is_some_and(|l| l.colors.is_some());
                         ui.horizontal(|ui| {
-                            let by_label = self.settings.color_mode == ColorMode::ByLabel;
+                            let mode = self.settings.color_mode;
+                            if has_native
+                                && ui
+                                    .selectable_label(
+                                        mode == ColorMode::Native,
+                                        t!("dataset.color_native").to_string(),
+                                    )
+                                    .clicked()
+                            {
+                                self.settings.color_mode = ColorMode::Native;
+                                changed = true;
+                            }
                             if ui
                                 .selectable_label(
-                                    by_label,
+                                    mode == ColorMode::ByLabel,
                                     t!("dataset.color_by_label").to_string(),
                                 )
                                 .clicked()
@@ -1098,7 +1143,10 @@ impl DatasetView {
                                 changed = true;
                             }
                             if ui
-                                .selectable_label(!by_label, t!("dataset.by_distance").to_string())
+                                .selectable_label(
+                                    mode == ColorMode::ByDistance,
+                                    t!("dataset.by_distance").to_string(),
+                                )
                                 .clicked()
                             {
                                 self.settings.color_mode = ColorMode::ByDistance;
@@ -1309,11 +1357,11 @@ impl DatasetView {
                 ));
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.worker = Some(rx);
-                // CFD/FEM result files carry real geometry in their first
-                // three columns: project them directly so the mesh shape is
-                // preserved (PCA/radial would scramble it). The View tab can
-                // still reproject afterwards.
-                let spec = if crate::dataset::cae::is_cae_path(&path) {
+                // CFD/FEM results and point clouds carry real geometry in
+                // their first three columns: project them directly so the
+                // shape is preserved (PCA/radial would scramble it). The View
+                // tab can still reproject afterwards.
+                let spec = if loader::is_spatial_path(&path) {
                     ProjectionSpec {
                         method: ProjectionMethod::Direct,
                         dims: 3,
@@ -1444,11 +1492,34 @@ pub fn prepare_dataset_spec(
             .save_json(&dir.join(format!("{:016x}.meta.json", key)));
     }
 
+    let colors = native_colors(&dataset);
+
     Ok(LoadedDataset {
         dataset,
         index,
         projection,
+        colors,
     })
+}
+
+/// Per-row colors from the dataset's declared RGB columns, if any.
+fn native_colors(dataset: &Dataset) -> Option<Vec<[f32; 3]>> {
+    let [r, g, b] = dataset.metadata.color_columns?;
+    let n_cols = dataset.n_cols();
+    if r >= n_cols || g >= n_cols || b >= n_cols {
+        return None;
+    }
+    Some(
+        (0..dataset.n_rows())
+            .map(|row| {
+                [
+                    dataset.value(row, r).clamp(0.0, 1.0),
+                    dataset.value(row, g).clamp(0.0, 1.0),
+                    dataset.value(row, b).clamp(0.0, 1.0),
+                ]
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

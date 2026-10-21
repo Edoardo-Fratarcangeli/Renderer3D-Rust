@@ -109,7 +109,7 @@ impl MeshData {
         use cgmath::InnerSpace;
         const EPS: f32 = 1e-7;
         let mut best: Option<f32> = None;
-        for tri in self.indices.chunks_exact(3) {
+        for tri in self.indices.as_chunks::<3>().0 {
             let v0 = vec3(self.vertices[tri[0] as usize].position);
             let v1 = vec3(self.vertices[tri[1] as usize].position);
             let v2 = vec3(self.vertices[tri[2] as usize].position);
@@ -162,11 +162,32 @@ fn build(positions: Vec<[f32; 3]>, normals: Option<Vec<[f32; 3]>>, indices: Vec<
     MeshData { vertices, indices }
 }
 
+/// Expand a glTF triangle strip / fan into a plain triangle list (strip
+/// winding alternates so every triangle keeps the same orientation).
+fn triangulate(mode: gltf::mesh::Mode, idx: &[u32]) -> Vec<u32> {
+    use gltf::mesh::Mode;
+    match mode {
+        Mode::TriangleStrip => (0..idx.len().saturating_sub(2))
+            .flat_map(|i| {
+                if i % 2 == 0 {
+                    [idx[i], idx[i + 1], idx[i + 2]]
+                } else {
+                    [idx[i + 1], idx[i], idx[i + 2]]
+                }
+            })
+            .collect(),
+        Mode::TriangleFan => (1..idx.len().saturating_sub(1))
+            .flat_map(|i| [idx[0], idx[i], idx[i + 1]])
+            .collect(),
+        _ => idx[..idx.len() - idx.len() % 3].to_vec(),
+    }
+}
+
 /// Area-weighted smooth normals, used when a model ships without normals.
 fn smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     use cgmath::InnerSpace;
     let mut acc = vec![cgmath::Vector3::new(0.0_f32, 0.0, 0.0); positions.len()];
-    for tri in indices.chunks_exact(3) {
+    for tri in indices.as_chunks::<3>().0 {
         let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
         let v0 = vec3(positions[i0]);
         let v1 = vec3(positions[i1]);
@@ -248,13 +269,29 @@ fn load_obj(path: &Path) -> Result<MeshData> {
 }
 
 fn load_gltf(path: &Path) -> Result<MeshData> {
-    let (doc, buffers, _) = gltf::import(path)?;
+    let (doc, buffers, _) = gltf::import(path)
+        .map_err(|e| anyhow!(crate::dataset::pointcloud::describe_error(&e)))?;
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     let mut indices = Vec::new();
     let mut have_normals = true;
+    let mut skipped_points = 0usize;
     for mesh in doc.meshes() {
         for primitive in mesh.primitives() {
+            let mode = primitive.mode();
+            match mode {
+                gltf::mesh::Mode::Triangles
+                | gltf::mesh::Mode::TriangleStrip
+                | gltf::mesh::Mode::TriangleFan => {}
+                // Points and lines have no faces: stitching them into
+                // triangles would draw garbage. Point clouds go through the
+                // dataset importer instead (`dataset::pointcloud`).
+                gltf::mesh::Mode::Points => {
+                    skipped_points += 1;
+                    continue;
+                }
+                _ => continue,
+            }
             let reader = primitive.reader(|b| buffers.get(b.index()).map(|d| &d.0[..]));
             let pos = reader
                 .read_positions()
@@ -268,12 +305,18 @@ fn load_gltf(path: &Path) -> Result<MeshData> {
             } else {
                 have_normals = false;
             }
-            match reader.read_indices() {
-                Some(it) => indices.extend(it.into_u32().map(|i| base + i)),
-                // No index buffer → triangles are the vertex sequence.
-                None => indices.extend((0..added as u32).map(|i| base + i)),
-            }
+            // No index buffer → the vertex sequence itself.
+            let local: Vec<u32> = match reader.read_indices() {
+                Some(it) => it.into_u32().collect(),
+                None => (0..added as u32).collect(),
+            };
+            indices.extend(triangulate(mode, &local).into_iter().map(|i| base + i));
         }
+    }
+    if positions.is_empty() && skipped_points > 0 {
+        return Err(anyhow!(
+            "glTF holds a point cloud, not a solid — import it from the Data window"
+        ));
     }
     let normals = if have_normals && normals.len() == positions.len() {
         Some(normals)
@@ -478,6 +521,69 @@ mod tests {
         // Provided normals are preserved (point along +z).
         assert!(mesh.vertices.iter().all(|v| (v.normal[2] - 1.0).abs() < 1e-5));
         assert_eq!(mesh.aabb(), ([0.0, 0.0, 0.0], [1.0, 1.0, 0.0]));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn strips_and_fans_expand_to_triangle_lists() {
+        use gltf::mesh::Mode;
+        assert_eq!(
+            triangulate(Mode::TriangleStrip, &[0, 1, 2, 3]),
+            vec![0, 1, 2, 2, 1, 3]
+        );
+        assert_eq!(
+            triangulate(Mode::TriangleFan, &[0, 1, 2, 3]),
+            vec![0, 1, 2, 0, 2, 3]
+        );
+        // A dangling partial triangle is dropped, never read out of range.
+        assert_eq!(triangulate(Mode::Triangles, &[0, 1, 2, 3]), vec![0, 1, 2]);
+        assert!(triangulate(Mode::TriangleStrip, &[0, 1]).is_empty());
+    }
+
+    #[test]
+    fn gltf_point_primitives_are_not_stitched_into_triangles() {
+        let dir = std::env::temp_dir().join(format!("r3d_gltf_pts_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut bin = Vec::new();
+        for c in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0] {
+            bin.extend_from_slice(&c.to_le_bytes());
+        }
+        std::fs::write(dir.join("pts.bin"), &bin).unwrap();
+        let accessors = r#""accessors": [{ "bufferView": 0, "componentType": 5126, "count": 4,
+            "type": "VEC3", "min": [0.0,0.0,0.0], "max": [1.0,1.0,0.0] }]"#;
+        let header = r#""asset": { "version": "2.0" },
+  "buffers": [{ "uri": "pts.bin", "byteLength": 48 }],
+  "bufferViews": [{ "buffer": 0, "byteOffset": 0, "byteLength": 48 }]"#;
+
+        // Points only: refused with a pointer to the Data window.
+        let only_points = dir.join("points.gltf");
+        std::fs::write(
+            &only_points,
+            format!(
+                r#"{{ {header}, {accessors},
+  "meshes": [{{ "primitives": [{{ "mode": 0, "attributes": {{ "POSITION": 0 }} }}] }}] }}"#
+            ),
+        )
+        .unwrap();
+        let err = MeshData::load(&only_points).unwrap_err().to_string();
+        assert!(err.contains("point cloud"), "{err}");
+
+        // Mixed: the strip becomes 2 triangles, the points are ignored.
+        let mixed = dir.join("mixed.gltf");
+        std::fs::write(
+            &mixed,
+            format!(
+                r#"{{ {header}, {accessors},
+  "meshes": [{{ "primitives": [
+    {{ "mode": 0, "attributes": {{ "POSITION": 0 }} }},
+    {{ "mode": 5, "attributes": {{ "POSITION": 0 }} }}
+  ] }}] }}"#
+            ),
+        )
+        .unwrap();
+        let mesh = MeshData::load(&mixed).unwrap();
+        assert_eq!(mesh.vertices.len(), 4);
+        assert_eq!(mesh.indices, vec![0, 1, 2, 2, 1, 3]);
         std::fs::remove_dir_all(&dir).ok();
     }
 

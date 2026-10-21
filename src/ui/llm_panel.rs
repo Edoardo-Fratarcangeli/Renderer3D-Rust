@@ -1449,7 +1449,7 @@ impl LlmView {
             for i in 0..n.saturating_sub(1) {
                 painter.line_segment(
                     [to_px(i, self.loss_history[i]), to_px(i + 1, self.loss_history[i + 1])],
-                    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 170, 40)),
+                    egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 170, 40)),
                 );
             }
             if let Some(&last_loss) = self.loss_history.last() {

@@ -170,7 +170,7 @@ pub struct State {
 
     // Imported 3D solid models (STL/OBJ/glTF), keyed by scene-object id.
     pub custom_meshes: std::collections::HashMap<usize, CustomMesh>,
-    mesh_worker: Option<std::sync::mpsc::Receiver<Result<(crate::mesh::MeshData, String), String>>>,
+    mesh_worker: Option<std::sync::mpsc::Receiver<Result<ModelImport, String>>>,
     // Low-poly sphere used for instanced batches above LOD_SPHERE_THRESHOLD
     // instances, so huge point clouds stay fast.
     sphere_lod_mesh: MeshBuffers,
@@ -620,6 +620,10 @@ impl State {
     }
 
     /// Spawn a worker thread that loads a 3D model file off the UI thread.
+    ///
+    /// glTF files are inspected first: point primitives are routed to the
+    /// dataset pipeline (instanced point cloud + filters + table) and only
+    /// the triangle primitives, if any, become a solid mesh object.
     pub fn spawn_mesh_load(&mut self, path: std::path::PathBuf) {
         self.geometry_view.mesh_loading = true;
         self.geometry_view.status = Some(crate::ui::StatusMessage::info(t!(
@@ -629,15 +633,7 @@ impl State {
         let (tx, rx) = std::sync::mpsc::channel();
         self.mesh_worker = Some(rx);
         std::thread::spawn(move || {
-            let label = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("model")
-                .to_string();
-            let result = crate::mesh::MeshData::load(&path)
-                .map(|mesh| (mesh, label))
-                .map_err(|e| e.to_string());
-            let _ = tx.send(result);
+            let _ = tx.send(load_model_import(path));
         });
     }
 
@@ -645,10 +641,19 @@ impl State {
     fn poll_mesh_worker(&mut self) {
         let Some(rx) = &self.mesh_worker else { return };
         match rx.try_recv() {
-            Ok(Ok((mesh, label))) => {
+            Ok(Ok(import)) => {
                 self.mesh_worker = None;
                 self.geometry_view.mesh_loading = false;
-                self.add_mesh_object(mesh, label);
+                if let Some(path) = import.point_cloud {
+                    self.geometry_view.status = Some(crate::ui::StatusMessage::info(t!(
+                        "geometry.point_cloud_routed",
+                        path = path.display().to_string()
+                    )));
+                    self.dataset_view.import_point_cloud(path);
+                }
+                if let Some((mesh, label)) = import.mesh {
+                    self.add_mesh_object(mesh, label);
+                }
             }
             Ok(Err(msg)) => {
                 self.mesh_worker = None;
@@ -1934,7 +1939,7 @@ impl State {
                 if pts.len() == 2 {
                     painter.line_segment(
                         [pts[0], pts[1]],
-                        egui::Stroke::new(2.0, egui::Color32::YELLOW),
+                        egui::Stroke::new(2.0_f32, egui::Color32::YELLOW),
                     );
                     let a = self.measure_points[0];
                     let b = self.measure_points[1];
@@ -2522,5 +2527,97 @@ impl State {
         output.present();
 
         Ok(())
+    }
+}
+
+/// Outcome of a 3D-model import: a solid mesh, a point cloud to hand to the
+/// dataset pipeline, or both (a glTF mixing triangle and point primitives).
+struct ModelImport {
+    mesh: Option<(crate::mesh::MeshData, String)>,
+    point_cloud: Option<std::path::PathBuf>,
+}
+
+/// Worker body of [`State::spawn_mesh_load`].
+fn load_model_import(path: std::path::PathBuf) -> Result<ModelImport, String> {
+    let label = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("model")
+        .to_string();
+    let content = if crate::dataset::pointcloud::is_point_cloud_path(&path) {
+        Some(crate::dataset::pointcloud::inspect(&path).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let has_points = content.is_some_and(|c| c.has_points());
+    let has_triangles = content.is_none_or(|c| c.has_triangles());
+    let mesh = if has_triangles {
+        Some(crate::mesh::MeshData::load(&path).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    if mesh.is_none() && !has_points {
+        return Err(t!("geometry.no_renderable_primitives").to_string());
+    }
+    Ok(ModelImport {
+        mesh: mesh.map(|m| (m, label)),
+        point_cloud: has_points.then_some(path),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `.gltf` sharing one 4-vertex buffer between the given primitives
+    /// (JSON fragments such as `{"mode":0,"attributes":{"POSITION":0}}`).
+    fn write_gltf(dir: &std::path::Path, name: &str, primitives: &str) -> std::path::PathBuf {
+        let mut bin = Vec::new();
+        for c in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0] {
+            bin.extend_from_slice(&c.to_le_bytes());
+        }
+        std::fs::write(dir.join("v.bin"), &bin).unwrap();
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"asset":{{"version":"2.0"}},
+"buffers":[{{"uri":"v.bin","byteLength":48}}],
+"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":48}}],
+"accessors":[{{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3",
+  "min":[0,0,0],"max":[1,1,0]}}],
+"meshes":[{{"primitives":[{primitives}]}}]}}"#
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn model_import_routes_point_clouds_to_the_dataset_pipeline() {
+        let dir = std::env::temp_dir().join(format!("r3d_route_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let points = r#"{"mode":0,"attributes":{"POSITION":0}}"#;
+        let tris = r#"{"mode":4,"attributes":{"POSITION":0}}"#;
+        let lines = r#"{"mode":1,"attributes":{"POSITION":0}}"#;
+
+        let only_points = write_gltf(&dir, "points.gltf", points);
+        let import = load_model_import(only_points.clone()).unwrap();
+        assert!(import.mesh.is_none());
+        assert_eq!(import.point_cloud, Some(only_points));
+
+        let mixed = write_gltf(&dir, "mixed.gltf", &format!("{points},{tris}"));
+        let import = load_model_import(mixed.clone()).unwrap();
+        let (mesh, label) = import.mesh.expect("triangles become a solid");
+        assert_eq!((mesh.triangle_count(), label.as_str()), (1, "mixed"));
+        assert_eq!(import.point_cloud, Some(mixed));
+
+        let solid = write_gltf(&dir, "solid.gltf", tris);
+        let import = load_model_import(solid).unwrap();
+        assert!(import.mesh.is_some() && import.point_cloud.is_none());
+
+        let only_lines = write_gltf(&dir, "lines.gltf", lines);
+        assert!(load_model_import(only_lines).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

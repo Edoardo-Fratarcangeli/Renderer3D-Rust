@@ -7,5 +7,6 @@ mod helpers;
 mod index_tests;
 mod loader_tests;
 mod metadata_tests;
+mod pointcloud_tests;
 mod preprocessor_tests;
 mod smoke;

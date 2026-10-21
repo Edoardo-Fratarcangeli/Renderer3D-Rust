@@ -44,7 +44,7 @@ pub fn solid_to_mesh(solid: &Solid) -> MeshData {
         };
 
         // Each triangle gets its own three vertices carrying the face normal.
-        for t in tris.chunks_exact(3) {
+        for t in tris.as_chunks::<3>().0 {
             let base = vertices.len() as u32;
             for &li in t {
                 vertices.push(Vertex {
@@ -155,7 +155,7 @@ mod tests {
         let center = Vector3::new(0.5, 0.5, 0.5);
         // For an outward-oriented closed solid, each triangle's flat normal
         // should point away from the centroid.
-        for t in mesh.indices.chunks_exact(3) {
+        for t in mesh.indices.as_chunks::<3>().0 {
             let p = Vector3::from(mesh.vertices[t[0] as usize].position);
             let nrm = Vector3::from(mesh.vertices[t[0] as usize].normal);
             let outward = (p - center).dot(nrm);

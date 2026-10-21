@@ -572,7 +572,7 @@ fn parse_vtk_legacy(bytes: &[u8], budget: usize) -> Result<(CaeMesh, Option<Stri
                 let elem = vtk_elem(cur.token()?)?;
                 set_count(&mut n_points, &mut stride, n)?;
                 let vals = read_tuples(&mut cur, n, 3, elem, ascii, stride, true)?;
-                points = Some(vals.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect());
+                points = Some(vals.as_chunks::<3>().0.to_vec());
             }
             "X_COORDINATES" | "Y_COORDINATES" | "Z_COORDINATES" => {
                 let axis = match kw.as_bytes()[0].to_ascii_uppercase() {
@@ -1259,7 +1259,7 @@ fn parse_vtk_xml(map: &[u8], budget: usize) -> Result<(CaeMesh, Option<String>)>
             pcomp
         )));
     }
-    let points: Vec<[f32; 3]> = pvals.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+    let points: Vec<[f32; 3]> = pvals.as_chunks::<3>().0.to_vec();
 
     let mut fields = Vec::new();
     let mut default_field = None;

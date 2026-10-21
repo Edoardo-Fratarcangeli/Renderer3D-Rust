@@ -98,25 +98,30 @@ pub fn show(ui: &mut egui::Ui, state: &mut ImportState) -> Option<ImportRequest>
             });
             ui.end_row();
 
-            // CFD/FEM result files (.vtk/.vtu/.vtp/.frd): pick the result
-            // field colored as contour bands. Geometry is projected directly
-            // (x/y/z), so the projection controls below do not apply to them.
-            let is_cae = crate::dataset::cae::is_cae_path(std::path::Path::new(
-                state.path_text.trim(),
-            ));
-            if is_cae {
+            // CFD/FEM results (.vtk/.vtu/.vtp/.frd) and glTF/GLB point
+            // clouds: pick the field/column colored as contour bands.
+            // Geometry is projected directly (x/y/z), so the projection
+            // controls below do not apply to them.
+            let typed = std::path::Path::new(state.path_text.trim());
+            let hints = if crate::dataset::cae::is_cae_path(typed) {
+                Some((t!("dataset.cae_field_hint"), t!("dataset.cae_file_hint")))
+            } else if crate::dataset::pointcloud::is_point_cloud_path(typed) {
+                Some((
+                    t!("dataset.point_cloud_field_hint"),
+                    t!("dataset.point_cloud_file_hint"),
+                ))
+            } else {
+                None
+            };
+            if let Some((field_hint, file_hint)) = hints {
                 ui.label(t!("dataset.cae_field").to_string());
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.cae_field)
                             .desired_width(160.0)
-                            .hint_text(t!("dataset.cae_field_hint").to_string()),
+                            .hint_text(field_hint.to_string()),
                     );
-                    ui.label(
-                        egui::RichText::new(t!("dataset.cae_file_hint").to_string())
-                            .weak()
-                            .small(),
-                    );
+                    ui.label(egui::RichText::new(file_hint.to_string()).weak().small());
                 });
                 ui.end_row();
             }

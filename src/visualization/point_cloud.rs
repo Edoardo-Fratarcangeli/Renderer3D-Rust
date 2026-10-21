@@ -75,6 +75,18 @@ pub fn build_instances(
     visible_rows: &[u32],
     settings: &PointCloudSettings,
 ) -> PointCloudBuildResult {
+    build_instances_colored(points, labels, None, visible_rows, settings)
+}
+
+/// [`build_instances`] with optional native per-row colors (indexed by
+/// absolute row id), used by [`ColorMode::Native`].
+pub fn build_instances_colored(
+    points: &[[f32; 3]],
+    labels: &[u32],
+    native_colors: Option<&[[f32; 3]]>,
+    visible_rows: &[u32],
+    settings: &PointCloudSettings,
+) -> PointCloudBuildResult {
     let total = visible_rows.len();
     let stride = if total > MAX_RENDER_POINTS {
         total.div_ceil(MAX_RENDER_POINTS)
@@ -119,9 +131,10 @@ pub fn build_instances(
             GeometryPolicy::ByDistance => geometry_for_distance(t),
             policy => geometry_for_label(policy, label),
         };
-        let color = match settings.color_mode {
-            ColorMode::ByDistance => color_for_distance(t),
-            ColorMode::ByLabel => settings.label_color(label),
+        let color = match (settings.color_mode, native_colors) {
+            (ColorMode::ByDistance, _) => color_for_distance(t),
+            (ColorMode::Native, Some(colors)) => colors[row as usize],
+            (ColorMode::ByLabel | ColorMode::Native, _) => settings.label_color(label),
         };
 
         let highlighted = settings.highlighted_row == Some(row);

@@ -56,7 +56,7 @@ fn six_sketched_faces_compose_into_a_watertight_cube() {
     assert_eq!(mesh.aabb(), ([0.0; 3], [1.0, 1.0, 1.0]));
 
     let center = [0.5_f32, 0.5, 0.5];
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let p = mesh.vertices[tri[0] as usize].position;
         let n = mesh.vertices[tri[0] as usize].normal;
         // (p - center) · n > 0  ⇒  the normal points away from the centroid.

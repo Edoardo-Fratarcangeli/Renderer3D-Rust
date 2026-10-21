@@ -196,6 +196,12 @@ _version: 2
   es: por distancia
   fr: par distance
   de: nach Distanz
+"dataset.color_native":
+  en: original colors
+  it: colori originali
+  es: colores originales
+  fr: couleurs d'origine
+  de: Originalfarben
 "dataset.dimensions":
   en: Dimensions
   it: Dimensioni
@@ -275,11 +281,11 @@ _version: 2
   fr: Importer un jeu de données
   de: Datensatz importieren
 "dataset.import_formats":
-  en: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — large files are memory mapped or subsampled
-  it: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — i file grandi sono mappati in memoria o sottocampionati
-  es: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — los archivos grandes se mapean en memoria o se submuestrean
-  fr: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — les fichiers volumineux sont mappés en mémoire ou sous-échantillonnés
-  de: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD — große Dateien werden speicherabgebildet oder unterabgetastet
+  en: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD · glTF/GLB point clouds — large files are memory mapped or subsampled
+  it: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD · nuvole di punti glTF/GLB — i file grandi sono mappati in memoria o sottocampionati
+  es: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD · nubes de puntos glTF/GLB — los archivos grandes se mapean en memoria o se submuestrean
+  fr: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD · nuages de points glTF/GLB — les fichiers volumineux sont mappés en mémoire ou sous-échantillonnés
+  de: NPY · NPZ · CSV · Excel · Parquet · IDX · VTK/VTU/VTP · FRD · glTF/GLB-Punktwolken — große Dateien werden speicherabgebildet oder unterabgetastet
 "dataset.cae_field":
   en: Field
   it: Campo
@@ -328,6 +334,18 @@ _version: 2
   es: resultado CFD/FEM — geometría en x/y/z, campo mostrado en bandas de contorno
   fr: résultat CFD/FEM — géométrie conservée en x/y/z, champ affiché en bandes de contour
   de: CFD/FEM-Ergebnis — Geometrie bleibt x/y/z, Feld als Konturbänder dargestellt
+"dataset.point_cloud_field_hint":
+  en: e.g. classification, intensity (empty = auto)
+  it: es. classification, intensity (vuoto = auto)
+  es: p. ej. classification, intensity (vacío = auto)
+  fr: p. ex. classification, intensity (vide = auto)
+  de: z. B. classification, intensity (leer = auto)
+"dataset.point_cloud_file_hint":
+  en: point cloud — geometry kept as x/y/z, original RGB colors shown
+  it: nuvola di punti — geometria mantenuta su x/y/z, colori RGB originali
+  es: nube de puntos — geometría en x/y/z, colores RGB originales
+  fr: nuage de points — géométrie conservée en x/y/z, couleurs RVB d'origine
+  de: Punktwolke — Geometrie bleibt x/y/z, Original-RGB-Farben
 "dataset.field_file":
   en: File
   it: File

@@ -7,6 +7,8 @@
 //! - VTK / VTU / VTP / FRD: CFD & FEM solver results (see [`super::cae`]);
 //!   `max_rows` acts as a point budget applied by uniform striding and
 //!   `label_column` selects the result field colored as contour bands.
+//! - glTF / GLB point clouds (see [`super::pointcloud`]): same point budget
+//!   and label-column semantics; native RGB colors are kept.
 //! - Parquet: behind the optional `parquet-support` feature.
 //!
 //! Entry point is [`load`], which dispatches on the file extension and
@@ -36,6 +38,13 @@ pub struct LoadOptions {
     pub label_column: Option<String>,
 }
 
+/// Sources whose first three columns are real geometry (CFD/FEM meshes,
+/// point clouds): they must be projected directly, since PCA or radial
+/// projection would scramble the shape.
+pub fn is_spatial_path(path: &Path) -> bool {
+    super::cae::is_cae_path(path) || super::pointcloud::is_point_cloud_path(path)
+}
+
 /// Load a dataset, dispatching on the file extension.
 pub fn load(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
     let ext = path
@@ -52,6 +61,7 @@ pub fn load(path: &Path, opts: &LoadOptions) -> Result<Dataset> {
         "vtk" => super::cae::load_vtk_legacy(path, opts),
         "vtu" | "vtp" => super::cae::load_vtk_xml(path, opts),
         "frd" => super::cae::load_frd(path, opts),
+        "gltf" | "glb" => super::pointcloud::load_gltf(path, opts),
         #[cfg(feature = "parquet-support")]
         "parquet" => load_parquet(path, opts),
         #[cfg(not(feature = "parquet-support"))]

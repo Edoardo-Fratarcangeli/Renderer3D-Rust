@@ -122,3 +122,59 @@ pub fn write_sample_idx(dir: &Path) -> PathBuf {
 
     images_path
 }
+
+/// Write a GLB point cloud (`mode = POINTS`) of `n` points on a helix with
+/// u8-normalized RGB colors (`[i % 256, 0, 255 - i % 256]`, padded to 4
+/// bytes) and a u8 `_CLASSIFICATION` cycling ground(2) / building(6) /
+/// water(9). About 17 bytes per point, like a real scanned cloud.
+pub fn write_point_cloud_glb(dir: &Path, name: &str, n: usize) -> PathBuf {
+    let mut bin = Vec::with_capacity(n * 17);
+    for i in 0..n {
+        let t = i as f32 * 0.01;
+        for c in [t.cos(), t.sin(), t * 0.1] {
+            bin.extend_from_slice(&c.to_le_bytes());
+        }
+    }
+    let color_off = bin.len();
+    for i in 0..n {
+        let v = (i % 256) as u8;
+        bin.extend_from_slice(&[v, 0, 255 - v, 0]);
+    }
+    let class_off = bin.len();
+    bin.extend((0..n).map(|i| [2u8, 6, 9][i % 3]));
+    while !bin.len().is_multiple_of(4) {
+        bin.push(0);
+    }
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],
+"nodes":[{{"mesh":0}}],"buffers":[{{"byteLength":{total}}}],
+"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":{pos_len}}},
+{{"buffer":0,"byteOffset":{color_off},"byteLength":{color_len},"byteStride":4}},
+{{"buffer":0,"byteOffset":{class_off},"byteLength":{n}}}],
+"accessors":[{{"bufferView":0,"componentType":5126,"count":{n},"type":"VEC3","min":[-1,-1,0],"max":[1,1,{maxz}]}},
+{{"bufferView":1,"componentType":5121,"normalized":true,"count":{n},"type":"VEC3"}},
+{{"bufferView":2,"componentType":5121,"count":{n},"type":"SCALAR"}}],
+"meshes":[{{"primitives":[{{"mode":0,"attributes":{{"POSITION":0,"COLOR_0":1,"_CLASSIFICATION":2}}}}]}}]}}"#,
+        total = bin.len(),
+        pos_len = n * 12,
+        color_len = n * 4,
+        maxz = (n as f32 - 1.0) * 0.001,
+    );
+    let mut json = json.into_bytes();
+    while !json.len().is_multiple_of(4) {
+        json.push(b' ');
+    }
+    let total = 12 + 8 + json.len() + 8 + bin.len();
+    let path = dir.join(name);
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(b"glTF").unwrap();
+    f.write_all(&2u32.to_le_bytes()).unwrap();
+    f.write_all(&(total as u32).to_le_bytes()).unwrap();
+    f.write_all(&(json.len() as u32).to_le_bytes()).unwrap();
+    f.write_all(b"JSON").unwrap();
+    f.write_all(&json).unwrap();
+    f.write_all(&(bin.len() as u32).to_le_bytes()).unwrap();
+    f.write_all(b"BIN\0").unwrap();
+    f.write_all(&bin).unwrap();
+    path
+}
